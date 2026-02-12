@@ -1,0 +1,31 @@
+with-expecter: true
+dir: "{{.InterfaceDir}}"
+outpkg: "{{.PackageName}}"
+filename: "mock_{{.InterfaceName | snakecase}}_test.go"
+inpackage: true
+packages:
+  github.com/sells-group/research-cli/internal/store:
+    interfaces:
+      Store:
+  github.com/sells-group/research-cli/pkg/anthropic:
+    interfaces:
+      Client:
+      BatchResultIterator:
+  github.com/sells-group/research-cli/pkg/firecrawl:
+    interfaces:
+      Client:
+  github.com/sells-group/research-cli/pkg/perplexity:
+    interfaces:
+      Client:
+  github.com/sells-group/research-cli/pkg/salesforce:
+    interfaces:
+      Client:
+  github.com/sells-group/research-cli/pkg/notion:
+    interfaces:
+      Client:
+  github.com/sells-group/research-cli/pkg/jina:
+    interfaces:
+      Client:
+  github.com/sells-group/research-cli/pkg/ppp:
+    interfaces:
+      Querier:

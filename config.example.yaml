@@ -1,0 +1,65 @@
+store:
+  driver: sqlite              # "sqlite" for local dev, "postgres" for production
+  database_url: research.db   # SQLite file path or Postgres connection string
+
+log:
+  level: info                 # debug, info, warn, error
+  format: console             # json (prod) or console (dev)
+
+notion:
+  token: ""                   # RESEARCH_NOTION_TOKEN
+  lead_db: ""                 # RESEARCH_NOTION_LEAD_DB
+  question_db: ""             # RESEARCH_NOTION_QUESTION_DB
+  field_db: ""                # RESEARCH_NOTION_FIELD_DB
+
+jina:
+  key: ""                     # RESEARCH_JINA_KEY
+  base_url: https://r.jina.ai
+
+firecrawl:
+  key: ""                     # RESEARCH_FIRECRAWL_KEY (fallback only)
+  base_url: https://api.firecrawl.dev/v2
+  max_pages: 50
+  exclude_paths:
+    - /blog/*
+    - /news/*
+    - /press/*
+    - /careers/*
+
+perplexity:
+  key: ""                     # RESEARCH_PERPLEXITY_KEY
+  base_url: https://api.perplexity.ai
+  model: sonar-pro
+
+anthropic:
+  key: ""                     # RESEARCH_ANTHROPIC_KEY
+  haiku_model: claude-haiku-4-5-20251001
+  sonnet_model: claude-sonnet-4-5-20250929
+  opus_model: claude-opus-4-6
+  max_batch_size: 100
+
+salesforce:
+  client_id: ""               # RESEARCH_SF_CLIENT_ID
+  username: ""                # RESEARCH_SF_USERNAME
+  key_path: ""                # RESEARCH_SF_KEY_PATH (path to JWT private key)
+  login_url: https://login.salesforce.com
+
+tooljet:
+  webhook_url: ""             # RESEARCH_TOOLJET_WEBHOOK
+
+crawl:
+  max_pages: 50
+  max_depth: 2
+  timeout_secs: 60
+  cache_ttl_hours: 24
+
+pipeline:
+  confidence_escalation_threshold: 0.4
+  tier3_gate: ambiguity_only  # "always" or "ambiguity_only"
+  quality_score_threshold: 0.6
+
+batch:
+  max_concurrent_companies: 5
+
+server:
+  port: 8080
