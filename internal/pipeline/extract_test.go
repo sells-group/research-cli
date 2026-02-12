@@ -2,10 +2,13 @@ package pipeline
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
@@ -235,4 +238,235 @@ func TestBuildT1Context_WithAnswers(t *testing.T) {
 	assert.Contains(t, result, "industry")
 	assert.Contains(t, result, "Tech")
 	assert.Contains(t, result, "0.90")
+}
+
+// --- executeBatch batch-path tests ---
+
+func makeRoutedQuestions(n int) []model.RoutedQuestion {
+	routed := make([]model.RoutedQuestion, n)
+	for i := 0; i < n; i++ {
+		routed[i] = model.RoutedQuestion{
+			Question: model.Question{
+				ID:           fmt.Sprintf("q%d", i),
+				Text:         fmt.Sprintf("Question %d?", i),
+				FieldKey:     fmt.Sprintf("field_%d", i),
+				OutputFormat: "string",
+			},
+			Pages: []model.ClassifiedPage{{
+				CrawledPage: model.CrawledPage{URL: "https://acme.com", Markdown: "content"},
+			}},
+		}
+	}
+	return routed
+}
+
+func makeBatchItems(routed []model.RoutedQuestion) []anthropic.BatchRequestItem {
+	items := make([]anthropic.BatchRequestItem, len(routed))
+	for i, rq := range routed {
+		items[i] = anthropic.BatchRequestItem{
+			CustomID: fmt.Sprintf("t1-%d-%s", i, rq.Question.ID),
+			Params: anthropic.MessageRequest{
+				Model:     "claude-haiku-4-5-20251001",
+				MaxTokens: 512,
+				Messages: []anthropic.Message{
+					{Role: "user", Content: "test prompt"},
+				},
+			},
+		}
+	}
+	return items
+}
+
+func TestExecuteBatch_BatchPath(t *testing.T) {
+	ctx := context.Background()
+	routed := makeRoutedQuestions(5)
+	items := makeBatchItems(routed)
+
+	aiClient := &mockAnthropicClient{}
+
+	// CreateBatch returns a batch ID.
+	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
+		Return(&anthropic.BatchResponse{
+			ID:               "batch-1",
+			ProcessingStatus: "ended",
+		}, nil)
+
+	// PollBatch wraps ctx with a timeout, so use mock.Anything for context.
+	aiClient.On("GetBatch", mock.Anything, "batch-1").
+		Return(&anthropic.BatchResponse{
+			ID:               "batch-1",
+			ProcessingStatus: "ended",
+		}, nil)
+
+	// Build 5 batch results.
+	var resultItems []anthropic.BatchResultItem
+	for i, rq := range routed {
+		resultItems = append(resultItems, anthropic.BatchResultItem{
+			CustomID: fmt.Sprintf("t1-%d-%s", i, rq.Question.ID),
+			Type:     "succeeded",
+			Message: &anthropic.MessageResponse{
+				Content: []anthropic.ContentBlock{{Text: fmt.Sprintf(`{"value": "answer_%d", "confidence": 0.9, "reasoning": "found", "source_url": "https://acme.com"}`, i)}},
+				Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
+			},
+		})
+	}
+
+	aiClient.On("GetBatchResults", mock.Anything, "batch-1").
+		Return(newMockBatchIterator(resultItems), nil)
+
+	answers, usage, err := executeBatch(ctx, items, routed, 1, aiClient)
+
+	require.NoError(t, err)
+	assert.Len(t, answers, 5)
+	assert.Equal(t, 500, usage.InputTokens)   // 5 * 100
+	assert.Equal(t, 100, usage.OutputTokens)   // 5 * 20
+	aiClient.AssertExpectations(t)
+}
+
+func TestExecuteBatch_CreateBatchError(t *testing.T) {
+	ctx := context.Background()
+	routed := makeRoutedQuestions(5)
+	items := makeBatchItems(routed)
+
+	aiClient := &mockAnthropicClient{}
+	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
+		Return(nil, errors.New("rate limited"))
+
+	answers, _, err := executeBatch(ctx, items, routed, 1, aiClient)
+
+	assert.Nil(t, answers)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "execute batch: create")
+	aiClient.AssertExpectations(t)
+}
+
+func TestExecuteBatch_PollError(t *testing.T) {
+	ctx := context.Background()
+	routed := makeRoutedQuestions(5)
+	items := makeBatchItems(routed)
+
+	aiClient := &mockAnthropicClient{}
+	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
+		Return(&anthropic.BatchResponse{
+			ID:               "batch-1",
+			ProcessingStatus: "in_progress",
+		}, nil)
+
+	// PollBatch wraps ctx with a timeout, so use mock.Anything for context.
+	aiClient.On("GetBatch", mock.Anything, "batch-1").
+		Return(nil, errors.New("api error"))
+
+	answers, _, err := executeBatch(ctx, items, routed, 1, aiClient)
+
+	assert.Nil(t, answers)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "execute batch: poll")
+	aiClient.AssertExpectations(t)
+}
+
+func TestExecuteBatch_GetResultsError(t *testing.T) {
+	ctx := context.Background()
+	routed := makeRoutedQuestions(5)
+	items := makeBatchItems(routed)
+
+	aiClient := &mockAnthropicClient{}
+	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
+		Return(&anthropic.BatchResponse{
+			ID:               "batch-1",
+			ProcessingStatus: "ended",
+		}, nil)
+
+	aiClient.On("GetBatch", mock.Anything, "batch-1").
+		Return(&anthropic.BatchResponse{
+			ID:               "batch-1",
+			ProcessingStatus: "ended",
+		}, nil)
+
+	aiClient.On("GetBatchResults", mock.Anything, "batch-1").
+		Return(nil, errors.New("stream error"))
+
+	answers, _, err := executeBatch(ctx, items, routed, 1, aiClient)
+
+	assert.Nil(t, answers)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "execute batch: get results")
+	aiClient.AssertExpectations(t)
+}
+
+func TestExecuteBatch_MissingResultInBatch(t *testing.T) {
+	ctx := context.Background()
+	routed := makeRoutedQuestions(4)
+	items := makeBatchItems(routed)
+
+	aiClient := &mockAnthropicClient{}
+	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
+		Return(&anthropic.BatchResponse{
+			ID:               "batch-1",
+			ProcessingStatus: "ended",
+		}, nil)
+
+	aiClient.On("GetBatch", mock.Anything, "batch-1").
+		Return(&anthropic.BatchResponse{
+			ID:               "batch-1",
+			ProcessingStatus: "ended",
+		}, nil)
+
+	// Only return results for items 0 and 2 (skip 1 and 3).
+	resultItems := []anthropic.BatchResultItem{
+		{
+			CustomID: fmt.Sprintf("t1-0-%s", routed[0].Question.ID),
+			Type:     "succeeded",
+			Message: &anthropic.MessageResponse{
+				Content: []anthropic.ContentBlock{{Text: `{"value": "a0", "confidence": 0.9, "reasoning": "ok", "source_url": "https://acme.com"}`}},
+				Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
+			},
+		},
+		{
+			CustomID: fmt.Sprintf("t1-2-%s", routed[2].Question.ID),
+			Type:     "succeeded",
+			Message: &anthropic.MessageResponse{
+				Content: []anthropic.ContentBlock{{Text: `{"value": "a2", "confidence": 0.8, "reasoning": "ok", "source_url": "https://acme.com"}`}},
+				Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
+			},
+		},
+	}
+
+	aiClient.On("GetBatchResults", mock.Anything, "batch-1").
+		Return(newMockBatchIterator(resultItems), nil)
+
+	answers, usage, err := executeBatch(ctx, items, routed, 1, aiClient)
+
+	require.NoError(t, err)
+	assert.Len(t, answers, 2)
+	assert.Equal(t, 200, usage.InputTokens)
+	assert.Equal(t, 40, usage.OutputTokens)
+	aiClient.AssertExpectations(t)
+}
+
+func TestExecuteBatch_DirectModeError(t *testing.T) {
+	ctx := context.Background()
+	routed := makeRoutedQuestions(2) // <=3 triggers direct mode.
+	items := makeBatchItems(routed)
+
+	aiClient := &mockAnthropicClient{}
+
+	// First call fails.
+	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(nil, errors.New("model overloaded")).Once()
+
+	// Second call succeeds.
+	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(&anthropic.MessageResponse{
+			Content: []anthropic.ContentBlock{{Text: `{"value": "answer", "confidence": 0.9, "reasoning": "ok", "source_url": "https://acme.com"}`}},
+			Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
+		}, nil).Once()
+
+	answers, usage, err := executeBatch(ctx, items, routed, 1, aiClient)
+
+	require.NoError(t, err)
+	// Only 1 answer (first failed, second succeeded).
+	assert.Len(t, answers, 1)
+	assert.Equal(t, "answer", answers[0].Value)
+	assert.Equal(t, 100, usage.InputTokens)
+	aiClient.AssertExpectations(t)
 }
