@@ -4,13 +4,12 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 )
 
 // CopyFrom bulk-inserts rows into a table using PostgreSQL COPY protocol.
 // This is the fastest way to insert large volumes of data.
-func CopyFrom(ctx context.Context, pool *pgxpool.Pool, table string, columns []string, rows [][]any) (int64, error) {
+func CopyFrom(ctx context.Context, pool Pool, table string, columns []string, rows [][]any) (int64, error) {
 	if len(rows) == 0 {
 		return 0, nil
 	}
@@ -25,7 +24,7 @@ func CopyFrom(ctx context.Context, pool *pgxpool.Pool, table string, columns []s
 }
 
 // CopyFromSchema bulk-inserts rows into a schema-qualified table using PostgreSQL COPY protocol.
-func CopyFromSchema(ctx context.Context, pool *pgxpool.Pool, schema, table string, columns []string, rows [][]any) (int64, error) {
+func CopyFromSchema(ctx context.Context, pool Pool, schema, table string, columns []string, rows [][]any) (int64, error) {
 	if len(rows) == 0 {
 		return 0, nil
 	}

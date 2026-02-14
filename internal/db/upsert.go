@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 )
 
@@ -23,7 +22,7 @@ type UpsertConfig struct {
 // 2. COPY rows into the temp table
 // 3. INSERT INTO target SELECT ... FROM temp ON CONFLICT (keys) DO UPDATE SET ...
 // 4. Drops the temp table
-func BulkUpsert(ctx context.Context, pool *pgxpool.Pool, cfg UpsertConfig, rows [][]any) (int64, error) {
+func BulkUpsert(ctx context.Context, pool Pool, cfg UpsertConfig, rows [][]any) (int64, error) {
 	if len(rows) == 0 {
 		return 0, nil
 	}
