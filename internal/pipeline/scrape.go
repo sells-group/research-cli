@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/model"
-	"github.com/sells-group/research-cli/pkg/firecrawl"
-	"github.com/sells-group/research-cli/pkg/jina"
+	"github.com/sells-group/research-cli/internal/scrape"
 )
 
 // ExternalSource defines an external data source to scrape.
@@ -45,9 +43,9 @@ func DefaultExternalSources(company model.Company) []ExternalSource {
 	}
 }
 
-// ScrapePhase implements Phase 1B: fetch external sources via Jina (primary)
-// with Firecrawl scrape fallback. Sources are fetched in parallel.
-func ScrapePhase(ctx context.Context, company model.Company, jinaClient jina.Client, fcClient firecrawl.Client) []model.CrawledPage {
+// ScrapePhase implements Phase 1B: fetch external sources via scrape chain.
+// Sources are fetched in parallel.
+func ScrapePhase(ctx context.Context, company model.Company, chain *scrape.Chain) []model.CrawledPage {
 	sources := DefaultExternalSources(company)
 
 	var (
@@ -61,35 +59,20 @@ func ScrapePhase(ctx context.Context, company model.Company, jinaClient jina.Cli
 		g.Go(func() error {
 			targetURL := src.URLFunc(company)
 
-			page, err := scrapeViaJina(gCtx, targetURL, src.Name, jinaClient)
-			if err == nil && page != nil {
-				mu.Lock()
-				pages = append(pages, *page)
-				mu.Unlock()
-				return nil
-			}
-
+			result, err := chain.Scrape(gCtx, targetURL)
 			if err != nil {
-				zap.L().Debug("scrape: jina failed for external source, trying firecrawl",
-					zap.String("source", src.Name),
-					zap.String("url", targetURL),
-					zap.Error(err),
-				)
-			}
-
-			// Firecrawl fallback.
-			page, err = scrapeViaFirecrawl(gCtx, targetURL, src.Name, fcClient)
-			if err != nil {
-				zap.L().Warn("scrape: firecrawl also failed for external source",
+				zap.L().Warn("scrape: chain failed for external source",
 					zap.String("source", src.Name),
 					zap.String("url", targetURL),
 					zap.Error(err),
 				)
 				return nil
 			}
-			if page != nil {
+			if result != nil {
+				page := result.Page
+				page.Title = fmt.Sprintf("[%s] %s", src.Name, page.Title)
 				mu.Lock()
-				pages = append(pages, *page)
+				pages = append(pages, page)
 				mu.Unlock()
 			}
 			return nil
@@ -98,41 +81,4 @@ func ScrapePhase(ctx context.Context, company model.Company, jinaClient jina.Cli
 
 	_ = g.Wait()
 	return pages
-}
-
-func scrapeViaJina(ctx context.Context, targetURL, sourceName string, client jina.Client) (*model.CrawledPage, error) {
-	resp, err := client.Read(ctx, targetURL)
-	if err != nil {
-		return nil, err
-	}
-
-	if ValidateJinaResponse(resp) {
-		return nil, eris.Errorf("scrape: jina response invalid for %s", sourceName)
-	}
-
-	return &model.CrawledPage{
-		URL:        resp.Data.URL,
-		Title:      fmt.Sprintf("[%s] %s", sourceName, resp.Data.Title),
-		Markdown:   resp.Data.Content,
-		StatusCode: resp.Code,
-	}, nil
-}
-
-func scrapeViaFirecrawl(ctx context.Context, targetURL, sourceName string, client firecrawl.Client) (*model.CrawledPage, error) {
-	resp, err := client.Scrape(ctx, firecrawl.ScrapeRequest{
-		URL:     targetURL,
-		Formats: []string{"markdown"},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if !resp.Success {
-		return nil, eris.Errorf("scrape: firecrawl not successful for %s", sourceName)
-	}
-	return &model.CrawledPage{
-		URL:        resp.Data.URL,
-		Title:      fmt.Sprintf("[%s] %s", sourceName, resp.Data.Title),
-		Markdown:   resp.Data.Markdown,
-		StatusCode: resp.Data.StatusCode,
-	}, nil
 }

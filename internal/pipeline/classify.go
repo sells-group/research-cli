@@ -89,6 +89,8 @@ func classifyDirect(ctx context.Context, pages []model.CrawledPage, items []anth
 
 		usage.InputTokens += int(resp.Usage.InputTokens)
 		usage.OutputTokens += int(resp.Usage.OutputTokens)
+		usage.CacheCreationTokens += int(resp.Usage.CacheCreationInputTokens)
+		usage.CacheReadTokens += int(resp.Usage.CacheReadInputTokens)
 
 		classification := parseClassification(extractText(resp))
 		cp := model.ClassifiedPage{
@@ -137,6 +139,8 @@ func classifyBatch(ctx context.Context, pages []model.CrawledPage, items []anthr
 		if ok && resp != nil {
 			usage.InputTokens += int(resp.Usage.InputTokens)
 			usage.OutputTokens += int(resp.Usage.OutputTokens)
+			usage.CacheCreationTokens += int(resp.Usage.CacheCreationInputTokens)
+			usage.CacheReadTokens += int(resp.Usage.CacheReadInputTokens)
 			classification = parseClassification(extractText(resp))
 		} else {
 			classification = model.PageClassification{

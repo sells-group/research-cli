@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/scrape"
 	"github.com/sells-group/research-cli/internal/store"
 	"github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
@@ -293,6 +294,19 @@ func (m *mockPPPClient) FindLoans(ctx context.Context, name, state, city string)
 }
 
 func (m *mockPPPClient) Close() {}
+
+// --- Scraper Mock (for scrape.Chain tests in pipeline) ---
+
+type mockScraper struct {
+	name     string
+	supports bool
+	result   *scrape.Result
+	err      error
+}
+
+func (m *mockScraper) Name() string                                             { return m.name }
+func (m *mockScraper) Supports(_ string) bool                                   { return m.supports }
+func (m *mockScraper) Scrape(_ context.Context, _ string) (*scrape.Result, error) { return m.result, m.err }
 
 // --- Batch Result Iterator Mock ---
 

@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/xml"
 	"io"
 	"net"
 	"net/http"
@@ -14,24 +15,17 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/scrape"
 )
-
-// defaultExcludePrefixes are URL path prefixes used when no config is provided.
-var defaultExcludePrefixes = []string{
-	"/blog/", "/blog",
-	"/news/", "/news",
-	"/press/", "/press",
-	"/careers/", "/careers",
-}
 
 // LocalCrawler discovers links via HTTP probing and link extraction.
 type LocalCrawler struct {
-	http           *http.Client
-	excludePaths   []string
+	http    *http.Client
+	matcher *scrape.PathMatcher
 }
 
 // NewLocalCrawler creates a LocalCrawler with a sensible default HTTP client
-// and the default exclude prefixes.
+// and the default exclude patterns.
 func NewLocalCrawler() *LocalCrawler {
 	return &LocalCrawler{
 		http: &http.Client{
@@ -43,39 +37,23 @@ func NewLocalCrawler() *LocalCrawler {
 				TLSHandshakeTimeout: 10 * time.Second,
 			},
 		},
-		excludePaths: defaultExcludePrefixes,
+		matcher: scrape.NewPathMatcher(nil),
 	}
 }
 
-// NewLocalCrawlerWithExcludes creates a LocalCrawler using the given exclude
-// path patterns (glob-style, e.g. "/blog/*"). Patterns are converted to prefix
-// matching by stripping the trailing "*".
-func NewLocalCrawlerWithExcludes(patterns []string) *LocalCrawler {
+// NewLocalCrawlerWithMatcher creates a LocalCrawler using the given PathMatcher.
+func NewLocalCrawlerWithMatcher(matcher *scrape.PathMatcher) *LocalCrawler {
 	lc := NewLocalCrawler()
-	if len(patterns) > 0 {
-		lc.excludePaths = expandExcludePatterns(patterns)
+	if matcher != nil {
+		lc.matcher = matcher
 	}
 	return lc
 }
 
-// expandExcludePatterns converts glob patterns like "/blog/*" into prefix
-// pairs like "/blog/", "/blog" for matching.
-func expandExcludePatterns(patterns []string) []string {
-	var prefixes []string
-	for _, p := range patterns {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		// Strip trailing glob star.
-		p = strings.TrimRight(p, "*")
-		// Ensure we match both "/blog/" and "/blog".
-		p = strings.TrimRight(p, "/")
-		if p != "" {
-			prefixes = append(prefixes, p+"/", p)
-		}
-	}
-	return prefixes
+// NewLocalCrawlerWithExcludes creates a LocalCrawler using the given exclude
+// path patterns (glob-style, e.g. "/blog/*"). Wraps them in a PathMatcher.
+func NewLocalCrawlerWithExcludes(patterns []string) *LocalCrawler {
+	return NewLocalCrawlerWithMatcher(scrape.NewPathMatcher(patterns))
 }
 
 // Probe performs an HTTP probe of the given URL checking reachability,
@@ -135,7 +113,7 @@ func (lc *LocalCrawler) Probe(ctx context.Context, rawURL string) (*model.ProbeR
 }
 
 // DiscoverLinks crawls a site to discover internal links up to maxDepth
-// and maxPages. Returns deduplicated URLs found.
+// and maxPages. Merges sitemap URLs if available. Returns deduplicated URLs.
 func (lc *LocalCrawler) DiscoverLinks(ctx context.Context, rawURL string, maxPages, maxDepth int) ([]string, error) {
 	parsed, err := normalizeURL(rawURL)
 	if err != nil {
@@ -157,6 +135,28 @@ func (lc *LocalCrawler) DiscoverLinks(ctx context.Context, rawURL string, maxPag
 
 	queue := []crawlItem{{url: parsed, depth: 0}}
 	seen[parsed] = true
+
+	// Seed queue from sitemap if available.
+	sitemapURL := base.Scheme + "://" + base.Host + "/sitemap.xml"
+	sitemapURLs := lc.fetchSitemapURLs(ctx, sitemapURL, base)
+	seededCount := 0
+	for _, su := range sitemapURLs {
+		if seen[su] || len(queue) >= maxPages {
+			continue
+		}
+		if lc.matcher.IsExcluded(su) {
+			continue
+		}
+		seen[su] = true
+		queue = append(queue, crawlItem{url: su, depth: 1})
+		seededCount++
+	}
+	if seededCount > 0 {
+		zap.L().Debug("localcrawl: seeded urls from sitemap",
+			zap.Int("count", seededCount),
+			zap.String("sitemap", sitemapURL),
+		)
+	}
 
 	for len(queue) > 0 && len(urls) < maxPages {
 		select {
@@ -187,7 +187,7 @@ func (lc *LocalCrawler) DiscoverLinks(ctx context.Context, rawURL string, maxPag
 			if seen[link] || len(urls)+len(queue) >= maxPages {
 				continue
 			}
-			if lc.isExcluded(link, base) {
+			if lc.matcher.IsExcluded(link) {
 				continue
 			}
 			seen[link] = true
@@ -196,6 +196,66 @@ func (lc *LocalCrawler) DiscoverLinks(ctx context.Context, rawURL string, maxPag
 	}
 
 	return urls, nil
+}
+
+// sitemapURLSet represents a basic sitemap.xml <urlset> document.
+type sitemapURLSet struct {
+	XMLName xml.Name     `xml:"urlset"`
+	URLs    []sitemapLoc `xml:"url"`
+}
+
+// sitemapLoc represents a single <url><loc> entry.
+type sitemapLoc struct {
+	Loc string `xml:"loc"`
+}
+
+// fetchSitemapURLs fetches and parses a sitemap.xml, returning same-host URLs.
+// Does NOT handle sitemap index files (<sitemapindex>).
+func (lc *LocalCrawler) fetchSitemapURLs(ctx context.Context, sitemapURL string, base *url.URL) []string {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sitemapURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; ResearchBot/1.0)")
+
+	resp, err := lc.http.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	// Limit to 2MB.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+	if err != nil {
+		return nil
+	}
+
+	var urlSet sitemapURLSet
+	if err := xml.Unmarshal(body, &urlSet); err != nil {
+		return nil
+	}
+
+	var urls []string
+	for _, entry := range urlSet.URLs {
+		loc := strings.TrimSpace(entry.Loc)
+		if loc == "" {
+			continue
+		}
+		u, err := url.Parse(loc)
+		if err != nil {
+			continue
+		}
+		// Only same-host URLs.
+		if u.Host != base.Host {
+			continue
+		}
+		urls = append(urls, loc)
+	}
+	return urls
 }
 
 func (lc *LocalCrawler) extractLinks(ctx context.Context, pageURL string, base *url.URL) ([]string, error) {
@@ -312,26 +372,8 @@ func baseURL(rawURL string) string {
 	return u.Scheme + "://" + u.Host
 }
 
-func (lc *LocalCrawler) isExcluded(link string, base *url.URL) bool {
-	u, err := url.Parse(link)
-	if err != nil {
-		return true
-	}
-	path := strings.ToLower(u.Path)
-	for _, prefix := range lc.excludePaths {
-		if strings.HasPrefix(path, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 // IsExcludedURL checks whether a URL matches the exclude paths. Exported for
 // use by crawl.go and scrape.go to filter discovered URLs before fetching.
 func (lc *LocalCrawler) IsExcludedURL(rawURL string) bool {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return true
-	}
-	return lc.isExcluded(rawURL, u)
+	return lc.matcher.IsExcluded(rawURL)
 }

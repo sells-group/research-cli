@@ -10,8 +10,8 @@ import (
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/scrape"
 	"github.com/sells-group/research-cli/pkg/anthropic"
-	"github.com/sells-group/research-cli/pkg/jina"
 	"github.com/sells-group/research-cli/pkg/perplexity"
 )
 
@@ -76,17 +76,21 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 	}, nil)
 	st.On("UpdateRunResult", mock.Anything, "run-001", mock.AnythingOfType("*model.RunResult")).Return(nil)
 
-	// Jina mock - for scrape phase (external sources).
-	jinaClient := &mockJinaClient{}
-	jinaClient.On("Read", mock.Anything, mock.AnythingOfType("string")).
-		Return(&jina.ReadResponse{
-			Code: 200,
-			Data: jina.ReadData{
-				Title:   "External Source",
-				URL:     "https://example.com",
-				Content: "Acme Corp information from external source with details about their operations and industry presence in the tech sector.",
+	// Scrape chain — for scrape phase (external sources) and LinkedIn.
+	chain := scrape.NewChain(
+		scrape.NewPathMatcher(nil),
+		&mockScraper{
+			name: "mock", supports: true,
+			result: &scrape.Result{
+				Page: model.CrawledPage{
+					URL:      "https://example.com",
+					Title:    "External Source",
+					Markdown: "Acme Corp information from external source with details about their operations and industry presence in the tech sector.",
+				},
+				Source: "mock",
 			},
-		}, nil)
+		},
+	)
 
 	fcClient := &mockFirecrawlClient{}
 
@@ -153,7 +157,7 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 		Return(nil, nil)
 
 	// --- Run pipeline ---
-	p := New(cfg, st, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, questions, fields)
+	p := New(cfg, st, chain, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, questions, fields)
 
 	result, err := p.Run(ctx, company)
 
@@ -185,7 +189,7 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 func TestPipeline_New(t *testing.T) {
 	cfg := &config.Config{}
 	st := &mockStore{}
-	jinaClient := &mockJinaClient{}
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil))
 	fcClient := &mockFirecrawlClient{}
 	pplxClient := &mockPerplexityClient{}
 	aiClient := &mockAnthropicClient{}
@@ -196,7 +200,7 @@ func TestPipeline_New(t *testing.T) {
 	questions := []model.Question{{ID: "q1"}}
 	fields := model.NewFieldRegistry(nil)
 
-	p := New(cfg, st, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, questions, fields)
+	p := New(cfg, st, chain, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, questions, fields)
 
 	assert.NotNil(t, p)
 	assert.Equal(t, cfg, p.cfg)

@@ -161,9 +161,14 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 
 	// Send primer request to warm cache if there are enough items.
 	if len(batchItems) > 1 {
-		_, err := anthropic.PrimerRequest(ctx, aiClient, batchItems[0].Params)
-		if err != nil {
-			zap.L().Warn("extract: tier 2 primer failed", zap.Error(err))
+		primerResp, primerErr := anthropic.PrimerRequest(ctx, aiClient, batchItems[0].Params)
+		if primerErr != nil {
+			zap.L().Warn("extract: tier 2 primer failed", zap.Error(primerErr))
+		} else if primerResp != nil {
+			result.TokenUsage.InputTokens += int(primerResp.Usage.InputTokens)
+			result.TokenUsage.OutputTokens += int(primerResp.Usage.OutputTokens)
+			result.TokenUsage.CacheCreationTokens += int(primerResp.Usage.CacheCreationInputTokens)
+			result.TokenUsage.CacheReadTokens += int(primerResp.Usage.CacheReadInputTokens)
 		}
 	}
 
@@ -173,7 +178,7 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 	}
 
 	result.Answers = answers
-	result.TokenUsage = *usage
+	result.TokenUsage.Add(*usage)
 	result.Duration = time.Since(start).Milliseconds()
 	return result, nil
 }
@@ -231,9 +236,14 @@ func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers
 
 	// Primer for cache warming.
 	if len(batchItems) > 1 {
-		_, err := anthropic.PrimerRequest(ctx, aiClient, batchItems[0].Params)
-		if err != nil {
-			zap.L().Warn("extract: tier 3 primer failed", zap.Error(err))
+		primerResp, primerErr := anthropic.PrimerRequest(ctx, aiClient, batchItems[0].Params)
+		if primerErr != nil {
+			zap.L().Warn("extract: tier 3 primer failed", zap.Error(primerErr))
+		} else if primerResp != nil {
+			totalUsage.InputTokens += int(primerResp.Usage.InputTokens)
+			totalUsage.OutputTokens += int(primerResp.Usage.OutputTokens)
+			totalUsage.CacheCreationTokens += int(primerResp.Usage.CacheCreationInputTokens)
+			totalUsage.CacheReadTokens += int(primerResp.Usage.CacheReadInputTokens)
 		}
 	}
 
@@ -294,6 +304,8 @@ Source pages:
 
 	usage.InputTokens = int(resp.Usage.InputTokens)
 	usage.OutputTokens = int(resp.Usage.OutputTokens)
+	usage.CacheCreationTokens = int(resp.Usage.CacheCreationInputTokens)
+	usage.CacheReadTokens = int(resp.Usage.CacheReadInputTokens)
 
 	return extractText(resp), usage, nil
 }
@@ -319,6 +331,8 @@ func executeBatch(ctx context.Context, items []anthropic.BatchRequestItem, route
 
 			usage.InputTokens += int(resp.Usage.InputTokens)
 			usage.OutputTokens += int(resp.Usage.OutputTokens)
+			usage.CacheCreationTokens += int(resp.Usage.CacheCreationInputTokens)
+			usage.CacheReadTokens += int(resp.Usage.CacheReadInputTokens)
 
 			answer := parseExtractionAnswer(extractText(resp), routed[i].Question, tier)
 			answers = append(answers, answer)
@@ -365,6 +379,8 @@ func executeBatch(ctx context.Context, items []anthropic.BatchRequestItem, route
 
 		usage.InputTokens += int(resp.Usage.InputTokens)
 		usage.OutputTokens += int(resp.Usage.OutputTokens)
+		usage.CacheCreationTokens += int(resp.Usage.CacheCreationInputTokens)
+		usage.CacheReadTokens += int(resp.Usage.CacheReadInputTokens)
 
 		answer := parseExtractionAnswer(extractText(resp), rq.Question, tier)
 		answers = append(answers, answer)

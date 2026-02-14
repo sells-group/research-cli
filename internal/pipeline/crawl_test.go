@@ -12,9 +12,14 @@ import (
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/scrape"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
-	"github.com/sells-group/research-cli/pkg/jina"
 )
+
+func testChain(scrapers ...scrape.Scraper) *scrape.Chain {
+	matcher := scrape.NewPathMatcher([]string{"/blog/*", "/news/*", "/press/*", "/careers/*"})
+	return scrape.NewChain(matcher, scrapers...)
+}
 
 func TestCrawlPhase_CacheHit(t *testing.T) {
 	ctx := context.Background()
@@ -29,145 +34,17 @@ func TestCrawlPhase_CacheHit(t *testing.T) {
 			},
 		}, nil)
 
-	jinaClient := &mockJinaClient{}
+	chain := testChain(&mockScraper{name: "s1", supports: true})
 	fcClient := &mockFirecrawlClient{}
 	cfg := config.CrawlConfig{MaxPages: 50, MaxDepth: 2, CacheTTLHours: 24}
 
-	result, err := CrawlPhase(ctx, company, cfg, st, jinaClient, fcClient)
+	result, err := CrawlPhase(ctx, company, cfg, st, chain, fcClient)
 
 	assert.NoError(t, err)
 	assert.True(t, result.FromCache)
 	assert.Equal(t, "cache", result.Source)
 	assert.Len(t, result.Pages, 1)
 	st.AssertExpectations(t)
-}
-
-func TestFetchViaJina_Success(t *testing.T) {
-	ctx := context.Background()
-
-	jinaClient := &mockJinaClient{}
-	jinaClient.On("Read", ctx, "https://acme.com/about").
-		Return(&jina.ReadResponse{
-			Code: 200,
-			Data: jina.ReadData{
-				Title:   "About Acme",
-				URL:     "https://acme.com/about",
-				Content: "Acme Corporation is a technology company with headquarters in NYC. We build innovative solutions for enterprises worldwide.",
-			},
-		}, nil)
-
-	page, err := fetchViaJina(ctx, "https://acme.com/about", jinaClient)
-
-	assert.NoError(t, err)
-	assert.NotNil(t, page)
-	assert.Equal(t, "About Acme", page.Title)
-	assert.Equal(t, "https://acme.com/about", page.URL)
-	assert.Contains(t, page.Markdown, "Acme Corporation")
-	jinaClient.AssertExpectations(t)
-}
-
-func TestFetchViaJina_NeedsFallback(t *testing.T) {
-	ctx := context.Background()
-
-	jinaClient := &mockJinaClient{}
-	jinaClient.On("Read", ctx, "https://acme.com").
-		Return(&jina.ReadResponse{
-			Code: 200,
-			Data: jina.ReadData{
-				Content: "short", // Too short, triggers fallback.
-			},
-		}, nil)
-
-	page, err := fetchViaJina(ctx, "https://acme.com", jinaClient)
-
-	assert.Error(t, err)
-	assert.Nil(t, page)
-	jinaClient.AssertExpectations(t)
-}
-
-func TestFetchPagesWithJina_FallbackToFirecrawl(t *testing.T) {
-	ctx := context.Background()
-
-	jinaClient := &mockJinaClient{}
-	fcClient := &mockFirecrawlClient{}
-
-	// First URL: Jina succeeds (use mock.Anything for ctx since errgroup wraps it).
-	jinaClient.On("Read", mock.Anything, "https://acme.com").
-		Return(&jina.ReadResponse{
-			Code: 200,
-			Data: jina.ReadData{
-				Title:   "Acme Home",
-				URL:     "https://acme.com",
-				Content: "Welcome to Acme Corporation. We are a leading provider of industrial solutions with over 50 years of experience.",
-			},
-		}, nil)
-
-	// Second URL: Jina fails, Firecrawl fallback succeeds.
-	jinaClient.On("Read", mock.Anything, "https://acme.com/about").
-		Return(nil, assert.AnError)
-
-	fcClient.On("Scrape", mock.Anything, mock.AnythingOfType("firecrawl.ScrapeRequest")).
-		Return(&firecrawl.ScrapeResponse{
-			Success: true,
-			Data: firecrawl.PageData{
-				URL:      "https://acme.com/about",
-				Title:    "About",
-				Markdown: "About Acme Corp, a technology company.",
-			},
-		}, nil)
-
-	urls := []string{"https://acme.com", "https://acme.com/about"}
-	pages := fetchPagesWithJina(ctx, urls, jinaClient, fcClient)
-
-	assert.Len(t, pages, 2)
-	// Order is not guaranteed with parallel fetching, check both present.
-	urlSet := map[string]bool{}
-	for _, p := range pages {
-		urlSet[p.URL] = true
-	}
-	assert.True(t, urlSet["https://acme.com"])
-	assert.True(t, urlSet["https://acme.com/about"])
-	jinaClient.AssertExpectations(t)
-	fcClient.AssertExpectations(t)
-}
-
-func TestFetchViaFirecrawlScrape_Success(t *testing.T) {
-	ctx := context.Background()
-
-	fcClient := &mockFirecrawlClient{}
-	fcClient.On("Scrape", ctx, mock.AnythingOfType("firecrawl.ScrapeRequest")).
-		Return(&firecrawl.ScrapeResponse{
-			Success: true,
-			Data: firecrawl.PageData{
-				URL:        "https://acme.com",
-				Title:      "Acme Home",
-				Markdown:   "Welcome to Acme",
-				StatusCode: 200,
-			},
-		}, nil)
-
-	page, err := fetchViaFirecrawlScrape(ctx, "https://acme.com", fcClient)
-
-	assert.NoError(t, err)
-	assert.NotNil(t, page)
-	assert.Equal(t, "Acme Home", page.Title)
-	fcClient.AssertExpectations(t)
-}
-
-func TestFetchViaFirecrawlScrape_NotSuccessful(t *testing.T) {
-	ctx := context.Background()
-
-	fcClient := &mockFirecrawlClient{}
-	fcClient.On("Scrape", ctx, mock.AnythingOfType("firecrawl.ScrapeRequest")).
-		Return(&firecrawl.ScrapeResponse{
-			Success: false,
-		}, nil)
-
-	page, err := fetchViaFirecrawlScrape(ctx, "https://acme.com", fcClient)
-
-	assert.Error(t, err)
-	assert.Nil(t, page)
-	fcClient.AssertExpectations(t)
 }
 
 // --- CrawlPhase tests ---
@@ -181,11 +58,11 @@ func TestCrawlPhase_CacheError(t *testing.T) {
 	st.On("GetCachedCrawl", ctx, "http://127.0.0.1:1").
 		Return(nil, errors.New("db down"))
 
-	jinaClient := &mockJinaClient{}
+	chain := testChain(&mockScraper{name: "s1", supports: true})
 	fcClient := &mockFirecrawlClient{}
 	cfg := config.CrawlConfig{MaxPages: 50, MaxDepth: 2}
 
-	result, err := CrawlPhase(ctx, company, cfg, st, jinaClient, fcClient)
+	result, err := CrawlPhase(ctx, company, cfg, st, chain, fcClient)
 
 	assert.Nil(t, result)
 	assert.Error(t, err)
@@ -201,11 +78,11 @@ func TestCrawlPhase_ProbeUnreachable(t *testing.T) {
 	st.On("GetCachedCrawl", ctx, "http://127.0.0.1:1").
 		Return(nil, nil) // Cache miss.
 
-	jinaClient := &mockJinaClient{}
+	chain := testChain(&mockScraper{name: "s1", supports: true})
 	fcClient := &mockFirecrawlClient{}
 	cfg := config.CrawlConfig{}
 
-	result, err := CrawlPhase(ctx, company, cfg, st, jinaClient, fcClient)
+	result, err := CrawlPhase(ctx, company, cfg, st, chain, fcClient)
 
 	assert.Nil(t, result)
 	assert.Error(t, err)

@@ -11,8 +11,8 @@ import (
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/scrape"
 	"github.com/sells-group/research-cli/pkg/anthropic"
-	jinapkg "github.com/sells-group/research-cli/pkg/jina"
 	"github.com/sells-group/research-cli/pkg/perplexity"
 )
 
@@ -53,27 +53,27 @@ If a field cannot be determined, use an empty string.
 Research data:
 %s`
 
-// LinkedInPhase implements Phase 1C: Jina-first LinkedIn lookup with Perplexity fallback.
-func LinkedInPhase(ctx context.Context, company model.Company, jinaClient jinapkg.Client, pplxClient perplexity.Client, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*LinkedInData, *model.TokenUsage, error) {
+// LinkedInPhase implements Phase 1C: chain-first LinkedIn lookup with Perplexity fallback.
+func LinkedInPhase(ctx context.Context, company model.Company, chain *scrape.Chain, pplxClient perplexity.Client, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*LinkedInData, *model.TokenUsage, error) {
 	log := zap.L().With(zap.String("company", company.Name), zap.String("phase", "1c_linkedin"))
 	usage := &model.TokenUsage{}
 
-	// Step 1: Try Jina Reader for LinkedIn page.
+	// Step 1: Try scrape chain for LinkedIn page.
 	linkedInURL := buildLinkedInURL(company.Name)
 	var rawData string
 
-	if jinaClient != nil {
-		page, jinaErr := fetchViaJina(ctx, linkedInURL, jinaClient)
-		if jinaErr != nil {
-			log.Debug("linkedin: jina failed, falling back to perplexity", zap.Error(jinaErr))
-		} else if page != nil {
-			rawData = page.Markdown
+	if chain != nil {
+		result, chainErr := chain.Scrape(ctx, linkedInURL)
+		if chainErr != nil {
+			log.Debug("linkedin: chain scrape failed, falling back to perplexity", zap.Error(chainErr))
+		} else if result != nil {
+			rawData = result.Page.Markdown
 		}
 	}
 
-	// Check if Jina response is a login wall.
+	// Check if response is a login wall.
 	if rawData != "" && isLinkedInLoginWall(rawData) {
-		log.Debug("linkedin: jina returned login wall, falling back to perplexity")
+		log.Debug("linkedin: scrape returned login wall, falling back to perplexity")
 		rawData = ""
 	}
 
@@ -115,6 +115,8 @@ func LinkedInPhase(ctx context.Context, company model.Company, jinaClient jinapk
 
 	usage.InputTokens += int(aiResp.Usage.InputTokens)
 	usage.OutputTokens += int(aiResp.Usage.OutputTokens)
+	usage.CacheCreationTokens += int(aiResp.Usage.CacheCreationInputTokens)
+	usage.CacheReadTokens += int(aiResp.Usage.CacheReadInputTokens)
 
 	// Parse JSON from Haiku response.
 	text := extractText(aiResp)

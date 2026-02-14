@@ -10,23 +10,27 @@ import (
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/scrape"
 	"github.com/sells-group/research-cli/pkg/anthropic"
-	"github.com/sells-group/research-cli/pkg/jina"
 	"github.com/sells-group/research-cli/pkg/perplexity"
 )
 
-func TestLinkedInPhase_JinaSuccess(t *testing.T) {
+func TestLinkedInPhase_ChainSuccess(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
 
-	jinaClient := &mockJinaClient{}
-	jinaClient.On("Read", ctx, mock.AnythingOfType("string")).
-		Return(&jina.ReadResponse{
-			Code: 200,
-			Data: jina.ReadData{
-				Content: "Acme Corp is a technology company headquartered in NYC with 200 employees. Founded in 2010. Industry: Technology.",
+	chain := scrape.NewChain(
+		scrape.NewPathMatcher(nil),
+		&mockScraper{
+			name: "mock", supports: true,
+			result: &scrape.Result{
+				Page: model.CrawledPage{
+					Markdown: "Acme Corp is a technology company headquartered in NYC with 200 employees. Founded in 2010. Industry: Technology.",
+				},
+				Source: "mock",
 			},
-		}, nil)
+		},
+	)
 
 	pplxClient := &mockPerplexityClient{} // Should not be called
 
@@ -41,7 +45,7 @@ func TestLinkedInPhase_JinaSuccess(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	data, usage, err := LinkedInPhase(ctx, company, jinaClient, pplxClient, aiClient, aiCfg)
+	data, usage, err := LinkedInPhase(ctx, company, chain, pplxClient, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, data)
@@ -49,21 +53,24 @@ func TestLinkedInPhase_JinaSuccess(t *testing.T) {
 	assert.Equal(t, "Technology", data.Industry)
 	assert.NotEmpty(t, data.LinkedInURL) // Should be filled in
 	assert.NotNil(t, usage)
-	jinaClient.AssertExpectations(t)
 	pplxClient.AssertNotCalled(t, "ChatCompletion") // Perplexity not used
 	aiClient.AssertExpectations(t)
 }
 
-func TestLinkedInPhase_JinaLoginWall_FallsBackToPerplexity(t *testing.T) {
+func TestLinkedInPhase_ChainLoginWall_FallsBackToPerplexity(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
 
-	jinaClient := &mockJinaClient{}
-	jinaClient.On("Read", ctx, mock.AnythingOfType("string")).
-		Return(&jina.ReadResponse{
-			Code: 200,
-			Data: jina.ReadData{Content: "Sign in to view this profile. Join now to see full content."},
-		}, nil)
+	chain := scrape.NewChain(
+		scrape.NewPathMatcher(nil),
+		&mockScraper{
+			name: "mock", supports: true,
+			result: &scrape.Result{
+				Page:   model.CrawledPage{Markdown: "Sign in to view this profile. Join now to see full content."},
+				Source: "mock",
+			},
+		},
+	)
 
 	pplxClient := &mockPerplexityClient{}
 	pplxClient.On("ChatCompletion", ctx, mock.AnythingOfType("perplexity.ChatCompletionRequest")).
@@ -85,19 +92,18 @@ func TestLinkedInPhase_JinaLoginWall_FallsBackToPerplexity(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	data, usage, err := LinkedInPhase(ctx, company, jinaClient, pplxClient, aiClient, aiCfg)
+	data, usage, err := LinkedInPhase(ctx, company, chain, pplxClient, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, data)
 	assert.Equal(t, "Acme Corp", data.CompanyName)
 	assert.NotNil(t, usage)
 	assert.Equal(t, 300, usage.InputTokens) // 100 from pplx + 200 from ai
-	jinaClient.AssertExpectations(t)
 	pplxClient.AssertExpectations(t)
 	aiClient.AssertExpectations(t)
 }
 
-func TestLinkedInPhase_NilJina_FallsBackToPerplexity(t *testing.T) {
+func TestLinkedInPhase_NilChain_FallsBackToPerplexity(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
 
@@ -143,7 +149,7 @@ func TestLinkedInPhase_PerplexityError(t *testing.T) {
 	aiClient := &mockAnthropicClient{}
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	// nil jina → falls to perplexity which errors
+	// nil chain → falls to perplexity which errors
 	data, _, err := LinkedInPhase(ctx, company, nil, pplxClient, aiClient, aiCfg)
 
 	assert.Error(t, err)

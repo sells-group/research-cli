@@ -13,10 +13,10 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/cost"
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/scrape"
 	"github.com/sells-group/research-cli/internal/store"
 	"github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
-	"github.com/sells-group/research-cli/pkg/jina"
 	"github.com/sells-group/research-cli/pkg/notion"
 	"github.com/sells-group/research-cli/pkg/perplexity"
 	"github.com/sells-group/research-cli/pkg/ppp"
@@ -27,7 +27,7 @@ import (
 type Pipeline struct {
 	cfg        *config.Config
 	store      store.Store
-	jina       jina.Client
+	chain      *scrape.Chain
 	firecrawl  firecrawl.Client
 	perplexity perplexity.Client
 	anthropic  anthropic.Client
@@ -43,7 +43,7 @@ type Pipeline struct {
 func New(
 	cfg *config.Config,
 	st store.Store,
-	jinaClient jina.Client,
+	chain *scrape.Chain,
 	fcClient firecrawl.Client,
 	pplxClient perplexity.Client,
 	aiClient anthropic.Client,
@@ -53,20 +53,44 @@ func New(
 	questions []model.Question,
 	fields *model.FieldRegistry,
 ) *Pipeline {
+	rates := cost.RatesFromConfig(cost.PricingConfig{
+		Anthropic:  convertAnthropicPricing(cfg.Pricing.Anthropic),
+		Jina:       cost.JinaPricing{PerMTok: cfg.Pricing.Jina.PerMTok},
+		Perplexity: cost.PerplexityPricing{PerQuery: cfg.Pricing.Perplexity.PerQuery},
+		Firecrawl:  cost.FirecrawlPricing{PlanMonthly: cfg.Pricing.Firecrawl.PlanMonthly, CreditsIncluded: cfg.Pricing.Firecrawl.CreditsIncluded},
+	})
 	return &Pipeline{
 		cfg:        cfg,
 		store:      st,
-		jina:       jinaClient,
+		chain:      chain,
 		firecrawl:  fcClient,
 		perplexity: pplxClient,
 		anthropic:  aiClient,
 		salesforce: sfClient,
 		notion:     notionClient,
 		ppp:        pppClient,
-		costCalc:   cost.NewCalculator(cost.DefaultRates()),
+		costCalc:   cost.NewCalculator(rates),
 		questions:  questions,
 		fields:     fields,
 	}
+}
+
+// convertAnthropicPricing maps config pricing to cost pricing types.
+func convertAnthropicPricing(src map[string]config.ModelPricing) map[string]cost.ModelPricing {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]cost.ModelPricing, len(src))
+	for k, v := range src {
+		dst[k] = cost.ModelPricing{
+			Input:         v.Input,
+			Output:        v.Output,
+			BatchDiscount: v.BatchDiscount,
+			CacheWriteMul: v.CacheWriteMul,
+			CacheReadMul:  v.CacheReadMul,
+		}
+	}
+	return dst
 }
 
 // Run executes the full enrichment pipeline for a single company.
@@ -126,6 +150,11 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			)
 		}
 
+		// Compute per-phase cost based on model used.
+		if phaseResult.Status != model.PhaseStatusSkipped {
+			phaseResult.TokenUsage.Cost = p.computePhaseCost(name, phaseResult.TokenUsage)
+		}
+
 		if phase != nil {
 			_ = p.store.CompletePhase(ctx, phase.ID, phaseResult)
 		}
@@ -149,7 +178,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	// Phase 1A: Crawl
 	g.Go(func() error {
 		pr := trackPhase("1a_crawl", func() (*model.PhaseResult, error) {
-			cr, crawlErr := CrawlPhase(gCtx, company, p.cfg.Crawl, p.store, p.jina, p.firecrawl)
+			cr, crawlErr := CrawlPhase(gCtx, company, p.cfg.Crawl, p.store, p.chain, p.firecrawl)
 			if crawlErr != nil {
 				return nil, crawlErr
 			}
@@ -169,7 +198,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	// Phase 1B: External Scrape
 	g.Go(func() error {
 		pr := trackPhase("1b_scrape", func() (*model.PhaseResult, error) {
-			ep := ScrapePhase(gCtx, company, p.jina, p.firecrawl)
+			ep := ScrapePhase(gCtx, company, p.chain)
 			externalPages = ep
 			return &model.PhaseResult{
 				Metadata: map[string]any{
@@ -184,7 +213,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	// Phase 1C: LinkedIn
 	g.Go(func() error {
 		pr := trackPhase("1c_linkedin", func() (*model.PhaseResult, error) {
-			ld, usage, liErr := LinkedInPhase(gCtx, company, p.jina, p.perplexity, p.anthropic, p.cfg.Anthropic)
+			ld, usage, liErr := LinkedInPhase(gCtx, company, p.chain, p.perplexity, p.anthropic, p.cfg.Anthropic)
 			if liErr != nil {
 				return nil, liErr
 			}
@@ -193,10 +222,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 				totalUsage.Add(*usage)
 			}
 			return &model.PhaseResult{
-				TokenUsage: model.TokenUsage{
-					InputTokens:  usage.InputTokens,
-					OutputTokens: usage.OutputTokens,
-				},
+				TokenUsage: *usage,
 			}, nil
 		})
 		_ = pr
@@ -258,10 +284,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			totalUsage.Add(*usage)
 		}
 		return &model.PhaseResult{
-			TokenUsage: model.TokenUsage{
-				InputTokens:  usage.InputTokens,
-				OutputTokens: usage.OutputTokens,
-			},
+			TokenUsage: *usage,
 			Metadata: map[string]any{
 				"page_types": len(idx),
 			},
@@ -298,10 +321,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		t1Answers = t1Result.Answers
 		totalUsage.Add(t1Result.TokenUsage)
 		return &model.PhaseResult{
-			TokenUsage: model.TokenUsage{
-				InputTokens:  t1Result.TokenUsage.InputTokens,
-				OutputTokens: t1Result.TokenUsage.OutputTokens,
-			},
+			TokenUsage: t1Result.TokenUsage,
 			Metadata: map[string]any{
 				"answers":     len(t1Result.Answers),
 				"duration_ms": t1Result.Duration,
@@ -324,10 +344,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		t2Answers = t2Result.Answers
 		totalUsage.Add(t2Result.TokenUsage)
 		return &model.PhaseResult{
-			TokenUsage: model.TokenUsage{
-				InputTokens:  t2Result.TokenUsage.InputTokens,
-				OutputTokens: t2Result.TokenUsage.OutputTokens,
-			},
+			TokenUsage: t2Result.TokenUsage,
 			Metadata: map[string]any{
 				"answers":   len(t2Result.Answers),
 				"escalated": len(escalated),
@@ -362,10 +379,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			t3Answers = t3Result.Answers
 			totalUsage.Add(t3Result.TokenUsage)
 			return &model.PhaseResult{
-				TokenUsage: model.TokenUsage{
-					InputTokens:  t3Result.TokenUsage.InputTokens,
-					OutputTokens: t3Result.TokenUsage.OutputTokens,
-				},
+				TokenUsage: t3Result.TokenUsage,
 				Metadata: map[string]any{
 					"answers": len(t3Result.Answers),
 				},
@@ -427,13 +441,13 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		}, nil
 	})
 
-	// Finalize.
+	// Finalize: sum per-phase costs for accurate per-model pricing.
 	result.TotalTokens = totalUsage.InputTokens + totalUsage.OutputTokens
-	result.TotalCost = p.costCalc.Claude(
-		p.cfg.Anthropic.HaikuModel, false,
-		totalUsage.InputTokens, totalUsage.OutputTokens,
-		totalUsage.CacheCreationTokens, totalUsage.CacheReadTokens,
-	)
+	var totalCost float64
+	for _, ph := range result.Phases {
+		totalCost += ph.TokenUsage.Cost
+	}
+	result.TotalCost = totalCost
 
 	setStatus(model.RunStatusComplete)
 
@@ -461,6 +475,28 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	)
 
 	return result, nil
+}
+
+// computePhaseCost maps a phase name to the correct model and computes cost.
+func (p *Pipeline) computePhaseCost(phase string, usage model.TokenUsage) float64 {
+	var modelName string
+	isBatch := true // most extraction phases use batch
+
+	switch phase {
+	case "1c_linkedin", "2_classify", "4_extract_t1":
+		modelName = p.cfg.Anthropic.HaikuModel
+	case "5_extract_t2":
+		modelName = p.cfg.Anthropic.SonnetModel
+	case "6_extract_t3":
+		modelName = p.cfg.Anthropic.OpusModel
+	default:
+		return 0
+	}
+
+	return p.costCalc.Claude(modelName, isBatch,
+		usage.InputTokens, usage.OutputTokens,
+		usage.CacheCreationTokens, usage.CacheReadTokens,
+	)
 }
 
 // linkedInToPage converts LinkedIn data into a synthetic CrawledPage.

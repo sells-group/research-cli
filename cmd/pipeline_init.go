@@ -9,6 +9,7 @@ import (
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/pipeline"
 	"github.com/sells-group/research-cli/internal/registry"
+	"github.com/sells-group/research-cli/internal/scrape"
 	"github.com/sells-group/research-cli/internal/store"
 	anthropicpkg "github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
@@ -99,7 +100,14 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 		zap.Int("fields", len(fields.Fields)),
 	)
 
-	p := pipeline.New(cfg, st, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, pppClient, questions, fields)
+	// Build scrape chain: Jina primary → Firecrawl fallback.
+	matcher := scrape.NewPathMatcher(cfg.Crawl.ExcludePaths)
+	chain := scrape.NewChain(matcher,
+		scrape.NewJinaAdapter(jinaClient),
+		scrape.NewFirecrawlAdapter(firecrawlClient),
+	)
+
+	p := pipeline.New(cfg, st, chain, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, pppClient, questions, fields)
 
 	return &pipelineEnv{
 		Store:     st,

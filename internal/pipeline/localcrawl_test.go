@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sells-group/research-cli/internal/scrape"
 )
 
 func TestNormalizeURL(t *testing.T) {
@@ -52,8 +54,7 @@ func TestBaseURL(t *testing.T) {
 	}
 }
 
-func TestIsExcluded(t *testing.T) {
-	base, _ := url.Parse("https://acme.com")
+func TestIsExcluded_WithPathMatcher(t *testing.T) {
 	lc := NewLocalCrawler()
 
 	tests := []struct {
@@ -73,7 +74,7 @@ func TestIsExcluded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := lc.isExcluded(tt.link, base)
+			result := lc.IsExcludedURL(tt.link)
 			assert.Equal(t, tt.excluded, result)
 		})
 	}
@@ -85,19 +86,16 @@ func TestNewLocalCrawlerWithExcludes(t *testing.T) {
 	assert.True(t, lc.IsExcludedURL("https://acme.com/blog/post1"))
 	assert.True(t, lc.IsExcludedURL("https://acme.com/events/2024"))
 	assert.False(t, lc.IsExcludedURL("https://acme.com/about"))
-	// Default prefixes should NOT be present when custom ones are provided.
+	// Default patterns should NOT be present when custom ones are provided.
 	assert.False(t, lc.IsExcludedURL("https://acme.com/careers/job1"))
 }
 
-func TestExpandExcludePatterns(t *testing.T) {
-	patterns := []string{"/blog/*", "/news/*", ""}
-	prefixes := expandExcludePatterns(patterns)
+func TestNewLocalCrawlerWithMatcher(t *testing.T) {
+	matcher := scrape.NewPathMatcher([]string{"/tmp/*"})
+	lc := NewLocalCrawlerWithMatcher(matcher)
 
-	assert.Contains(t, prefixes, "/blog/")
-	assert.Contains(t, prefixes, "/blog")
-	assert.Contains(t, prefixes, "/news/")
-	assert.Contains(t, prefixes, "/news")
-	assert.Len(t, prefixes, 4) // No empty string entries.
+	assert.True(t, lc.IsExcludedURL("https://acme.com/tmp/file"))
+	assert.False(t, lc.IsExcludedURL("https://acme.com/about"))
 }
 
 func TestParseLinks(t *testing.T) {
@@ -166,7 +164,7 @@ func TestCheckExists_Found(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	lc := &LocalCrawler{http: srv.Client()}
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
 	ctx := context.Background()
 
 	assert.True(t, lc.checkExists(ctx, srv.URL+"/robots.txt"))
@@ -178,14 +176,14 @@ func TestCheckExists_NotFound(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	lc := &LocalCrawler{http: srv.Client()}
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
 	ctx := context.Background()
 
 	assert.False(t, lc.checkExists(ctx, srv.URL+"/sitemap.xml"))
 }
 
 func TestCheckExists_ConnectionRefused(t *testing.T) {
-	lc := &LocalCrawler{http: http.DefaultClient}
+	lc := &LocalCrawler{http: http.DefaultClient, matcher: scrape.NewPathMatcher(nil)}
 	ctx := context.Background()
 
 	assert.False(t, lc.checkExists(ctx, "http://127.0.0.1:1/bad"))
@@ -213,7 +211,7 @@ func TestProbe_Reachable(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	lc := &LocalCrawler{http: srv.Client()}
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
 	ctx := context.Background()
 
 	result, err := lc.Probe(ctx, srv.URL)
@@ -226,7 +224,7 @@ func TestProbe_Reachable(t *testing.T) {
 }
 
 func TestProbe_Unreachable(t *testing.T) {
-	lc := &LocalCrawler{http: http.DefaultClient}
+	lc := &LocalCrawler{http: http.DefaultClient, matcher: scrape.NewPathMatcher(nil)}
 	ctx := context.Background()
 
 	result, err := lc.Probe(ctx, "http://127.0.0.1:1")
@@ -247,7 +245,7 @@ func TestProbe_Blocked_Cloudflare(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	lc := &LocalCrawler{http: srv.Client()}
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
 	ctx := context.Background()
 
 	result, err := lc.Probe(ctx, srv.URL)
@@ -268,7 +266,7 @@ func TestProbe_NoRobotsNoSitemap(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	lc := &LocalCrawler{http: srv.Client()}
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
 	ctx := context.Background()
 
 	result, err := lc.Probe(ctx, srv.URL)
@@ -299,11 +297,14 @@ func TestDiscoverLinks_BFS(t *testing.T) {
 	mux.HandleFunc("/team", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<html><body>Our team</body></html>`)
 	})
+	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
 
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	lc := &LocalCrawler{http: srv.Client(), excludePaths: defaultExcludePrefixes}
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher([]string{"/blog/*", "/news/*", "/press/*", "/careers/*"})}
 	ctx := context.Background()
 
 	urls, err := lc.DiscoverLinks(ctx, srv.URL, 10, 2)
@@ -339,11 +340,14 @@ func TestDiscoverLinks_MaxPages(t *testing.T) {
 	mux.HandleFunc("/contact", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<html><body>Contact</body></html>`)
 	})
+	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
 
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	lc := &LocalCrawler{http: srv.Client()}
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
 	ctx := context.Background()
 
 	urls, err := lc.DiscoverLinks(ctx, srv.URL, 2, 2)
@@ -362,11 +366,14 @@ func TestDiscoverLinks_MaxDepth(t *testing.T) {
 	mux.HandleFunc("/team", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<html><body>Team page</body></html>`)
 	})
+	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
 
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	lc := &LocalCrawler{http: srv.Client()}
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
 	ctx := context.Background()
 
 	// maxDepth=1: should get / (depth 0) and /about (depth 1), but NOT /team (depth 2).
@@ -391,7 +398,7 @@ func TestDiscoverLinks_ContextCancelled(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	lc := &LocalCrawler{http: srv.Client()}
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately.
 
@@ -408,7 +415,7 @@ func TestExtractLinks_Non200(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	lc := &LocalCrawler{http: srv.Client()}
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
 	ctx := context.Background()
 
 	base, _ := url.Parse(srv.URL)
@@ -424,7 +431,7 @@ func TestExtractLinks_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	lc := &LocalCrawler{http: srv.Client()}
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
 	ctx := context.Background()
 
 	base, _ := url.Parse(srv.URL)
@@ -432,4 +439,96 @@ func TestExtractLinks_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, links, 2)
+}
+
+func TestFetchSitemapURLs(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://acme.com/about</loc></url>
+  <url><loc>https://acme.com/services</loc></url>
+  <url><loc>https://external.com/page</loc></url>
+</urlset>`)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
+	ctx := context.Background()
+
+	base, _ := url.Parse("https://acme.com")
+	urls := lc.fetchSitemapURLs(ctx, srv.URL+"/sitemap.xml", base)
+
+	// Should only include same-host URLs (acme.com), not external.com.
+	assert.Len(t, urls, 2)
+	assert.Contains(t, urls, "https://acme.com/about")
+	assert.Contains(t, urls, "https://acme.com/services")
+}
+
+func TestFetchSitemapURLs_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
+	ctx := context.Background()
+
+	base, _ := url.Parse("https://acme.com")
+	urls := lc.fetchSitemapURLs(ctx, srv.URL+"/sitemap.xml", base)
+
+	assert.Nil(t, urls)
+}
+
+func TestFetchSitemapURLs_InvalidXML(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "not xml at all")
+	}))
+	defer srv.Close()
+
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
+	ctx := context.Background()
+
+	base, _ := url.Parse("https://acme.com")
+	urls := lc.fetchSitemapURLs(ctx, srv.URL+"/sitemap.xml", base)
+
+	assert.Nil(t, urls)
+}
+
+func TestDiscoverLinks_WithSitemap(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<html><body><a href="/about">About</a></body></html>`)
+	})
+	mux.HandleFunc("/about", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<html><body>About us</body></html>`)
+	})
+	mux.HandleFunc("/services", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<html><body>Services</body></html>`)
+	})
+	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
+		// The sitemap URLs must use the httptest server host.
+		srvURL := "http://" + r.Host
+		fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>%s/services</loc></url>
+</urlset>`, srvURL)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
+	ctx := context.Background()
+
+	urls, err := lc.DiscoverLinks(ctx, srv.URL, 10, 2)
+	require.NoError(t, err)
+
+	// Should find / (BFS seed), /about (from HTML links), and /services (from sitemap).
+	assert.Contains(t, urls, srv.URL+"/")
+	assert.Contains(t, urls, srv.URL+"/about")
+	assert.Contains(t, urls, srv.URL+"/services")
 }

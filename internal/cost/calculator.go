@@ -73,6 +73,97 @@ func (c *Calculator) PerplexityQuery() float64 {
 	return c.rates.Perplexity.PerQuery
 }
 
+// RatesFromConfig converts config pricing into cost rates, falling back
+// to DefaultRates() for any zero-value fields.
+func RatesFromConfig(cfg PricingConfig) Rates {
+	defaults := DefaultRates()
+
+	rates := Rates{
+		Anthropic: make(map[string]ModelRate),
+		Jina:      defaults.Jina,
+		Perplexity: defaults.Perplexity,
+		Firecrawl:  defaults.Firecrawl,
+	}
+
+	// Copy default Anthropic rates first.
+	for k, v := range defaults.Anthropic {
+		rates.Anthropic[k] = v
+	}
+
+	// Override with config values where set.
+	for model, mp := range cfg.Anthropic {
+		r := ModelRate{}
+		if existing, ok := rates.Anthropic[model]; ok {
+			r = existing
+		}
+		if mp.Input > 0 {
+			r.Input = mp.Input
+		}
+		if mp.Output > 0 {
+			r.Output = mp.Output
+		}
+		if mp.BatchDiscount > 0 {
+			r.BatchDiscount = mp.BatchDiscount
+		}
+		if mp.CacheWriteMul > 0 {
+			r.CacheWriteMul = mp.CacheWriteMul
+		}
+		if mp.CacheReadMul > 0 {
+			r.CacheReadMul = mp.CacheReadMul
+		}
+		rates.Anthropic[model] = r
+	}
+
+	if cfg.Jina.PerMTok > 0 {
+		rates.Jina.PerMTok = cfg.Jina.PerMTok
+	}
+	if cfg.Perplexity.PerQuery > 0 {
+		rates.Perplexity.PerQuery = cfg.Perplexity.PerQuery
+	}
+	if cfg.Firecrawl.PlanMonthly > 0 {
+		rates.Firecrawl.PlanMonthly = cfg.Firecrawl.PlanMonthly
+	}
+	if cfg.Firecrawl.CreditsIncluded > 0 {
+		rates.Firecrawl.CreditsIncluded = cfg.Firecrawl.CreditsIncluded
+	}
+
+	return rates
+}
+
+// PricingConfig mirrors config.PricingConfig to avoid an import cycle.
+// Used by RatesFromConfig to convert config types into cost types.
+type PricingConfig struct {
+	Anthropic  map[string]ModelPricing
+	Jina       JinaPricing
+	Perplexity PerplexityPricing
+	Firecrawl  FirecrawlPricing
+}
+
+// ModelPricing mirrors config.ModelPricing.
+type ModelPricing struct {
+	Input         float64
+	Output        float64
+	BatchDiscount float64
+	CacheWriteMul float64
+	CacheReadMul  float64
+}
+
+// JinaPricing mirrors config.JinaPricing.
+type JinaPricing struct {
+	PerMTok float64
+}
+
+// PerplexityPricing mirrors config.PerplexityPricing.
+type PerplexityPricing struct {
+	PerQuery float64
+}
+
+// FirecrawlPricing mirrors config.FirecrawlPricing.
+type FirecrawlPricing struct {
+	PlanMonthly     float64
+	CreditsIncluded float64
+}
+
 // DefaultRates returns the default pricing rates.
 func DefaultRates() Rates {
 	return Rates{
