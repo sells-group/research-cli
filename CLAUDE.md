@@ -1,6 +1,8 @@
 # CLAUDE.md — research-cli
 
-Automated account enrichment pipeline in Go. Crawls company websites, classifies pages, extracts structured data via tiered Claude models (Haiku → Sonnet → Opus), writes to Salesforce. Leads enter via CSV → Notion; registries (questions + fields) live in Notion.
+Automated account enrichment pipeline + federal data sync in Go. Two subsystems:
+1. **Enrichment:** Crawls company websites, classifies pages, extracts structured data via tiered Claude models (Haiku → Sonnet → Opus), writes to Salesforce. Leads enter via CSV → Notion; registries (questions + fields) live in Notion.
+2. **Fedsync:** Incrementally syncs 26 federal datasets (Census, BLS, SEC EDGAR, FINRA, OSHA, EPA, FRED) into `fed_data.*` Postgres tables. Runs daily via Fly.io cron, exits in <1s when no new data is expected.
 
 ## Stack
 
@@ -18,6 +20,10 @@ Automated account enrichment pipeline in Go. Crawls company websites, classifies
 | Destination | Salesforce REST API (go-salesforce/v3) |
 | Lead Tracker | Notion API (notionapi) |
 | Concurrency | errgroup |
+| FTP | jlaffaye/ftp |
+| XLSX | tealeg/xlsx/v2 |
+| Rate Limit | golang.org/x/time/rate |
+| OCR | pdftotext (local) → Mistral API (fallback) |
 
 ## Commands
 
@@ -31,15 +37,23 @@ go run ./cmd batch --limit 100                           # batch from Notion que
 go run ./cmd serve --port 8080                           # webhook server
 fly deploy                                               # deploy to Fly.io
 fly ssh console -C "research-cli batch --limit 100"      # run on Fly
+
+# Fedsync commands
+go run ./cmd fedsync migrate                              # apply schema migrations
+go run ./cmd fedsync status                               # show sync log
+go run ./cmd fedsync sync                                 # sync all due datasets
+go run ./cmd fedsync sync --phase 1                       # sync Phase 1 only
+go run ./cmd fedsync sync --datasets cbp,fpds --force     # force specific datasets
+go run ./cmd fedsync xref                                 # build entity cross-reference
 ```
 
 ## Project Structure
 
 ```
-cmd/                        # cobra commands: root, import, run, batch, serve
+cmd/                        # cobra commands: root, import, run, batch, serve, fedsync
 internal/
-  config/config.go          # viper struct + loader
-  pipeline/
+  config/config.go          # viper struct + loader (includes FedsyncConfig)
+  pipeline/                 # enrichment pipeline (phases 1-9)
     pipeline.go             # orchestrates phases 1-9 per company
     crawl.go                # Phase 1A: local-first → Firecrawl fallback
     localcrawl.go           # net/http probe + colly + html-to-markdown
@@ -60,6 +74,50 @@ internal/
     postgres.go             # pgx implementation
     sqlite.go               # modernc sqlite implementation
   model/                    # company, page, question, field types
+  db/                       # shared DB helpers
+    copy.go                 # pgx CopyFrom wrapper
+    upsert.go               # BulkUpsert via temp table + ON CONFLICT
+  fedsync/                  # federal data sync subsystem
+    migrate.go              # embed.FS migration runner → fed_data.schema_migrations
+    synclog.go              # sync log tracking (start, complete, fail)
+    migrations/*.sql        # 40 SQL migration files (001-040)
+    dataset/                # 26 dataset implementations
+      interface.go          # Dataset interface, Phase, Cadence, SyncResult
+      schedule.go           # ShouldRun helpers: Daily, Weekly, Monthly, Quarterly, Annual
+      registry.go           # Registry: maps names → Dataset impls
+      engine.go             # Engine: Run() orchestration loop
+      parse.go              # shared parse helpers (parseInt, trimQuotes)
+      cbp.go                # Census CBP (Phase 1, annual)
+      susb.go               # Census SUSB (Phase 1, annual)
+      qcew.go               # BLS QCEW (Phase 1, quarterly)
+      oews.go               # BLS OEWS (Phase 1, annual)
+      fpds.go               # SAM.gov FPDS (Phase 1, daily)
+      econ_census.go        # Census Economic Census (Phase 1, annual)
+      adv_part1.go          # SEC ADV Part 1A (Phase 1B, monthly)
+      ia_compilation.go     # IARD daily XML (Phase 1B, daily)
+      holdings_13f.go       # SEC 13F holdings (Phase 1B, quarterly)
+      form_d.go             # EDGAR Form D (Phase 1B, daily)
+      edgar_submissions.go  # EDGAR bulk JSON (Phase 1B, weekly)
+      entity_xref.go        # CRD↔CIK cross-ref (Phase 1B)
+      adv_part2.go          # ADV brochure PDFs → OCR (Phase 2, monthly)
+      brokercheck.go        # FINRA BrokerCheck (Phase 2, monthly)
+      form_bd.go            # Form BD broker-dealer (Phase 2, monthly)
+      osha_ita.go           # OSHA ITA (Phase 2, annual)
+      epa_echo.go           # EPA ECHO (Phase 2, monthly)
+      nes.go                # Census NES (Phase 2, annual)
+      asm.go                # Census ASM (Phase 2, annual)
+      eci.go                # BLS ECI (Phase 2, quarterly)
+      adv_part3.go          # CRS PDFs → OCR (Phase 3, monthly)
+      xbrl_facts.go         # EDGAR XBRL facts (Phase 3, daily)
+      fred.go               # FRED series (Phase 3, monthly)
+      abs.go                # Census ABS (Phase 3, annual)
+      cps_laus.go           # BLS CPS/LAUS (Phase 3, monthly)
+      m3.go                 # Census M3 (Phase 3, monthly)
+    transform/              # NAICS, FIPS, SIC normalization
+    resolve/                # entity resolution (CRD↔CIK fuzzy matching)
+    xbrl/                   # XBRL JSON-LD fact parser
+  fetcher/                  # download + parse (HTTP, FTP, CSV, XML, JSON, XLSX, ZIP)
+  ocr/                      # PDF text extraction (pdftotext → Mistral fallback)
 pkg/
   anthropic/                # Messages + Batch + cache primer
   firecrawl/                # crawl, scrape, batch scrape + poll
@@ -119,6 +177,33 @@ pkg/
 - T1 answers with confidence < `confidence_escalation_threshold` (default 0.4) re-queue into T2
 - T3 gating: `"always"` or `"ambiguity_only"` (config)
 
+### Fedsync — Dataset interface
+- Each of 26 datasets implements `Dataset` in `internal/fedsync/dataset/`
+- `ShouldRun(now, lastSync)` checks cadence (daily/weekly/monthly/quarterly/annual)
+- `Sync(ctx, pool, fetcher, tempDir)` returns `*SyncResult` with row count + metadata
+- Engine iterates registry, checks `ShouldRun()`, calls `Sync()`, records in `fed_data.sync_log`
+- Phases: 1 (Market Intelligence), 1B (SEC/EDGAR), 2 (Extended), 3 (On-Demand)
+
+### Fedsync — Streaming large datasets
+- `fetcher.DownloadToFile()` → ZIP to temp dir
+- `fetcher.ExtractZIP()` → CSV to temp dir
+- `fetcher.StreamCSV()` → `<-chan []string` (row channel)
+- Consumer batches rows (5,000–10,000) → `db.BulkUpsert()` or `db.CopyFrom()`
+- Keeps memory bounded regardless of dataset size
+
+### Fedsync — Rate limiting
+- Per-host limiters in `internal/fetcher/http.go` via `golang.org/x/time/rate`
+- SEC (efts/www/data.sec.gov): 10 req/s
+- SAM.gov: 5 req/s
+- Default: 20 req/s
+- EDGAR requires `User-Agent` header from `cfg.Fedsync.EDGARUserAgent`
+
+### Fedsync — Migrations
+- SQL files embedded via `embed.FS` in `internal/fedsync/migrate.go`
+- Tracked in `fed_data.schema_migrations`
+- Applied in lexicographic filename order, idempotent (skips already-applied)
+- All tables live in `fed_data` schema (separate from enrichment)
+
 ## API Client Pattern (`pkg/`)
 
 Each external API gets its own package in `pkg/`:
@@ -136,6 +221,10 @@ Each external API gets its own package in `pkg/`:
 - `pkg/` clients: mock HTTP with `httptest.Server`
 - `internal/pipeline/`: mock `pkg/` clients behind interfaces, test with canned data
 - `internal/store/`: real SQLite in `t.TempDir()`
+- `internal/fedsync/dataset/`: mock `Fetcher`, canned CSV/JSON/XML from `testdata/` fixtures
+- `internal/fetcher/`: `httptest.NewServer` for HTTP, embedded fixtures for parsers
+- `internal/db/`: pgxmock for upsert/copy validation logic
+- `internal/ocr/`: mock `exec.Command` for pdftotext, `httptest` for Mistral
 - **No external API calls in CI** — all mocked
 - Integration tests: `go test -tags=integration` (manual, needs real API keys)
 
@@ -174,3 +263,18 @@ Each external API gets its own package in `pkg/`:
 | `RESEARCH_STORE_DRIVER` | `postgres` | `postgres` or `sqlite` |
 | `RESEARCH_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `RESEARCH_LOG_FORMAT` | `json` | `json` (prod) or `console` (dev) |
+
+### Fedsync
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `RESEARCH_FEDSYNC_DATABASE_URL` | (falls back to `DATABASE_URL`) | Fedsync Postgres connection |
+| `RESEARCH_FEDSYNC_SAM_API_KEY` | | SAM.gov FPDS API key |
+| `RESEARCH_FEDSYNC_FRED_API_KEY` | | FRED API key |
+| `RESEARCH_FEDSYNC_BLS_API_KEY` | | BLS API key |
+| `RESEARCH_FEDSYNC_CENSUS_API_KEY` | | Census API key |
+| `RESEARCH_FEDSYNC_EDGAR_USER_AGENT` | `Sells Advisors blake@sellsadvisors.com` | SEC EDGAR required User-Agent |
+| `RESEARCH_FEDSYNC_N8N_WEBHOOK_URL` | | n8n webhook for notifications |
+| `RESEARCH_FEDSYNC_MISTRAL_API_KEY` | | Mistral OCR API key |
+| `RESEARCH_FEDSYNC_TEMP_DIR` | `/tmp/fedsync` | Temp directory for downloads |
+| `RESEARCH_FEDSYNC_OCR_PROVIDER` | `local` | `local` (pdftotext) or `mistral` |
