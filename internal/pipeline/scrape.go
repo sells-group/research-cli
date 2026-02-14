@@ -3,9 +3,11 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
@@ -18,7 +20,8 @@ type ExternalSource struct {
 	URLFunc func(company model.Company) string
 }
 
-// DefaultExternalSources returns the standard external sources (GP, BBB, PPP, SoS).
+// DefaultExternalSources returns the standard external sources (GP, BBB, SoS).
+// PPP data is fetched via direct Postgres lookup in Phase 1D, not web scraping.
 func DefaultExternalSources(company model.Company) []ExternalSource {
 	return []ExternalSource{
 		{
@@ -34,12 +37,6 @@ func DefaultExternalSources(company model.Company) []ExternalSource {
 			},
 		},
 		{
-			Name: "ppp",
-			URLFunc: func(c model.Company) string {
-				return fmt.Sprintf("https://www.usaspending.gov/search/?hash=&fy=all&keyword=%s", c.Name)
-			},
-		},
-		{
 			Name: "sos",
 			URLFunc: func(c model.Company) string {
 				return fmt.Sprintf("https://www.google.com/search?q=%s+secretary+of+state+business+filing", c.Name)
@@ -49,49 +46,57 @@ func DefaultExternalSources(company model.Company) []ExternalSource {
 }
 
 // ScrapePhase implements Phase 1B: fetch external sources via Jina (primary)
-// with Firecrawl scrape fallback.
+// with Firecrawl scrape fallback. Sources are fetched in parallel.
 func ScrapePhase(ctx context.Context, company model.Company, jinaClient jina.Client, fcClient firecrawl.Client) []model.CrawledPage {
 	sources := DefaultExternalSources(company)
-	var pages []model.CrawledPage
+
+	var (
+		mu    sync.Mutex
+		pages []model.CrawledPage
+	)
+
+	g, gCtx := errgroup.WithContext(ctx)
 
 	for _, src := range sources {
-		select {
-		case <-ctx.Done():
-			return pages
-		default:
-		}
+		g.Go(func() error {
+			targetURL := src.URLFunc(company)
 
-		targetURL := src.URLFunc(company)
+			page, err := scrapeViaJina(gCtx, targetURL, src.Name, jinaClient)
+			if err == nil && page != nil {
+				mu.Lock()
+				pages = append(pages, *page)
+				mu.Unlock()
+				return nil
+			}
 
-		page, err := scrapeViaJina(ctx, targetURL, src.Name, jinaClient)
-		if err == nil && page != nil {
-			pages = append(pages, *page)
-			continue
-		}
+			if err != nil {
+				zap.L().Debug("scrape: jina failed for external source, trying firecrawl",
+					zap.String("source", src.Name),
+					zap.String("url", targetURL),
+					zap.Error(err),
+				)
+			}
 
-		if err != nil {
-			zap.L().Debug("scrape: jina failed for external source, trying firecrawl",
-				zap.String("source", src.Name),
-				zap.String("url", targetURL),
-				zap.Error(err),
-			)
-		}
-
-		// Firecrawl fallback.
-		page, err = scrapeViaFirecrawl(ctx, targetURL, src.Name, fcClient)
-		if err != nil {
-			zap.L().Warn("scrape: firecrawl also failed for external source",
-				zap.String("source", src.Name),
-				zap.String("url", targetURL),
-				zap.Error(err),
-			)
-			continue
-		}
-		if page != nil {
-			pages = append(pages, *page)
-		}
+			// Firecrawl fallback.
+			page, err = scrapeViaFirecrawl(gCtx, targetURL, src.Name, fcClient)
+			if err != nil {
+				zap.L().Warn("scrape: firecrawl also failed for external source",
+					zap.String("source", src.Name),
+					zap.String("url", targetURL),
+					zap.Error(err),
+				)
+				return nil
+			}
+			if page != nil {
+				mu.Lock()
+				pages = append(pages, *page)
+				mu.Unlock()
+			}
+			return nil
+		})
 	}
 
+	_ = g.Wait()
 	return pages
 }
 
