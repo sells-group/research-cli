@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/fedsync/resolve"
@@ -28,7 +28,7 @@ func (d *EntityXref) ShouldRun(_ time.Time, _ *time.Time) bool {
 	return true
 }
 
-func (d *EntityXref) Sync(ctx context.Context, pool *pgxpool.Pool, _ fetcher.Fetcher, _ string) (*SyncResult, error) {
+func (d *EntityXref) Sync(ctx context.Context, pool db.Pool, _ fetcher.Fetcher, _ string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "entity_xref"))
 
 	builder := resolve.NewXrefBuilder(pool)

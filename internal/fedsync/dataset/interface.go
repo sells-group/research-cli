@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 
+	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
@@ -89,5 +89,5 @@ type Dataset interface {
 
 	// Sync performs the actual data download, parse, and load into Postgres.
 	// tempDir is a working directory for temporary files.
-	Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error)
+	Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error)
 }

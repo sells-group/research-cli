@@ -7,12 +7,11 @@ import (
 	"io"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
@@ -21,9 +20,9 @@ type ECI struct {
 	cfg *config.Config
 }
 
-func (d *ECI) Name() string    { return "eci" }
-func (d *ECI) Table() string   { return "fed_data.eci_data" }
-func (d *ECI) Phase() Phase    { return Phase2 }
+func (d *ECI) Name() string     { return "eci" }
+func (d *ECI) Table() string    { return "fed_data.eci_data" }
+func (d *ECI) Phase() Phase     { return Phase2 }
 func (d *ECI) Cadence() Cadence { return Quarterly }
 
 func (d *ECI) ShouldRun(now time.Time, lastSync *time.Time) bool {
@@ -37,9 +36,9 @@ type blsSeriesResponse struct {
 		Series []struct {
 			SeriesID string `json:"seriesID"`
 			Data     []struct {
-				Year       string `json:"year"`
-				Period     string `json:"period"`
-				Value      string `json:"value"`
+				Year   string `json:"year"`
+				Period string `json:"period"`
+				Value  string `json:"value"`
 			} `json:"data"`
 		} `json:"series"`
 	} `json:"Results"`
@@ -54,7 +53,7 @@ var eciSeries = []string{
 	"CIU2010000540000A", // Professional and business services
 }
 
-func (d *ECI) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *ECI) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing ECI data")
 

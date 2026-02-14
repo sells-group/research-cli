@@ -9,11 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
@@ -36,7 +35,7 @@ func (d *ADVPart1) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }
 
-func (d *ADVPart1) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *ADVPart1) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "adv_part1"))
 
 	csvPath := filepath.Join(tempDir, "adv-data-current.csv")
@@ -56,7 +55,7 @@ func (d *ADVPart1) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetch
 	return d.parseAndLoad(ctx, pool, file, log)
 }
 
-func (d *ADVPart1) parseAndLoad(ctx context.Context, pool *pgxpool.Pool, r io.Reader, log *zap.Logger) (*SyncResult, error) {
+func (d *ADVPart1) parseAndLoad(ctx context.Context, pool db.Pool, r io.Reader, log *zap.Logger) (*SyncResult, error) {
 	reader := csv.NewReader(r)
 	reader.LazyQuotes = true
 	reader.TrimLeadingSpace = true
@@ -70,14 +69,14 @@ func (d *ADVPart1) parseAndLoad(ctx context.Context, pool *pgxpool.Pool, r io.Re
 	colIdx := mapColumns(header)
 
 	var (
-		firmBatch      [][]any
-		aumBatch       [][]any
-		fundBatch      [][]any
-		ownerBatch     [][]any
-		totalFirms     int64
-		totalAUM       int64
-		totalFunds     int64
-		totalOwners    int64
+		firmBatch   [][]any
+		aumBatch    [][]any
+		fundBatch   [][]any
+		ownerBatch  [][]any
+		totalFirms  int64
+		totalAUM    int64
+		totalFunds  int64
+		totalOwners int64
 	)
 
 	firmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website", "aum", "num_accounts", "num_employees", "filing_date"}

@@ -10,12 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
@@ -57,18 +56,18 @@ type formDSearchResult struct {
 
 // formDXML represents the parsed Form D XML document.
 type formDXML struct {
-	XMLName          xml.Name `xml:"edgarSubmission"`
-	AccessionNumber  string   `xml:"headerData>accessionNumber"`
-	PrimaryIssuer    formDIssuer `xml:"formData>issuerList>issuer"`
-	OfferingData     formDOffering `xml:"formData>offeringData"`
+	XMLName         xml.Name      `xml:"edgarSubmission"`
+	AccessionNumber string        `xml:"headerData>accessionNumber"`
+	PrimaryIssuer   formDIssuer   `xml:"formData>issuerList>issuer"`
+	OfferingData    formDOffering `xml:"formData>offeringData"`
 }
 
 type formDIssuer struct {
-	CIK          string `xml:"issuerCIK"`
-	EntityName   string `xml:"issuerName"`
-	EntityType   string `xml:"issuerEntityType"`
-	YearOfInc    string `xml:"issuerYearOfInc"`
-	StateOfInc   string `xml:"issuerStateOrCountryOfInc"`
+	CIK        string `xml:"issuerCIK"`
+	EntityName string `xml:"issuerName"`
+	EntityType string `xml:"issuerEntityType"`
+	YearOfInc  string `xml:"issuerYearOfInc"`
+	StateOfInc string `xml:"issuerStateOrCountryOfInc"`
 }
 
 type formDOffering struct {
@@ -78,7 +77,7 @@ type formDOffering struct {
 	TotalSold     int64  `xml:"offeringSalesAmounts>totalAmountSold"`
 }
 
-func (d *FormD) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *FormD) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "form_d"))
 
 	// Search for Form D filings from the last 2 days to handle weekends.

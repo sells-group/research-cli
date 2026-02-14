@@ -7,12 +7,11 @@ import (
 	"io"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fedsync/transform"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
@@ -30,9 +29,9 @@ type EconCensus struct {
 	cfg *config.Config
 }
 
-func (d *EconCensus) Name() string    { return "econ_census" }
-func (d *EconCensus) Table() string   { return "fed_data.economic_census" }
-func (d *EconCensus) Phase() Phase    { return Phase1 }
+func (d *EconCensus) Name() string     { return "econ_census" }
+func (d *EconCensus) Table() string    { return "fed_data.economic_census" }
+func (d *EconCensus) Phase() Phase     { return Phase1 }
 func (d *EconCensus) Cadence() Cadence { return Annual }
 
 func (d *EconCensus) ShouldRun(now time.Time, lastSync *time.Time) bool {
@@ -63,7 +62,7 @@ func (d *EconCensus) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return false
 }
 
-func (d *EconCensus) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *EconCensus) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "econ_census"))
 
 	apiKey := ""
@@ -175,7 +174,7 @@ func (d *EconCensus) parseResponse(data []byte, year int) ([][]any, error) {
 	return rows, nil
 }
 
-func (d *EconCensus) upsertRows(ctx context.Context, pool *pgxpool.Pool, rows [][]any) (int64, error) {
+func (d *EconCensus) upsertRows(ctx context.Context, pool db.Pool, rows [][]any) (int64, error) {
 	columns := []string{"year", "geo_id", "naics", "estab", "rcptot", "payann", "emp"}
 	conflictKeys := []string{"year", "geo_id", "naics"}
 

@@ -7,12 +7,11 @@ import (
 	"io"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
@@ -21,9 +20,9 @@ type FRED struct {
 	cfg *config.Config
 }
 
-func (d *FRED) Name() string    { return "fred" }
-func (d *FRED) Table() string   { return "fed_data.fred_series" }
-func (d *FRED) Phase() Phase    { return Phase3 }
+func (d *FRED) Name() string     { return "fred" }
+func (d *FRED) Table() string    { return "fed_data.fred_series" }
+func (d *FRED) Phase() Phase     { return Phase3 }
 func (d *FRED) Cadence() Cadence { return Monthly }
 
 func (d *FRED) ShouldRun(now time.Time, lastSync *time.Time) bool {
@@ -32,21 +31,21 @@ func (d *FRED) ShouldRun(now time.Time, lastSync *time.Time) bool {
 
 // Target FRED series for financial advisory industry analysis.
 var fredTargetSeries = []string{
-	"GDP",          // Gross Domestic Product
-	"UNRATE",       // Unemployment Rate
-	"CPIAUCSL",     // Consumer Price Index
-	"FEDFUNDS",     // Federal Funds Rate
-	"GS10",         // 10-Year Treasury
-	"GS2",          // 2-Year Treasury
-	"T10Y2Y",       // 10Y-2Y Spread
-	"SP500",        // S&P 500
-	"VIXCLS",       // VIX Volatility
-	"M2SL",         // M2 Money Supply
-	"DTWEXBGS",     // Trade Weighted US Dollar
-	"HOUST",        // Housing Starts
-	"RSAFS",        // Retail Sales
-	"INDPRO",       // Industrial Production
-	"PAYEMS",       // Nonfarm Payrolls
+	"GDP",      // Gross Domestic Product
+	"UNRATE",   // Unemployment Rate
+	"CPIAUCSL", // Consumer Price Index
+	"FEDFUNDS", // Federal Funds Rate
+	"GS10",     // 10-Year Treasury
+	"GS2",      // 2-Year Treasury
+	"T10Y2Y",   // 10Y-2Y Spread
+	"SP500",    // S&P 500
+	"VIXCLS",   // VIX Volatility
+	"M2SL",     // M2 Money Supply
+	"DTWEXBGS", // Trade Weighted US Dollar
+	"HOUST",    // Housing Starts
+	"RSAFS",    // Retail Sales
+	"INDPRO",   // Industrial Production
+	"PAYEMS",   // Nonfarm Payrolls
 }
 
 type fredResponse struct {
@@ -56,7 +55,7 @@ type fredResponse struct {
 	} `json:"observations"`
 }
 
-func (d *FRED) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *FRED) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing FRED data")
 

@@ -5,20 +5,20 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 )
 
 // SyncEntry represents a row in fed_data.sync_log.
 type SyncEntry struct {
-	ID          int64              `json:"id"`
-	Dataset     string             `json:"dataset"`
-	Status      string             `json:"status"`
-	StartedAt   time.Time          `json:"started_at"`
-	CompletedAt *time.Time         `json:"completed_at,omitempty"`
-	RowsSynced  int64              `json:"rows_synced"`
-	Error       string             `json:"error,omitempty"`
-	Metadata    map[string]any     `json:"metadata,omitempty"`
+	ID          int64          `json:"id"`
+	Dataset     string         `json:"dataset"`
+	Status      string         `json:"status"`
+	StartedAt   time.Time      `json:"started_at"`
+	CompletedAt *time.Time     `json:"completed_at,omitempty"`
+	RowsSynced  int64          `json:"rows_synced"`
+	Error       string         `json:"error,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 // SyncResult holds the outcome of a dataset sync, passed to Complete().
@@ -29,11 +29,11 @@ type SyncResult struct {
 
 // SyncLog provides read/write access to the fed_data.sync_log table.
 type SyncLog struct {
-	pool *pgxpool.Pool
+	pool db.Pool
 }
 
 // NewSyncLog creates a new SyncLog backed by the given connection pool.
-func NewSyncLog(pool *pgxpool.Pool) *SyncLog {
+func NewSyncLog(pool db.Pool) *SyncLog {
 	return &SyncLog{pool: pool}
 }
 

@@ -10,18 +10,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
 const (
-	submissionsZipURL     = "https://data.sec.gov/submissions/submissions.zip"
-	submissionsBatchSize  = 5000
+	submissionsZipURL    = "https://data.sec.gov/submissions/submissions.zip"
+	submissionsBatchSize = 5000
 )
 
 // EDGARSubmissions implements the EDGAR Submissions bulk JSON dataset.
@@ -42,17 +41,17 @@ func (d *EDGARSubmissions) ShouldRun(now time.Time, lastSync *time.Time) bool {
 
 // submissionJSON represents a single company submission JSON file from the bulk download.
 type submissionJSON struct {
-	CIK              json.Number `json:"cik"`
-	EntityType       string      `json:"entityType"`
-	SIC              string      `json:"sic"`
-	SICDescription   string      `json:"sicDescription"`
-	Name             string      `json:"name"`
-	StateOfInc       string      `json:"stateOfIncorporation"`
-	StateOfBusiness  string      `json:"addresses,omitempty"`
-	EIN              string      `json:"ein"`
-	Tickers          []string    `json:"tickers"`
-	Exchanges        []string    `json:"exchanges"`
-	RecentFilings    recentFilings `json:"filings"`
+	CIK             json.Number   `json:"cik"`
+	EntityType      string        `json:"entityType"`
+	SIC             string        `json:"sic"`
+	SICDescription  string        `json:"sicDescription"`
+	Name            string        `json:"name"`
+	StateOfInc      string        `json:"stateOfIncorporation"`
+	StateOfBusiness string        `json:"addresses,omitempty"`
+	EIN             string        `json:"ein"`
+	Tickers         []string      `json:"tickers"`
+	Exchanges       []string      `json:"exchanges"`
+	RecentFilings   recentFilings `json:"filings"`
 }
 
 type recentFilings struct {
@@ -71,7 +70,7 @@ type filingList struct {
 	IsInlineXBRL    []int    `json:"isInlineXBRL"`
 }
 
-func (d *EDGARSubmissions) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *EDGARSubmissions) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "edgar_submissions"))
 
 	zipPath := filepath.Join(tempDir, "submissions.zip")

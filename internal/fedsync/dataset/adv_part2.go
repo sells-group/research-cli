@@ -7,12 +7,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 	"github.com/sells-group/research-cli/internal/ocr"
 )
@@ -24,16 +23,16 @@ type ADVPart2 struct {
 	cfg *config.Config
 }
 
-func (d *ADVPart2) Name() string    { return "adv_part2" }
-func (d *ADVPart2) Table() string   { return "fed_data.adv_brochures" }
-func (d *ADVPart2) Phase() Phase    { return Phase2 }
+func (d *ADVPart2) Name() string     { return "adv_part2" }
+func (d *ADVPart2) Table() string    { return "fed_data.adv_brochures" }
+func (d *ADVPart2) Phase() Phase     { return Phase2 }
 func (d *ADVPart2) Cadence() Cadence { return Monthly }
 
 func (d *ADVPart2) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }
 
-func (d *ADVPart2) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *ADVPart2) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 
 	ext, err := ocr.NewExtractor(d.cfg.Fedsync.OCR, d.cfg.Fedsync.MistralKey)

@@ -11,33 +11,32 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fedsync/transform"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
 const (
 	oewsStartYear = 2019
-	oewsBatchSize  = 5000
+	oewsBatchSize = 5000
 )
 
 // OEWS implements the BLS Occupational Employment and Wage Statistics dataset.
 type OEWS struct{}
 
-func (d *OEWS) Name() string    { return "oews" }
-func (d *OEWS) Table() string   { return "fed_data.oews_data" }
-func (d *OEWS) Phase() Phase    { return Phase1 }
+func (d *OEWS) Name() string     { return "oews" }
+func (d *OEWS) Table() string    { return "fed_data.oews_data" }
+func (d *OEWS) Phase() Phase     { return Phase1 }
 func (d *OEWS) Cadence() Cadence { return Annual }
 
 func (d *OEWS) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return AnnualAfter(now, lastSync, time.April)
 }
 
-func (d *OEWS) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *OEWS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "oews"))
 	var totalRows int64
 
@@ -76,7 +75,7 @@ func (d *OEWS) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, 
 	}, nil
 }
 
-func (d *OEWS) processZip(ctx context.Context, pool *pgxpool.Pool, zipPath string, year int) (int64, error) {
+func (d *OEWS) processZip(ctx context.Context, pool db.Pool, zipPath string, year int) (int64, error) {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return 0, eris.Wrap(err, "oews: open zip")
@@ -114,7 +113,7 @@ func (d *OEWS) processZip(ctx context.Context, pool *pgxpool.Pool, zipPath strin
 	return 0, eris.New("oews: no CSV found in zip")
 }
 
-func (d *OEWS) parseCSV(ctx context.Context, pool *pgxpool.Pool, r io.Reader, year int) (int64, error) {
+func (d *OEWS) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int) (int64, error) {
 	reader := csv.NewReader(r)
 	reader.LazyQuotes = true
 	reader.TrimLeadingSpace = true

@@ -10,12 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
@@ -41,17 +40,17 @@ func (d *Holdings13F) ShouldRun(now time.Time, lastSync *time.Time) bool {
 
 // f13Filing represents a 13F filing from the EFTS search results.
 type f13Filing struct {
-	CIK            string `json:"cik"`
-	CompanyName    string `json:"company_name"`
-	FormType       string `json:"form_type"`
-	FilingDate     string `json:"filing_date"`
+	CIK             string `json:"cik"`
+	CompanyName     string `json:"company_name"`
+	FormType        string `json:"form_type"`
+	FilingDate      string `json:"filing_date"`
 	AccessionNumber string `json:"accession_number"`
 }
 
 // f13InfoTable represents the root of a 13F XML holdings document.
 type f13InfoTable struct {
-	XMLName  xml.Name      `xml:"informationTable"`
-	Holdings []f13Holding  `xml:"infoTable"`
+	XMLName  xml.Name     `xml:"informationTable"`
+	Holdings []f13Holding `xml:"infoTable"`
 }
 
 // f13Holding represents a single holding in a 13F filing.
@@ -82,7 +81,7 @@ type eftsSearchResult struct {
 	} `json:"hits"`
 }
 
-func (d *Holdings13F) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *Holdings13F) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "holdings_13f"))
 
 	// Determine the most recent quarter-end for which data should be available.
@@ -176,7 +175,7 @@ func (d *Holdings13F) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fe
 	return &SyncResult{
 		RowsSynced: totalRows,
 		Metadata: map[string]any{
-			"period":       period,
+			"period":        period,
 			"filings_found": searchResult.Hits.Total,
 		},
 	}, nil
@@ -185,7 +184,7 @@ func (d *Holdings13F) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fe
 func (d *Holdings13F) downloadAndParseHoldings(
 	ctx context.Context,
 	f fetcher.Fetcher,
-	pool *pgxpool.Pool,
+	pool db.Pool,
 	url string,
 	cik string,
 	period *time.Time,
@@ -209,7 +208,7 @@ func (d *Holdings13F) downloadAndParseHoldings(
 
 func (d *Holdings13F) parseHoldingsXML(
 	ctx context.Context,
-	pool *pgxpool.Pool,
+	pool db.Pool,
 	r io.Reader,
 	cik string,
 	period *time.Time,

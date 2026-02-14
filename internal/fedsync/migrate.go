@@ -6,8 +6,8 @@ import (
 	"io/fs"
 	"sort"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 )
 
@@ -17,7 +17,7 @@ var migrationFS embed.FS
 // Migrate runs all pending SQL migrations in lexicographic order.
 // It creates the fed_data schema and schema_migrations tracking table if needed,
 // then applies any .sql files not yet recorded.
-func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+func Migrate(ctx context.Context, pool db.Pool) error {
 	log := zap.L().With(zap.String("component", "fedsync.migrate"))
 
 	// Ensure schema and tracking table exist.
@@ -72,7 +72,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 // ensureMigrationTable creates the schema and migration tracking table if they don't exist.
-func ensureMigrationTable(ctx context.Context, pool *pgxpool.Pool) error {
+func ensureMigrationTable(ctx context.Context, pool db.Pool) error {
 	sql := `
 		CREATE SCHEMA IF NOT EXISTS fed_data;
 		CREATE TABLE IF NOT EXISTS fed_data.schema_migrations (
@@ -88,7 +88,7 @@ func ensureMigrationTable(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 // appliedMigrations returns the set of already-applied migration filenames.
-func appliedMigrations(ctx context.Context, pool *pgxpool.Pool) (map[string]bool, error) {
+func appliedMigrations(ctx context.Context, pool db.Pool) (map[string]bool, error) {
 	rows, err := pool.Query(ctx, "SELECT filename FROM fed_data.schema_migrations")
 	if err != nil {
 		return nil, eris.Wrap(err, "fedsync: query applied migrations")

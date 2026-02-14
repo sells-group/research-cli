@@ -4,17 +4,17 @@ import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
 
+	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fedsync"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
 // Engine orchestrates dataset sync runs.
 type Engine struct {
-	pool    *pgxpool.Pool
+	pool    db.Pool
 	fetcher fetcher.Fetcher
 	syncLog *fedsync.SyncLog
 	reg     *Registry
@@ -30,7 +30,7 @@ type RunOpts struct {
 }
 
 // NewEngine creates a new sync engine.
-func NewEngine(pool *pgxpool.Pool, f fetcher.Fetcher, syncLog *fedsync.SyncLog, reg *Registry, tempDir string) *Engine {
+func NewEngine(pool db.Pool, f fetcher.Fetcher, syncLog *fedsync.SyncLog, reg *Registry, tempDir string) *Engine {
 	return &Engine{
 		pool:    pool,
 		fetcher: f,

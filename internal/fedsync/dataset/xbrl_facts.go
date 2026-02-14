@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fedsync/xbrl"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
@@ -20,16 +19,16 @@ type XBRLFacts struct {
 	cfg *config.Config
 }
 
-func (d *XBRLFacts) Name() string    { return "xbrl_facts" }
-func (d *XBRLFacts) Table() string   { return "fed_data.xbrl_facts" }
-func (d *XBRLFacts) Phase() Phase    { return Phase3 }
+func (d *XBRLFacts) Name() string     { return "xbrl_facts" }
+func (d *XBRLFacts) Table() string    { return "fed_data.xbrl_facts" }
+func (d *XBRLFacts) Phase() Phase     { return Phase3 }
 func (d *XBRLFacts) Cadence() Cadence { return Daily }
 
 func (d *XBRLFacts) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return DailySchedule(now, lastSync)
 }
 
-func (d *XBRLFacts) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *XBRLFacts) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing XBRL company facts")
 

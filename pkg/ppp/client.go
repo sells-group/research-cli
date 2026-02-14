@@ -43,9 +43,16 @@ type Querier interface {
 	Close()
 }
 
+// pool defines the minimal database pool interface used by Client.
+type pool interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Ping(ctx context.Context) error
+	Close()
+}
+
 // Client queries the PPP loan database.
 type Client struct {
-	pool *pgxpool.Pool
+	pool pool
 	cfg  Config
 }
 

@@ -8,12 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fedsync/transform"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
@@ -29,16 +28,16 @@ type FPDS struct {
 	cfg *config.Config
 }
 
-func (d *FPDS) Name() string    { return "fpds" }
-func (d *FPDS) Table() string   { return "fed_data.fpds_contracts" }
-func (d *FPDS) Phase() Phase    { return Phase1 }
+func (d *FPDS) Name() string     { return "fpds" }
+func (d *FPDS) Table() string    { return "fed_data.fpds_contracts" }
+func (d *FPDS) Phase() Phase     { return Phase1 }
 func (d *FPDS) Cadence() Cadence { return Daily }
 
 func (d *FPDS) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return DailySchedule(now, lastSync)
 }
 
-func (d *FPDS) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *FPDS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "fpds"))
 
 	apiKey := ""
@@ -120,36 +119,36 @@ type samResponse struct {
 }
 
 type samOpportunity struct {
-	NoticeID     string       `json:"noticeId"`
-	PIID         string       `json:"solicitationNumber"`
-	Agency       string       `json:"fullParentPathName"`
-	AgencyCode   string       `json:"fullParentPathCode"`
-	Title        string       `json:"title"`
-	Description  string       `json:"description"`
-	NAICS        string       `json:"naicsCode"`
-	PSC          string       `json:"classificationCode"`
-	PostedDate   string       `json:"postedDate"`
-	Award        *samAward    `json:"award"`
+	NoticeID       string       `json:"noticeId"`
+	PIID           string       `json:"solicitationNumber"`
+	Agency         string       `json:"fullParentPathName"`
+	AgencyCode     string       `json:"fullParentPathCode"`
+	Title          string       `json:"title"`
+	Description    string       `json:"description"`
+	NAICS          string       `json:"naicsCode"`
+	PSC            string       `json:"classificationCode"`
+	PostedDate     string       `json:"postedDate"`
+	Award          *samAward    `json:"award"`
 	PointOfContact []samContact `json:"pointOfContact"`
 }
 
 type samAward struct {
-	Amount float64 `json:"amount"`
+	Amount  float64     `json:"amount"`
 	Awardee *samAwardee `json:"awardee"`
 	Date    string      `json:"date"`
 }
 
 type samAwardee struct {
-	Name    string     `json:"name"`
-	UEI     string     `json:"ueiSAM"`
-	DUNS    string     `json:"duns"`
+	Name     string       `json:"name"`
+	UEI      string       `json:"ueiSAM"`
+	DUNS     string       `json:"duns"`
 	Location *samLocation `json:"location"`
 }
 
 type samLocation struct {
-	City    string `json:"city"`
-	State   string `json:"state"`
-	Zip     string `json:"zip"`
+	City  string `json:"city"`
+	State string `json:"state"`
+	Zip   string `json:"zip"`
 }
 
 type samContact struct {
@@ -239,7 +238,7 @@ func (d *FPDS) parseResponse(data []byte) ([][]any, bool, error) {
 	return rows, hasMore, nil
 }
 
-func (d *FPDS) upsertContracts(ctx context.Context, pool *pgxpool.Pool, rows [][]any) (int64, error) {
+func (d *FPDS) upsertContracts(ctx context.Context, pool db.Pool, rows [][]any) (int64, error) {
 	columns := []string{
 		"contract_id", "piid", "agency_id", "agency_name",
 		"vendor_name", "vendor_duns", "vendor_uei",

@@ -7,12 +7,11 @@ import (
 	"io"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
@@ -21,9 +20,9 @@ type M3 struct {
 	cfg *config.Config
 }
 
-func (d *M3) Name() string    { return "m3" }
-func (d *M3) Table() string   { return "fed_data.m3_data" }
-func (d *M3) Phase() Phase    { return Phase3 }
+func (d *M3) Name() string     { return "m3" }
+func (d *M3) Table() string    { return "fed_data.m3_data" }
+func (d *M3) Phase() Phase     { return Phase3 }
 func (d *M3) Cadence() Cadence { return Monthly }
 
 func (d *M3) ShouldRun(now time.Time, lastSync *time.Time) bool {
@@ -35,13 +34,13 @@ var m3Categories = []struct {
 	Category string
 	DataType string
 }{
-	{"AMTMNO", "new_orders"},       // New Orders
-	{"AMTMVS", "shipments"},        // Value of Shipments
-	{"AMTMTI", "inventories"},      // Total Inventories
-	{"AMTMUO", "unfilled_orders"},  // Unfilled Orders
+	{"AMTMNO", "new_orders"},      // New Orders
+	{"AMTMVS", "shipments"},       // Value of Shipments
+	{"AMTMTI", "inventories"},     // Total Inventories
+	{"AMTMUO", "unfilled_orders"}, // Unfilled Orders
 }
 
-func (d *M3) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *M3) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing M3 data")
 

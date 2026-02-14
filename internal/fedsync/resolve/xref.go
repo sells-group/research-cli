@@ -3,19 +3,20 @@ package resolve
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
+
+	"github.com/sells-group/research-cli/internal/db"
 )
 
 // XrefBuilder builds the CRD-CIK cross-reference table by performing
 // a 3-pass matching strategy between ADV firms and EDGAR entities.
 type XrefBuilder struct {
-	pool *pgxpool.Pool
+	pool db.Pool
 }
 
 // NewXrefBuilder creates a new XrefBuilder.
-func NewXrefBuilder(pool *pgxpool.Pool) *XrefBuilder {
+func NewXrefBuilder(pool db.Pool) *XrefBuilder {
 	return &XrefBuilder{pool: pool}
 }
 

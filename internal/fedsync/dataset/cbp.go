@@ -11,11 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fedsync/transform"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
@@ -28,16 +27,16 @@ const (
 // CBP implements the Census County Business Patterns dataset.
 type CBP struct{}
 
-func (d *CBP) Name() string    { return "cbp" }
-func (d *CBP) Table() string   { return "fed_data.cbp_data" }
-func (d *CBP) Phase() Phase    { return Phase1 }
+func (d *CBP) Name() string     { return "cbp" }
+func (d *CBP) Table() string    { return "fed_data.cbp_data" }
+func (d *CBP) Phase() Phase     { return Phase1 }
 func (d *CBP) Cadence() Cadence { return Annual }
 
 func (d *CBP) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return AnnualAfter(now, lastSync, time.March)
 }
 
-func (d *CBP) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *CBP) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "cbp"))
 	var totalRows int64
 
@@ -77,7 +76,7 @@ func (d *CBP) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, t
 	}, nil
 }
 
-func (d *CBP) processZip(ctx context.Context, pool *pgxpool.Pool, zipPath string, year int) (int64, error) {
+func (d *CBP) processZip(ctx context.Context, pool db.Pool, zipPath string, year int) (int64, error) {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return 0, eris.Wrap(err, "cbp: open zip")
@@ -99,7 +98,7 @@ func (d *CBP) processZip(ctx context.Context, pool *pgxpool.Pool, zipPath string
 	return 0, eris.New("cbp: no CSV found in zip")
 }
 
-func (d *CBP) parseCSV(ctx context.Context, pool *pgxpool.Pool, r io.Reader, year int) (int64, error) {
+func (d *CBP) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int) (int64, error) {
 	reader := csv.NewReader(r)
 	reader.LazyQuotes = true
 	reader.TrimLeadingSpace = true

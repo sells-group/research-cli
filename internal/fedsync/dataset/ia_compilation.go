@@ -10,12 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
@@ -55,7 +54,7 @@ type iaFirm struct {
 	FilingDate  string   `xml:"MostRecentFilingDate"`
 }
 
-func (d *IACompilation) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *IACompilation) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "ia_compilation"))
 
 	xmlPath := filepath.Join(tempDir, "ia-daily-compilation.xml")
@@ -75,7 +74,7 @@ func (d *IACompilation) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.
 	return d.parseAndLoad(ctx, pool, file, log)
 }
 
-func (d *IACompilation) parseAndLoad(ctx context.Context, pool *pgxpool.Pool, r io.Reader, log *zap.Logger) (*SyncResult, error) {
+func (d *IACompilation) parseAndLoad(ctx context.Context, pool db.Pool, r io.Reader, log *zap.Logger) (*SyncResult, error) {
 	firmCh, errCh := fetcher.StreamXML[iaFirm](ctx, r, "Firm")
 
 	columns := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website", "aum", "num_accounts", "filing_date"}

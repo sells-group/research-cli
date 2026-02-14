@@ -7,12 +7,11 @@ import (
 	"io"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
@@ -21,9 +20,9 @@ type CPSLAUS struct {
 	cfg *config.Config
 }
 
-func (d *CPSLAUS) Name() string    { return "cps_laus" }
-func (d *CPSLAUS) Table() string   { return "fed_data.laus_data" }
-func (d *CPSLAUS) Phase() Phase    { return Phase3 }
+func (d *CPSLAUS) Name() string     { return "cps_laus" }
+func (d *CPSLAUS) Table() string    { return "fed_data.laus_data" }
+func (d *CPSLAUS) Phase() Phase     { return Phase3 }
 func (d *CPSLAUS) Cadence() Cadence { return Monthly }
 
 func (d *CPSLAUS) ShouldRun(now time.Time, lastSync *time.Time) bool {
@@ -44,7 +43,7 @@ var lausSeries = []string{
 	"LASST360000000000006", // New York labor force
 }
 
-func (d *CPSLAUS) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *CPSLAUS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing CPS/LAUS data")
 

@@ -7,12 +7,11 @@ import (
 	"io"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
@@ -21,16 +20,16 @@ type ASM struct {
 	cfg *config.Config
 }
 
-func (d *ASM) Name() string    { return "asm" }
-func (d *ASM) Table() string   { return "fed_data.asm_data" }
-func (d *ASM) Phase() Phase    { return Phase2 }
+func (d *ASM) Name() string     { return "asm" }
+func (d *ASM) Table() string    { return "fed_data.asm_data" }
+func (d *ASM) Phase() Phase     { return Phase2 }
 func (d *ASM) Cadence() Cadence { return Annual }
 
 func (d *ASM) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return AnnualAfter(now, lastSync, time.March)
 }
 
-func (d *ASM) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *ASM) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing ASM data")
 
@@ -65,11 +64,11 @@ func (d *ASM) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, t
 		}
 		rows = append(rows, []any{
 			int16(year),
-			row[0],                    // naics
-			row[1],                    // geo_id
-			parseInt64Or(row[2], 0),   // valadd
-			parseInt64Or(row[3], 0),   // totval_ship
-			parseIntOr(row[4], 0),     // prodwrkrs
+			row[0],                  // naics
+			row[1],                  // geo_id
+			parseInt64Or(row[2], 0), // valadd
+			parseInt64Or(row[3], 0), // totval_ship
+			parseIntOr(row[4], 0),   // prodwrkrs
 		})
 	}
 

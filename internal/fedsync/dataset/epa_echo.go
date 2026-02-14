@@ -5,11 +5,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
 
-	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
@@ -18,16 +17,16 @@ const epaEchoURL = "https://echo.epa.gov/files/echodownloads/frs_downloads/NATIO
 // EPAECHO syncs EPA ECHO facility data.
 type EPAECHO struct{}
 
-func (d *EPAECHO) Name() string    { return "epa_echo" }
-func (d *EPAECHO) Table() string   { return "fed_data.epa_facilities" }
-func (d *EPAECHO) Phase() Phase    { return Phase2 }
+func (d *EPAECHO) Name() string     { return "epa_echo" }
+func (d *EPAECHO) Table() string    { return "fed_data.epa_facilities" }
+func (d *EPAECHO) Phase() Phase     { return Phase2 }
 func (d *EPAECHO) Cadence() Cadence { return Monthly }
 
 func (d *EPAECHO) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }
 
-func (d *EPAECHO) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *EPAECHO) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("downloading EPA ECHO data")
 
@@ -58,13 +57,13 @@ func (d *EPAECHO) Sync(ctx context.Context, pool *pgxpool.Pool, f fetcher.Fetche
 			continue
 		}
 		rows = append(rows, []any{
-			trimQuotes(row[0]),                // registry_id
-			trimQuotes(row[1]),                // fac_name
-			trimQuotes(row[2]),                // fac_city
-			trimQuotes(row[3]),                // fac_state
-			trimQuotes(row[4]),                // fac_zip
-			parseFloat64Or(row[7], 0),         // fac_lat
-			parseFloat64Or(row[8], 0),         // fac_long
+			trimQuotes(row[0]),        // registry_id
+			trimQuotes(row[1]),        // fac_name
+			trimQuotes(row[2]),        // fac_city
+			trimQuotes(row[3]),        // fac_state
+			trimQuotes(row[4]),        // fac_zip
+			parseFloat64Or(row[7], 0), // fac_lat
+			parseFloat64Or(row[8], 0), // fac_long
 		})
 
 		if len(rows) >= batchSize {
