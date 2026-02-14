@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/jomei/notionapi"
 	"github.com/rotisserie/eris"
@@ -41,6 +42,10 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 		// Update Salesforce.
 		if result.Company.SalesforceID != "" {
 			sfFields := buildSFFields(result.FieldValues)
+			// Include the enrichment report in Salesforce.
+			if result.Report != "" {
+				sfFields["Enrichment_Report__c"] = result.Report
+			}
 			if len(sfFields) > 0 {
 				if err := salesforce.UpdateAccount(ctx, sfClient, result.Company.SalesforceID, sfFields); err != nil {
 					zap.L().Error("gate: salesforce update failed",
@@ -72,7 +77,7 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 		if !gate.Passed {
 			status = "Manual Review"
 		}
-		if err := updateNotionStatus(ctx, notionClient, result.Company.NotionPageID, status, score); err != nil {
+		if err := updateNotionStatus(ctx, notionClient, result.Company.NotionPageID, status, result); err != nil {
 			zap.L().Warn("gate: notion update failed",
 				zap.String("company", result.Company.Name),
 				zap.Error(err),
@@ -118,7 +123,8 @@ func sendToToolJet(ctx context.Context, result *model.EnrichmentResult, webhookU
 	return nil
 }
 
-func updateNotionStatus(ctx context.Context, client notion.Client, pageID, status string, score float64) error {
+func updateNotionStatus(ctx context.Context, client notion.Client, pageID, status string, result *model.EnrichmentResult) error {
+	now := notionapi.Date(time.Now())
 	_, err := client.UpdatePage(ctx, pageID, &notionapi.PageUpdateRequest{
 		Properties: notionapi.Properties{
 			"Status": notionapi.StatusProperty{
@@ -127,7 +133,18 @@ func updateNotionStatus(ctx context.Context, client notion.Client, pageID, statu
 				},
 			},
 			"Score": notionapi.NumberProperty{
-				Number: score,
+				Number: result.Score,
+			},
+			"Fields Populated": notionapi.NumberProperty{
+				Number: float64(len(result.FieldValues)),
+			},
+			"Enrichment Cost": notionapi.NumberProperty{
+				Number: result.TotalCost,
+			},
+			"Last Enriched": notionapi.DateProperty{
+				Date: &notionapi.DateObject{
+					Start: &now,
+				},
 			},
 		},
 	})
