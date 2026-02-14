@@ -11,28 +11,29 @@ import (
 	"github.com/sells-group/research-cli/internal/model"
 )
 
-// mockScraper implements Scraper for testing.
-type mockScraper struct {
+// testScraper is a simple inline mock for chain tests.
+// Cannot use generated mocks from scrape/mocks due to import cycle.
+type testScraper struct {
 	name     string
 	supports bool
 	result   *Result
 	err      error
 }
 
-func (m *mockScraper) Name() string                                         { return m.name }
-func (m *mockScraper) Supports(_ string) bool                               { return m.supports }
-func (m *mockScraper) Scrape(_ context.Context, _ string) (*Result, error) { return m.result, m.err }
+func (m *testScraper) Name() string                                        { return m.name }
+func (m *testScraper) Supports(_ string) bool                              { return m.supports }
+func (m *testScraper) Scrape(_ context.Context, _ string) (*Result, error) { return m.result, m.err }
 
 func TestChain_Scrape_FirstSuccess(t *testing.T) {
 	matcher := NewPathMatcher([]string{"/excluded/*"})
-	s1 := &mockScraper{
+	s1 := &testScraper{
 		name: "primary", supports: true,
 		result: &Result{
 			Page:   model.CrawledPage{URL: "https://acme.com", Title: "Home", Markdown: "content"},
 			Source: "primary",
 		},
 	}
-	s2 := &mockScraper{name: "fallback", supports: true}
+	s2 := &testScraper{name: "fallback", supports: true}
 
 	chain := NewChain(matcher, s1, s2)
 	result, err := chain.Scrape(context.Background(), "https://acme.com")
@@ -44,8 +45,8 @@ func TestChain_Scrape_FirstSuccess(t *testing.T) {
 
 func TestChain_Scrape_FallbackOnError(t *testing.T) {
 	matcher := NewPathMatcher([]string{"/excluded/*"})
-	s1 := &mockScraper{name: "primary", supports: true, err: errors.New("failed")}
-	s2 := &mockScraper{
+	s1 := &testScraper{name: "primary", supports: true, err: errors.New("failed")}
+	s2 := &testScraper{
 		name: "fallback", supports: true,
 		result: &Result{
 			Page:   model.CrawledPage{URL: "https://acme.com", Title: "Home"},
@@ -62,8 +63,8 @@ func TestChain_Scrape_FallbackOnError(t *testing.T) {
 
 func TestChain_Scrape_AllFail(t *testing.T) {
 	matcher := NewPathMatcher([]string{"/excluded/*"})
-	s1 := &mockScraper{name: "s1", supports: true, err: errors.New("s1 error")}
-	s2 := &mockScraper{name: "s2", supports: true, err: errors.New("s2 error")}
+	s1 := &testScraper{name: "s1", supports: true, err: errors.New("s1 error")}
+	s2 := &testScraper{name: "s2", supports: true, err: errors.New("s2 error")}
 
 	chain := NewChain(matcher, s1, s2)
 	result, err := chain.Scrape(context.Background(), "https://acme.com")
@@ -75,7 +76,7 @@ func TestChain_Scrape_AllFail(t *testing.T) {
 
 func TestChain_Scrape_ExcludedURL(t *testing.T) {
 	matcher := NewPathMatcher([]string{"/blog/*"})
-	s1 := &mockScraper{name: "s1", supports: true}
+	s1 := &testScraper{name: "s1", supports: true}
 
 	chain := NewChain(matcher, s1)
 	result, err := chain.Scrape(context.Background(), "https://acme.com/blog/post1")
@@ -87,8 +88,8 @@ func TestChain_Scrape_ExcludedURL(t *testing.T) {
 
 func TestChain_Scrape_SkipsUnsupported(t *testing.T) {
 	matcher := NewPathMatcher(nil)
-	s1 := &mockScraper{name: "s1", supports: false}
-	s2 := &mockScraper{
+	s1 := &testScraper{name: "s1", supports: false}
+	s2 := &testScraper{
 		name: "s2", supports: true,
 		result: &Result{Page: model.CrawledPage{URL: "https://acme.com"}, Source: "s2"},
 	}
@@ -102,7 +103,7 @@ func TestChain_Scrape_SkipsUnsupported(t *testing.T) {
 
 func TestChain_ScrapeAll(t *testing.T) {
 	matcher := NewPathMatcher([]string{"/blog/*"})
-	s1 := &mockScraper{
+	s1 := &testScraper{
 		name: "s1", supports: true,
 		result: &Result{
 			Page:   model.CrawledPage{URL: "fetched", Markdown: "content"},
@@ -125,7 +126,7 @@ func TestChain_ScrapeAll(t *testing.T) {
 
 func TestChain_ScrapeAll_Empty(t *testing.T) {
 	matcher := NewPathMatcher(nil)
-	s1 := &mockScraper{name: "s1", supports: true, err: errors.New("fail")}
+	s1 := &testScraper{name: "s1", supports: true, err: errors.New("fail")}
 
 	chain := NewChain(matcher, s1)
 	pages := chain.ScrapeAll(context.Background(), []string{"https://acme.com"}, 5)

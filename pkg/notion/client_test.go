@@ -103,3 +103,35 @@ func TestCreatePageError(t *testing.T) {
 	assert.Nil(t, page)
 	mc.AssertExpectations(t)
 }
+
+func TestNewClientReturnsClient(t *testing.T) {
+	c := NewClient("test-token")
+	assert.NotNil(t, c)
+	var _ Client = c
+}
+
+func TestQueryDatabaseError(t *testing.T) {
+	mc := new(MockClient)
+	ctx := context.Background()
+
+	mc.On("QueryDatabase", ctx, "db-err", mock.AnythingOfType("*notionapi.DatabaseQueryRequest")).
+		Return(nil, assert.AnError)
+
+	resp, err := mc.QueryDatabase(ctx, "db-err", &notionapi.DatabaseQueryRequest{})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	mc.AssertExpectations(t)
+}
+
+func TestUpdatePageError(t *testing.T) {
+	mc := new(MockClient)
+	ctx := context.Background()
+
+	mc.On("UpdatePage", ctx, "page-err", mock.AnythingOfType("*notionapi.PageUpdateRequest")).
+		Return(nil, assert.AnError)
+
+	page, err := mc.UpdatePage(ctx, "page-err", &notionapi.PageUpdateRequest{})
+	assert.Error(t, err)
+	assert.Nil(t, page)
+	mc.AssertExpectations(t)
+}

@@ -6,29 +6,29 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/scrape"
+	scrapemocks "github.com/sells-group/research-cli/internal/scrape/mocks"
 )
 
 func TestScrapePhase_ChainSuccess(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
 
-	chain := scrape.NewChain(
-		scrape.NewPathMatcher(nil),
-		&mockScraper{
-			name: "mock", supports: true,
-			result: &scrape.Result{
-				Page: model.CrawledPage{
-					URL:      "https://example.com",
-					Title:    "External Source",
-					Markdown: "Acme Corp is a registered business entity with a BBB rating of A+.",
-				},
-				Source: "mock",
-			},
+	s := scrapemocks.NewMockScraper(t)
+	s.On("Name").Return("mock").Maybe()
+	s.On("Supports", mock.Anything).Return(true).Maybe()
+	s.On("Scrape", mock.Anything, mock.Anything).Return(&scrape.Result{
+		Page: model.CrawledPage{
+			URL:      "https://example.com",
+			Title:    "External Source",
+			Markdown: "Acme Corp is a registered business entity with a BBB rating of A+.",
 		},
-	)
+		Source: "mock",
+	}, nil).Maybe()
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
 	pages := ScrapePhase(ctx, company, chain)
 
@@ -42,10 +42,11 @@ func TestScrapePhase_ChainAllFail(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
 
-	chain := scrape.NewChain(
-		scrape.NewPathMatcher(nil),
-		&mockScraper{name: "mock", supports: true, err: errors.New("fail")},
-	)
+	s := scrapemocks.NewMockScraper(t)
+	s.On("Name").Return("mock").Maybe()
+	s.On("Supports", mock.Anything).Return(true).Maybe()
+	s.On("Scrape", mock.Anything, mock.Anything).Return(nil, errors.New("fail")).Maybe()
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
 	pages := ScrapePhase(ctx, company, chain)
 

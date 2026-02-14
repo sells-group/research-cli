@@ -137,3 +137,20 @@ func TestRead_EmptyContent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got.Data.Content)
 }
+
+func TestWithHTTPClient(t *testing.T) {
+	t.Parallel()
+	customClient := &http.Client{}
+	c := NewClient("test-key", WithHTTPClient(customClient))
+	hc := c.(*httpClient)
+	assert.Equal(t, customClient, hc.http)
+}
+
+func TestNewClient_Defaults(t *testing.T) {
+	t.Parallel()
+	c := NewClient("my-key")
+	hc := c.(*httpClient)
+	assert.Equal(t, "my-key", hc.apiKey)
+	assert.Equal(t, "https://r.jina.ai", hc.baseURL)
+	assert.Equal(t, http.DefaultClient, hc.http)
+}

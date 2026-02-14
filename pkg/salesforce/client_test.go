@@ -61,9 +61,13 @@ func TestMockClientImplementsInterface(t *testing.T) {
 }
 
 func TestNewClientReturnsClient(t *testing.T) {
-	// We can't easily test with a real salesforce.Salesforce instance without auth,
-	// but we can verify the type satisfies the interface.
+	// Verify the type satisfies the interface.
 	var _ Client = (*sfClient)(nil)
+
+	// NewClient wraps a salesforce.Salesforce instance.
+	client := NewClient(nil)
+	require.NotNil(t, client)
+	var _ Client = client
 }
 
 func TestCollectionResultFields(t *testing.T) {

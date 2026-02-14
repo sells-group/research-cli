@@ -164,3 +164,37 @@ func TestContextCancellation(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "send request")
 }
+
+func TestWithHTTPClient(t *testing.T) {
+	t.Parallel()
+	customClient := &http.Client{}
+	c := NewClient("test-key", WithHTTPClient(customClient))
+	hc := c.(*httpClient)
+	assert.Equal(t, customClient, hc.http)
+}
+
+func TestNewClient_Defaults(t *testing.T) {
+	t.Parallel()
+	c := NewClient("my-key")
+	hc := c.(*httpClient)
+	assert.Equal(t, "my-key", hc.apiKey)
+	assert.Equal(t, defaultBaseURL, hc.baseURL)
+	assert.Equal(t, defaultModel, hc.model)
+	assert.Equal(t, http.DefaultClient, hc.http)
+}
+
+func TestErrorResponseIncludesBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"invalid api key","message":"check your credentials"}`))
+	}))
+	defer srv.Close()
+
+	client := NewClient("bad-key", WithBaseURL(srv.URL))
+	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "test"}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "403")
+	assert.Contains(t, err.Error(), "invalid api key")
+}

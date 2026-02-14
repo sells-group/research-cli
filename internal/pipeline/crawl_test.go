@@ -13,19 +13,32 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/scrape"
+	scrapemocks "github.com/sells-group/research-cli/internal/scrape/mocks"
+	storemocks "github.com/sells-group/research-cli/internal/store/mocks"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
+	firecrawlmocks "github.com/sells-group/research-cli/pkg/firecrawl/mocks"
 )
 
-func testChain(scrapers ...scrape.Scraper) *scrape.Chain {
+func testChain(t *testing.T, scrapers ...scrape.Scraper) *scrape.Chain {
 	matcher := scrape.NewPathMatcher([]string{"/blog/*", "/news/*", "/press/*", "/careers/*"})
 	return scrape.NewChain(matcher, scrapers...)
+}
+
+func newTestScraper(t *testing.T, name string, supports bool, result *scrape.Result, err error) *scrapemocks.MockScraper {
+	s := scrapemocks.NewMockScraper(t)
+	s.On("Name").Return(name).Maybe()
+	s.On("Supports", mock.Anything).Return(supports).Maybe()
+	if supports {
+		s.On("Scrape", mock.Anything, mock.Anything).Return(result, err).Maybe()
+	}
+	return s
 }
 
 func TestCrawlPhase_CacheHit(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{URL: "https://acme.com", Name: "Acme"}
 
-	st := &mockStore{}
+	st := storemocks.NewMockStore(t)
 	st.On("GetCachedCrawl", ctx, "https://acme.com").
 		Return(&model.CrawlCache{
 			CompanyURL: "https://acme.com",
@@ -34,8 +47,8 @@ func TestCrawlPhase_CacheHit(t *testing.T) {
 			},
 		}, nil)
 
-	chain := testChain(&mockScraper{name: "s1", supports: true})
-	fcClient := &mockFirecrawlClient{}
+	chain := testChain(t, newTestScraper(t, "s1", true, nil, nil))
+	fcClient := firecrawlmocks.NewMockClient(t)
 	cfg := config.CrawlConfig{MaxPages: 50, MaxDepth: 2, CacheTTLHours: 24}
 
 	result, err := CrawlPhase(ctx, company, cfg, st, chain, fcClient)
@@ -54,12 +67,12 @@ func TestCrawlPhase_CacheError(t *testing.T) {
 	// Use an unreachable URL so probe returns Reachable=false after cache error.
 	company := model.Company{URL: "http://127.0.0.1:1", Name: "Bad"}
 
-	st := &mockStore{}
+	st := storemocks.NewMockStore(t)
 	st.On("GetCachedCrawl", ctx, "http://127.0.0.1:1").
 		Return(nil, errors.New("db down"))
 
-	chain := testChain(&mockScraper{name: "s1", supports: true})
-	fcClient := &mockFirecrawlClient{}
+	chain := testChain(t, newTestScraper(t, "s1", true, nil, nil))
+	fcClient := firecrawlmocks.NewMockClient(t)
 	cfg := config.CrawlConfig{MaxPages: 50, MaxDepth: 2}
 
 	result, err := CrawlPhase(ctx, company, cfg, st, chain, fcClient)
@@ -74,12 +87,12 @@ func TestCrawlPhase_ProbeUnreachable(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{URL: "http://127.0.0.1:1", Name: "Unreachable"}
 
-	st := &mockStore{}
+	st := storemocks.NewMockStore(t)
 	st.On("GetCachedCrawl", ctx, "http://127.0.0.1:1").
 		Return(nil, nil) // Cache miss.
 
-	chain := testChain(&mockScraper{name: "s1", supports: true})
-	fcClient := &mockFirecrawlClient{}
+	chain := testChain(t, newTestScraper(t, "s1", true, nil, nil))
+	fcClient := firecrawlmocks.NewMockClient(t)
 	cfg := config.CrawlConfig{}
 
 	result, err := CrawlPhase(ctx, company, cfg, st, chain, fcClient)
@@ -95,8 +108,8 @@ func TestCrawlPhase_ProbeUnreachable(t *testing.T) {
 func TestCrawlViaFirecrawl_Success(t *testing.T) {
 	ctx := context.Background()
 
-	fcClient := &mockFirecrawlClient{}
-	st := &mockStore{}
+	fcClient := firecrawlmocks.NewMockClient(t)
+	st := storemocks.NewMockStore(t)
 	cfg := config.CrawlConfig{MaxPages: 10, MaxDepth: 1, CacheTTLHours: 12}
 
 	fcClient.On("Crawl", ctx, firecrawl.CrawlRequest{
@@ -133,8 +146,8 @@ func TestCrawlViaFirecrawl_Success(t *testing.T) {
 func TestCrawlViaFirecrawl_CrawlError(t *testing.T) {
 	ctx := context.Background()
 
-	fcClient := &mockFirecrawlClient{}
-	st := &mockStore{}
+	fcClient := firecrawlmocks.NewMockClient(t)
+	st := storemocks.NewMockStore(t)
 	cfg := config.CrawlConfig{MaxPages: 10, MaxDepth: 1}
 
 	fcClient.On("Crawl", ctx, mock.AnythingOfType("firecrawl.CrawlRequest")).
@@ -151,8 +164,8 @@ func TestCrawlViaFirecrawl_CrawlError(t *testing.T) {
 func TestCrawlViaFirecrawl_PollError(t *testing.T) {
 	ctx := context.Background()
 
-	fcClient := &mockFirecrawlClient{}
-	st := &mockStore{}
+	fcClient := firecrawlmocks.NewMockClient(t)
+	st := storemocks.NewMockStore(t)
 	cfg := config.CrawlConfig{MaxPages: 10, MaxDepth: 1}
 
 	fcClient.On("Crawl", ctx, mock.AnythingOfType("firecrawl.CrawlRequest")).
@@ -173,8 +186,8 @@ func TestCrawlViaFirecrawl_PollError(t *testing.T) {
 func TestCrawlViaFirecrawl_CacheWriteError(t *testing.T) {
 	ctx := context.Background()
 
-	fcClient := &mockFirecrawlClient{}
-	st := &mockStore{}
+	fcClient := firecrawlmocks.NewMockClient(t)
+	st := storemocks.NewMockStore(t)
 	cfg := config.CrawlConfig{MaxPages: 10, MaxDepth: 1}
 
 	fcClient.On("Crawl", ctx, firecrawl.CrawlRequest{
@@ -208,8 +221,8 @@ func TestCrawlViaFirecrawl_CacheWriteError(t *testing.T) {
 func TestCrawlViaFirecrawl_DefaultsZero(t *testing.T) {
 	ctx := context.Background()
 
-	fcClient := &mockFirecrawlClient{}
-	st := &mockStore{}
+	fcClient := firecrawlmocks.NewMockClient(t)
+	st := storemocks.NewMockStore(t)
 	// Zero values: should default to MaxPages=50, MaxDepth=2.
 	cfg := config.CrawlConfig{MaxPages: 0, MaxDepth: 0}
 

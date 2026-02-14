@@ -225,6 +225,100 @@ func storeTestSuite(t *testing.T, newStore func(t *testing.T) Store) {
 		require.NoError(t, err)
 		assert.Equal(t, 0, n)
 	})
+
+	t.Run("ListRuns_ByCompanyURL", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		_, err := s.CreateRun(ctx, model.Company{URL: "https://a.com", Name: "A"})
+		require.NoError(t, err)
+		_, err = s.CreateRun(ctx, model.Company{URL: "https://b.com", Name: "B"})
+		require.NoError(t, err)
+
+		filtered, err := s.ListRuns(ctx, RunFilter{CompanyURL: "https://a.com"})
+		require.NoError(t, err)
+		assert.Len(t, filtered, 1)
+		assert.Equal(t, "A", filtered[0].Company.Name)
+	})
+
+	t.Run("ListRuns_WithOffset", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		_, err := s.CreateRun(ctx, model.Company{URL: "https://a.com", Name: "A"})
+		require.NoError(t, err)
+		_, err = s.CreateRun(ctx, model.Company{URL: "https://b.com", Name: "B"})
+		require.NoError(t, err)
+		_, err = s.CreateRun(ctx, model.Company{URL: "https://c.com", Name: "C"})
+		require.NoError(t, err)
+
+		// Offset 1, limit 1 should skip the first result
+		paged, err := s.ListRuns(ctx, RunFilter{Limit: 1, Offset: 1})
+		require.NoError(t, err)
+		assert.Len(t, paged, 1)
+	})
+
+	t.Run("ListRuns_Empty", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		runs, err := s.ListRuns(ctx, RunFilter{})
+		require.NoError(t, err)
+		assert.Empty(t, runs)
+	})
+
+	t.Run("GetRun_NotFound", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		_, err := s.GetRun(ctx, "nonexistent")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("UpdateRunResult_NotFound", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		err := s.UpdateRunResult(ctx, "nonexistent", &model.RunResult{Score: 0.5})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("DeleteExpiredCrawls_NoExpired", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		// No crawl cache at all
+		n, err := s.DeleteExpiredCrawls(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, 0, n)
+	})
+
+	t.Run("CrawlCacheOverwrite", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		pages1 := []model.CrawledPage{
+			{URL: "https://acme.com/", Title: "Old", Markdown: "# Old", StatusCode: 200},
+		}
+		pages2 := []model.CrawledPage{
+			{URL: "https://acme.com/", Title: "New", Markdown: "# New", StatusCode: 200},
+			{URL: "https://acme.com/about", Title: "About", Markdown: "# About", StatusCode: 200},
+		}
+
+		err := s.SetCachedCrawl(ctx, "https://acme.com", pages1, 24*time.Hour)
+		require.NoError(t, err)
+		err = s.SetCachedCrawl(ctx, "https://acme.com", pages2, 24*time.Hour)
+		require.NoError(t, err)
+
+		// Should get the latest crawl
+		got, err := s.GetCachedCrawl(ctx, "https://acme.com")
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Len(t, got.Pages, 2)
+		assert.Equal(t, "New", got.Pages[0].Title)
+	})
 }
 
 func TestSQLiteStore(t *testing.T) {

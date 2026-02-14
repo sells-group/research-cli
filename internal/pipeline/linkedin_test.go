@@ -11,30 +11,31 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/scrape"
+	scrapemocks "github.com/sells-group/research-cli/internal/scrape/mocks"
 	"github.com/sells-group/research-cli/pkg/anthropic"
+	anthropicmocks "github.com/sells-group/research-cli/pkg/anthropic/mocks"
 	"github.com/sells-group/research-cli/pkg/perplexity"
+	perplexitymocks "github.com/sells-group/research-cli/pkg/perplexity/mocks"
 )
 
 func TestLinkedInPhase_ChainSuccess(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
 
-	chain := scrape.NewChain(
-		scrape.NewPathMatcher(nil),
-		&mockScraper{
-			name: "mock", supports: true,
-			result: &scrape.Result{
-				Page: model.CrawledPage{
-					Markdown: "Acme Corp is a technology company headquartered in NYC with 200 employees. Founded in 2010. Industry: Technology.",
-				},
-				Source: "mock",
-			},
+	s := scrapemocks.NewMockScraper(t)
+	s.On("Name").Return("mock").Maybe()
+	s.On("Supports", mock.Anything).Return(true).Maybe()
+	s.On("Scrape", mock.Anything, mock.Anything).Return(&scrape.Result{
+		Page: model.CrawledPage{
+			Markdown: "Acme Corp is a technology company headquartered in NYC with 200 employees. Founded in 2010. Industry: Technology.",
 		},
-	)
+		Source: "mock",
+	}, nil).Maybe()
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	pplxClient := &mockPerplexityClient{} // Should not be called
+	pplxClient := perplexitymocks.NewMockClient(t) // Should not be called
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{
@@ -61,18 +62,16 @@ func TestLinkedInPhase_ChainLoginWall_FallsBackToPerplexity(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
 
-	chain := scrape.NewChain(
-		scrape.NewPathMatcher(nil),
-		&mockScraper{
-			name: "mock", supports: true,
-			result: &scrape.Result{
-				Page:   model.CrawledPage{Markdown: "Sign in to view this profile. Join now to see full content."},
-				Source: "mock",
-			},
-		},
-	)
+	s := scrapemocks.NewMockScraper(t)
+	s.On("Name").Return("mock").Maybe()
+	s.On("Supports", mock.Anything).Return(true).Maybe()
+	s.On("Scrape", mock.Anything, mock.Anything).Return(&scrape.Result{
+		Page:   model.CrawledPage{Markdown: "Sign in to view this profile. Join now to see full content."},
+		Source: "mock",
+	}, nil).Maybe()
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	pplxClient := &mockPerplexityClient{}
+	pplxClient := perplexitymocks.NewMockClient(t)
 	pplxClient.On("ChatCompletion", ctx, mock.AnythingOfType("perplexity.ChatCompletionRequest")).
 		Return(&perplexity.ChatCompletionResponse{
 			Choices: []perplexity.Choice{
@@ -81,7 +80,7 @@ func TestLinkedInPhase_ChainLoginWall_FallsBackToPerplexity(t *testing.T) {
 			Usage: perplexity.Usage{PromptTokens: 100, CompletionTokens: 50},
 		}, nil)
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{
@@ -107,7 +106,7 @@ func TestLinkedInPhase_NilChain_FallsBackToPerplexity(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
 
-	pplxClient := &mockPerplexityClient{}
+	pplxClient := perplexitymocks.NewMockClient(t)
 	pplxClient.On("ChatCompletion", ctx, mock.AnythingOfType("perplexity.ChatCompletionRequest")).
 		Return(&perplexity.ChatCompletionResponse{
 			Choices: []perplexity.Choice{
@@ -116,7 +115,7 @@ func TestLinkedInPhase_NilChain_FallsBackToPerplexity(t *testing.T) {
 			Usage: perplexity.Usage{PromptTokens: 100, CompletionTokens: 50},
 		}, nil)
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{
@@ -142,11 +141,11 @@ func TestLinkedInPhase_PerplexityError(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
 
-	pplxClient := &mockPerplexityClient{}
+	pplxClient := perplexitymocks.NewMockClient(t)
 	pplxClient.On("ChatCompletion", ctx, mock.AnythingOfType("perplexity.ChatCompletionRequest")).
 		Return(nil, errors.New("api error"))
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
 	// nil chain → falls to perplexity which errors
@@ -161,7 +160,7 @@ func TestLinkedInPhase_HaikuParseError(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
 
-	pplxClient := &mockPerplexityClient{}
+	pplxClient := perplexitymocks.NewMockClient(t)
 	pplxClient.On("ChatCompletion", ctx, mock.AnythingOfType("perplexity.ChatCompletionRequest")).
 		Return(&perplexity.ChatCompletionResponse{
 			Choices: []perplexity.Choice{
@@ -170,7 +169,7 @@ func TestLinkedInPhase_HaikuParseError(t *testing.T) {
 			Usage: perplexity.Usage{PromptTokens: 100, CompletionTokens: 50},
 		}, nil)
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: "Not valid JSON at all"}},

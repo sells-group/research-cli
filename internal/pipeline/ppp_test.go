@@ -6,25 +6,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/pkg/ppp"
+	pppmocks "github.com/sells-group/research-cli/pkg/ppp/mocks"
 )
-
-// mockPPPQuerier implements ppp.Querier for testing.
-type mockPPPQuerier struct {
-	findLoansFunc func(ctx context.Context, name, state, city string) ([]ppp.LoanMatch, error)
-	closed        bool
-}
-
-func (m *mockPPPQuerier) FindLoans(ctx context.Context, name, state, city string) ([]ppp.LoanMatch, error) {
-	return m.findLoansFunc(ctx, name, state, city)
-}
-
-func (m *mockPPPQuerier) Close() { m.closed = true }
-
-// Ensure interface compliance.
-var _ ppp.Querier = (*mockPPPQuerier)(nil)
 
 func TestParseLocation(t *testing.T) {
 	tests := []struct {
@@ -88,12 +75,8 @@ func TestPPPPhase_NilClient(t *testing.T) {
 }
 
 func TestPPPPhase_EmptyLocation(t *testing.T) {
-	q := &mockPPPQuerier{
-		findLoansFunc: func(_ context.Context, _, _, _ string) ([]ppp.LoanMatch, error) {
-			t.Fatal("FindLoans should not be called when location is empty")
-			return nil, nil
-		},
-	}
+	q := pppmocks.NewMockQuerier(t)
+	// FindLoans should not be called when location is empty.
 
 	company := model.Company{Name: "Acme Corp", Location: ""}
 	matches, err := PPPPhase(context.Background(), company, q)
@@ -102,12 +85,8 @@ func TestPPPPhase_EmptyLocation(t *testing.T) {
 }
 
 func TestPPPPhase_NoStateInLocation(t *testing.T) {
-	q := &mockPPPQuerier{
-		findLoansFunc: func(_ context.Context, _, _, _ string) ([]ppp.LoanMatch, error) {
-			t.Fatal("FindLoans should not be called when state cannot be parsed")
-			return nil, nil
-		},
-	}
+	q := pppmocks.NewMockQuerier(t)
+	// FindLoans should not be called when state cannot be parsed.
 
 	company := model.Company{Name: "Acme Corp", Location: "Austin, Texas"}
 	matches, err := PPPPhase(context.Background(), company, q)
@@ -127,14 +106,8 @@ func TestPPPPhase_SuccessfulLookup(t *testing.T) {
 		},
 	}
 
-	q := &mockPPPQuerier{
-		findLoansFunc: func(_ context.Context, name, state, city string) ([]ppp.LoanMatch, error) {
-			assert.Equal(t, "Acme Corp", name)
-			assert.Equal(t, "TX", state)
-			assert.Equal(t, "Austin", city)
-			return expected, nil
-		},
-	}
+	q := pppmocks.NewMockQuerier(t)
+	q.On("FindLoans", mock.Anything, "Acme Corp", "TX", "Austin").Return(expected, nil)
 
 	company := model.Company{Name: "Acme Corp", Location: "Austin, TX"}
 	matches, err := PPPPhase(context.Background(), company, q)
@@ -143,11 +116,8 @@ func TestPPPPhase_SuccessfulLookup(t *testing.T) {
 }
 
 func TestPPPPhase_NoMatches(t *testing.T) {
-	q := &mockPPPQuerier{
-		findLoansFunc: func(_ context.Context, _, _, _ string) ([]ppp.LoanMatch, error) {
-			return nil, nil
-		},
-	}
+	q := pppmocks.NewMockQuerier(t)
+	q.On("FindLoans", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 	company := model.Company{Name: "Unknown Corp", Location: "Austin, TX"}
 	matches, err := PPPPhase(context.Background(), company, q)
@@ -156,11 +126,8 @@ func TestPPPPhase_NoMatches(t *testing.T) {
 }
 
 func TestPPPPhase_ErrorPropagation(t *testing.T) {
-	q := &mockPPPQuerier{
-		findLoansFunc: func(_ context.Context, _, _, _ string) ([]ppp.LoanMatch, error) {
-			return nil, errors.New("connection refused")
-		},
-	}
+	q := pppmocks.NewMockQuerier(t)
+	q.On("FindLoans", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("connection refused"))
 
 	company := model.Company{Name: "Acme Corp", Location: "Austin, TX"}
 	matches, err := PPPPhase(context.Background(), company, q)
@@ -170,13 +137,8 @@ func TestPPPPhase_ErrorPropagation(t *testing.T) {
 }
 
 func TestPPPPhase_StateOnlyLocation(t *testing.T) {
-	q := &mockPPPQuerier{
-		findLoansFunc: func(_ context.Context, name, state, city string) ([]ppp.LoanMatch, error) {
-			assert.Equal(t, "TX", state)
-			assert.Equal(t, "", city)
-			return nil, nil
-		},
-	}
+	q := pppmocks.NewMockQuerier(t)
+	q.On("FindLoans", mock.Anything, "Acme Corp", "TX", "").Return(nil, nil)
 
 	company := model.Company{Name: "Acme Corp", Location: "TX"}
 	matches, err := PPPPhase(context.Background(), company, q)

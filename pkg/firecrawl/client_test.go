@@ -264,3 +264,69 @@ func TestContextCancellation(t *testing.T) {
 	_, err := c.Crawl(ctx, CrawlRequest{URL: "https://example.com"})
 	require.Error(t, err)
 }
+
+func TestAPIError_Error(t *testing.T) {
+	t.Parallel()
+	e := &APIError{StatusCode: 429, Body: `{"error":"rate limited"}`}
+	assert.Equal(t, `firecrawl: HTTP 429: {"error":"rate limited"}`, e.Error())
+}
+
+func TestWithHTTPClient(t *testing.T) {
+	t.Parallel()
+	customClient := &http.Client{}
+	c := NewClient("key", WithHTTPClient(customClient))
+	hc := c.(*httpClient)
+	assert.Equal(t, customClient, hc.http)
+}
+
+func TestMalformedJSON(t *testing.T) {
+	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{not json`))
+	})
+
+	_, err := c.Scrape(context.Background(), ScrapeRequest{URL: "https://example.com"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decode response")
+}
+
+func TestGetCrawlStatus_Error(t *testing.T) {
+	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"not found"}`))
+	})
+
+	_, err := c.GetCrawlStatus(context.Background(), "nonexistent")
+	require.Error(t, err)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 404, apiErr.StatusCode)
+}
+
+func TestGetBatchScrapeStatus_Error(t *testing.T) {
+	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"not found"}`))
+	})
+
+	_, err := c.GetBatchScrapeStatus(context.Background(), "nonexistent")
+	require.Error(t, err)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 404, apiErr.StatusCode)
+}
+
+func TestBatchScrape_Error(t *testing.T) {
+	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"rate limited"}`))
+	})
+
+	_, err := c.BatchScrape(context.Background(), BatchScrapeRequest{
+		URLs: []string{"https://a.com"},
+	})
+	require.Error(t, err)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 429, apiErr.StatusCode)
+}

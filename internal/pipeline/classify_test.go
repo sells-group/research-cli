@@ -10,6 +10,7 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/pkg/anthropic"
+	anthropicmocks "github.com/sells-group/research-cli/pkg/anthropic/mocks"
 )
 
 func TestClassifyPhase_DirectMode(t *testing.T) {
@@ -20,7 +21,7 @@ func TestClassifyPhase_DirectMode(t *testing.T) {
 		{URL: "https://acme.com/about", Title: "About", Markdown: "About Acme Corp"},
 	}
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 
 	// Two pages => direct mode (<=3).
 	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
@@ -49,7 +50,7 @@ func TestClassifyPhase_DirectMode(t *testing.T) {
 
 func TestClassifyPhase_EmptyPages(t *testing.T) {
 	ctx := context.Background()
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
 	index, usage, err := ClassifyPhase(ctx, nil, aiClient, aiCfg)

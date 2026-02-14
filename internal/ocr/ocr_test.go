@@ -132,3 +132,70 @@ func TestMistralOCR_FileNotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read PDF")
 }
+
+func TestPdfToText_ExtractText_BinaryNotFound(t *testing.T) {
+	p := NewPdfToText("/nonexistent/pdftotext")
+	_, err := p.ExtractText(context.Background(), "/tmp/test.pdf")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pdftotext failed")
+}
+
+func TestPdfToText_ExtractText_Success(t *testing.T) {
+	// Create a fake pdftotext script that echoes content
+	tmpDir := t.TempDir()
+	fakeBin := filepath.Join(tmpDir, "pdftotext")
+	script := "#!/bin/sh\necho 'Extracted text content'\n"
+	require.NoError(t, os.WriteFile(fakeBin, []byte(script), 0755))
+
+	p := NewPdfToText(fakeBin)
+	text, err := p.ExtractText(context.Background(), "/tmp/dummy.pdf")
+	require.NoError(t, err)
+	assert.Contains(t, text, "Extracted text content")
+}
+
+func TestMistralOCR_MalformedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{invalid json`))
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	pdfPath := filepath.Join(tmpDir, "test.pdf")
+	require.NoError(t, os.WriteFile(pdfPath, []byte("%PDF-1.4 test"), 0644))
+
+	m := &MistralOCR{
+		apiKey:   "test-key",
+		model:    "test-model",
+		endpoint: srv.URL,
+		client:   &http.Client{},
+	}
+
+	_, err := m.ExtractText(context.Background(), pdfPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unmarshal mistral response")
+}
+
+func TestMistralOCR_EmptyPages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := mistralOCRResponse{Pages: []mistralOCRPage{}}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	pdfPath := filepath.Join(tmpDir, "test.pdf")
+	require.NoError(t, os.WriteFile(pdfPath, []byte("%PDF-1.4 test"), 0644))
+
+	m := &MistralOCR{
+		apiKey:   "test-key",
+		model:    "test-model",
+		endpoint: srv.URL,
+		client:   &http.Client{},
+	}
+
+	text, err := m.ExtractText(context.Background(), pdfPath)
+	require.NoError(t, err)
+	assert.Empty(t, text)
+}

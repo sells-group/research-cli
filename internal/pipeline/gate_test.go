@@ -11,6 +11,8 @@ import (
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
+	notionmocks "github.com/sells-group/research-cli/pkg/notion/mocks"
+	salesforcemocks "github.com/sells-group/research-cli/pkg/salesforce/mocks"
 )
 
 func TestQualityGate_PassesAndUpdatesSF(t *testing.T) {
@@ -31,11 +33,11 @@ func TestQualityGate_PassesAndUpdatesSF(t *testing.T) {
 		},
 	}
 
-	sfClient := &mockSalesforceClient{}
+	sfClient := salesforcemocks.NewMockClient(t)
 	sfClient.On("UpdateOne", ctx, "Account", "001ABC", mock.AnythingOfType("map[string]interface {}")).
 		Return(nil)
 
-	notionClient := &mockNotionClient{}
+	notionClient := notionmocks.NewMockClient(t)
 	notionClient.On("UpdatePage", ctx, "page-123", mock.Anything).
 		Return(nil, nil)
 
@@ -79,8 +81,8 @@ func TestQualityGate_FailsSendsToManualReview(t *testing.T) {
 		FieldValues: map[string]model.FieldValue{}, // No fields found.
 	}
 
-	sfClient := &mockSalesforceClient{}
-	notionClient := &mockNotionClient{}
+	sfClient := salesforcemocks.NewMockClient(t)
+	notionClient := notionmocks.NewMockClient(t)
 	notionClient.On("UpdatePage", ctx, "page-456", mock.Anything).
 		Return(nil, nil)
 
@@ -120,8 +122,8 @@ func TestQualityGate_NoSalesforceID(t *testing.T) {
 		},
 	}
 
-	sfClient := &mockSalesforceClient{}
-	notionClient := &mockNotionClient{}
+	sfClient := salesforcemocks.NewMockClient(t)
+	notionClient := notionmocks.NewMockClient(t)
 	notionClient.On("UpdatePage", ctx, "page-789", mock.Anything).
 		Return(nil, nil)
 

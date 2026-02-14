@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/model"
+	notionmocks "github.com/sells-group/research-cli/pkg/notion/mocks"
 )
 
 func init() {
@@ -18,7 +19,7 @@ func init() {
 }
 
 func TestLoadQuestionRegistry_Success(t *testing.T) {
-	mc := new(mockNotionClient)
+	mc := notionmocks.NewMockClient(t)
 	ctx := context.Background()
 
 	mc.On("QueryDatabase", ctx, "q-db", mock.AnythingOfType("*notionapi.DatabaseQueryRequest")).
@@ -49,7 +50,7 @@ func TestLoadQuestionRegistry_Success(t *testing.T) {
 }
 
 func TestLoadQuestionRegistry_Pagination(t *testing.T) {
-	mc := new(mockNotionClient)
+	mc := notionmocks.NewMockClient(t)
 	ctx := context.Background()
 
 	// First page.
@@ -78,7 +79,7 @@ func TestLoadQuestionRegistry_Pagination(t *testing.T) {
 }
 
 func TestLoadQuestionRegistry_MalformedPage(t *testing.T) {
-	mc := new(mockNotionClient)
+	mc := notionmocks.NewMockClient(t)
 	ctx := context.Background()
 
 	// One good page, one with missing Text (will be skipped with warning).
@@ -99,7 +100,7 @@ func TestLoadQuestionRegistry_MalformedPage(t *testing.T) {
 }
 
 func TestLoadQuestionRegistry_Empty(t *testing.T) {
-	mc := new(mockNotionClient)
+	mc := notionmocks.NewMockClient(t)
 	ctx := context.Background()
 
 	mc.On("QueryDatabase", ctx, "q-db", mock.AnythingOfType("*notionapi.DatabaseQueryRequest")).
@@ -115,7 +116,7 @@ func TestLoadQuestionRegistry_Empty(t *testing.T) {
 }
 
 func TestLoadQuestionRegistry_QueryError(t *testing.T) {
-	mc := new(mockNotionClient)
+	mc := notionmocks.NewMockClient(t)
 	ctx := context.Background()
 
 	mc.On("QueryDatabase", ctx, "q-db", mock.AnythingOfType("*notionapi.DatabaseQueryRequest")).

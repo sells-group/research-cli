@@ -7,10 +7,12 @@ import (
 	"github.com/jomei/notionapi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+
+	notionmocks "github.com/sells-group/research-cli/pkg/notion/mocks"
 )
 
 func TestLoadFieldRegistry_Success(t *testing.T) {
-	mc := new(mockNotionClient)
+	mc := notionmocks.NewMockClient(t)
 	ctx := context.Background()
 
 	mc.On("QueryDatabase", ctx, "f-db", mock.AnythingOfType("*notionapi.DatabaseQueryRequest")).
@@ -55,7 +57,7 @@ func TestLoadFieldRegistry_Success(t *testing.T) {
 }
 
 func TestLoadFieldRegistry_Pagination(t *testing.T) {
-	mc := new(mockNotionClient)
+	mc := notionmocks.NewMockClient(t)
 	ctx := context.Background()
 
 	mc.On("QueryDatabase", ctx, "f-db", mock.MatchedBy(func(req *notionapi.DatabaseQueryRequest) bool {
@@ -82,7 +84,7 @@ func TestLoadFieldRegistry_Pagination(t *testing.T) {
 }
 
 func TestLoadFieldRegistry_MalformedPage(t *testing.T) {
-	mc := new(mockNotionClient)
+	mc := notionmocks.NewMockClient(t)
 	ctx := context.Background()
 
 	mc.On("QueryDatabase", ctx, "f-db", mock.AnythingOfType("*notionapi.DatabaseQueryRequest")).
@@ -102,7 +104,7 @@ func TestLoadFieldRegistry_MalformedPage(t *testing.T) {
 }
 
 func TestLoadFieldRegistry_Empty(t *testing.T) {
-	mc := new(mockNotionClient)
+	mc := notionmocks.NewMockClient(t)
 	ctx := context.Background()
 
 	mc.On("QueryDatabase", ctx, "f-db", mock.AnythingOfType("*notionapi.DatabaseQueryRequest")).
@@ -118,7 +120,7 @@ func TestLoadFieldRegistry_Empty(t *testing.T) {
 }
 
 func TestLoadFieldRegistry_QueryError(t *testing.T) {
-	mc := new(mockNotionClient)
+	mc := notionmocks.NewMockClient(t)
 	ctx := context.Background()
 
 	mc.On("QueryDatabase", ctx, "f-db", mock.AnythingOfType("*notionapi.DatabaseQueryRequest")).
@@ -131,7 +133,7 @@ func TestLoadFieldRegistry_QueryError(t *testing.T) {
 }
 
 func TestLoadFieldRegistry_IndexBuilding(t *testing.T) {
-	mc := new(mockNotionClient)
+	mc := notionmocks.NewMockClient(t)
 	ctx := context.Background()
 
 	mc.On("QueryDatabase", ctx, "f-db", mock.AnythingOfType("*notionapi.DatabaseQueryRequest")).

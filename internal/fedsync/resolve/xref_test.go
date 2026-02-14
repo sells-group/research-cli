@@ -1,11 +1,22 @@
 package resolve
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/pashagolub/pgxmock/v4"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
+
+func init() {
+	zap.ReplaceGlobals(zap.NewNop())
+}
+
+// --- SQL content tests ---
 
 func TestPass1DirectSQL(t *testing.T) {
 	sql := Pass1DirectSQL()
@@ -82,4 +93,137 @@ func TestPass2SICSQL_MatchType(t *testing.T) {
 func TestFuzzyMatchSQL_MatchType(t *testing.T) {
 	sql := FuzzyMatchSQL()
 	assert.Contains(t, sql, "'fuzzy_name'")
+}
+
+// --- XrefBuilder pgxmock tests ---
+
+func TestNewXrefBuilder(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	xb := NewXrefBuilder(mock)
+	assert.NotNil(t, xb)
+}
+
+func TestXrefBuilder_Build_Success(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
+	// Pass 1: direct CRD-CIK
+	mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("INSERT", 50))
+	// Pass 2: SIC code
+	mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("INSERT", 30))
+	// Pass 3: fuzzy name
+	mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("INSERT", 20))
+
+	xb := NewXrefBuilder(mock)
+	total, err := xb.Build(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), total)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestXrefBuilder_Build_TruncateError(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref").
+		WillReturnError(fmt.Errorf("permission denied"))
+
+	xb := NewXrefBuilder(mock)
+	_, err = xb.Build(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "truncate entity_xref")
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestXrefBuilder_Build_Pass1Error(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
+	mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+		WillReturnError(fmt.Errorf("adv_firms does not exist"))
+
+	xb := NewXrefBuilder(mock)
+	_, err = xb.Build(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pass 1")
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestXrefBuilder_Build_Pass2Error(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
+	// Pass 1 succeeds
+	mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("INSERT", 10))
+	// Pass 2 fails
+	mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+		WillReturnError(fmt.Errorf("sic column missing"))
+
+	xb := NewXrefBuilder(mock)
+	_, err = xb.Build(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pass 2")
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestXrefBuilder_Build_Pass3Error(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
+	// Pass 1 succeeds
+	mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("INSERT", 10))
+	// Pass 2 succeeds
+	mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("INSERT", 5))
+	// Pass 3 fails
+	mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+		WillReturnError(fmt.Errorf("pg_trgm not installed"))
+
+	xb := NewXrefBuilder(mock)
+	_, err = xb.Build(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pass 3")
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestXrefBuilder_Build_ZeroMatches(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
+	mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("INSERT", 0))
+	mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("INSERT", 0))
+	mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("INSERT", 0))
+
+	xb := NewXrefBuilder(mock)
+	total, err := xb.Build(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), total)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }

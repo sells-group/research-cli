@@ -13,6 +13,7 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/pkg/anthropic"
+	anthropicmocks "github.com/sells-group/research-cli/pkg/anthropic/mocks"
 )
 
 func TestExtractTier1_DirectMode(t *testing.T) {
@@ -29,7 +30,7 @@ func TestExtractTier1_DirectMode(t *testing.T) {
 		},
 	}
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: `{"value": "Technology", "confidence": 0.9, "reasoning": "stated on page", "source_url": "https://acme.com/about"}`}},
@@ -57,7 +58,7 @@ func TestExtractTier1_DirectMode(t *testing.T) {
 
 func TestExtractTier1_EmptyRouted(t *testing.T) {
 	ctx := context.Background()
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
 	result, err := ExtractTier1(ctx, nil, aiClient, aiCfg)
@@ -89,7 +90,7 @@ func TestExtractTier2_WithPrimer(t *testing.T) {
 		{QuestionID: "q0", FieldKey: "industry", Value: "Tech", Confidence: 0.8, Tier: 1},
 	}
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 
 	// Primer request (first of 2+ items) + 2 direct calls (<=3 items).
 	// The primer sends batchItems[0].Params, then executeBatch sends each item directly.
@@ -126,7 +127,7 @@ func TestExtractTier3_WithSummarization(t *testing.T) {
 		{FieldKey: "industry", Value: "Tech"},
 	}
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 
 	// Summarization (Haiku) call.
 	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
@@ -282,7 +283,7 @@ func TestExecuteBatch_BatchPath(t *testing.T) {
 	routed := makeRoutedQuestions(5)
 	items := makeBatchItems(routed)
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 
 	// CreateBatch returns a batch ID.
 	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
@@ -312,14 +313,14 @@ func TestExecuteBatch_BatchPath(t *testing.T) {
 	}
 
 	aiClient.On("GetBatchResults", mock.Anything, "batch-1").
-		Return(newMockBatchIterator(resultItems), nil)
+		Return(setupBatchIterator(t, resultItems), nil)
 
 	answers, usage, err := executeBatch(ctx, items, routed, 1, aiClient)
 
 	require.NoError(t, err)
 	assert.Len(t, answers, 5)
-	assert.Equal(t, 500, usage.InputTokens)   // 5 * 100
-	assert.Equal(t, 100, usage.OutputTokens)   // 5 * 20
+	assert.Equal(t, 500, usage.InputTokens)  // 5 * 100
+	assert.Equal(t, 100, usage.OutputTokens) // 5 * 20
 	aiClient.AssertExpectations(t)
 }
 
@@ -328,7 +329,7 @@ func TestExecuteBatch_CreateBatchError(t *testing.T) {
 	routed := makeRoutedQuestions(5)
 	items := makeBatchItems(routed)
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
 		Return(nil, errors.New("rate limited"))
 
@@ -345,7 +346,7 @@ func TestExecuteBatch_PollError(t *testing.T) {
 	routed := makeRoutedQuestions(5)
 	items := makeBatchItems(routed)
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
 		Return(&anthropic.BatchResponse{
 			ID:               "batch-1",
@@ -369,7 +370,7 @@ func TestExecuteBatch_GetResultsError(t *testing.T) {
 	routed := makeRoutedQuestions(5)
 	items := makeBatchItems(routed)
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
 		Return(&anthropic.BatchResponse{
 			ID:               "batch-1",
@@ -398,7 +399,7 @@ func TestExecuteBatch_MissingResultInBatch(t *testing.T) {
 	routed := makeRoutedQuestions(4)
 	items := makeBatchItems(routed)
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
 		Return(&anthropic.BatchResponse{
 			ID:               "batch-1",
@@ -432,7 +433,7 @@ func TestExecuteBatch_MissingResultInBatch(t *testing.T) {
 	}
 
 	aiClient.On("GetBatchResults", mock.Anything, "batch-1").
-		Return(newMockBatchIterator(resultItems), nil)
+		Return(setupBatchIterator(t, resultItems), nil)
 
 	answers, usage, err := executeBatch(ctx, items, routed, 1, aiClient)
 
@@ -448,7 +449,7 @@ func TestExecuteBatch_DirectModeError(t *testing.T) {
 	routed := makeRoutedQuestions(2) // <=3 triggers direct mode.
 	items := makeBatchItems(routed)
 
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 
 	// First call fails.
 	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).

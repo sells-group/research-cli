@@ -11,8 +11,16 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/scrape"
+	scrapemocks "github.com/sells-group/research-cli/internal/scrape/mocks"
+	storemocks "github.com/sells-group/research-cli/internal/store/mocks"
 	"github.com/sells-group/research-cli/pkg/anthropic"
+	anthropicmocks "github.com/sells-group/research-cli/pkg/anthropic/mocks"
+	firecrawlmocks "github.com/sells-group/research-cli/pkg/firecrawl/mocks"
+	notionmocks "github.com/sells-group/research-cli/pkg/notion/mocks"
 	"github.com/sells-group/research-cli/pkg/perplexity"
+	perplexitymocks "github.com/sells-group/research-cli/pkg/perplexity/mocks"
+	pppmocks "github.com/sells-group/research-cli/pkg/ppp/mocks"
+	salesforcemocks "github.com/sells-group/research-cli/pkg/salesforce/mocks"
 )
 
 func TestPipeline_Run_FullFlow(t *testing.T) {
@@ -56,7 +64,7 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 	// --- Set up mocks ---
 	// Use mock.Anything for context since errgroup wraps it in a cancelCtx.
 
-	st := &mockStore{}
+	st := storemocks.NewMockStore(t)
 	st.On("CreateRun", mock.Anything, company).Return(&model.Run{
 		ID:      "run-001",
 		Company: company,
@@ -77,35 +85,33 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 	st.On("UpdateRunResult", mock.Anything, "run-001", mock.AnythingOfType("*model.RunResult")).Return(nil)
 
 	// Scrape chain — for scrape phase (external sources) and LinkedIn.
-	chain := scrape.NewChain(
-		scrape.NewPathMatcher(nil),
-		&mockScraper{
-			name: "mock", supports: true,
-			result: &scrape.Result{
-				Page: model.CrawledPage{
-					URL:      "https://example.com",
-					Title:    "External Source",
-					Markdown: "Acme Corp information from external source with details about their operations and industry presence in the tech sector.",
-				},
-				Source: "mock",
-			},
+	s := scrapemocks.NewMockScraper(t)
+	s.On("Name").Return("mock").Maybe()
+	s.On("Supports", mock.Anything).Return(true).Maybe()
+	s.On("Scrape", mock.Anything, mock.Anything).Return(&scrape.Result{
+		Page: model.CrawledPage{
+			URL:      "https://example.com",
+			Title:    "External Source",
+			Markdown: "Acme Corp information from external source with details about their operations and industry presence in the tech sector.",
 		},
-	)
+		Source: "mock",
+	}, nil).Maybe()
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	fcClient := &mockFirecrawlClient{}
+	fcClient := firecrawlmocks.NewMockClient(t)
 
 	// Perplexity mock for LinkedIn phase.
-	pplxClient := &mockPerplexityClient{}
+	pplxClient := perplexitymocks.NewMockClient(t)
 	pplxClient.On("ChatCompletion", mock.Anything, mock.AnythingOfType("perplexity.ChatCompletionRequest")).
 		Return(&perplexity.ChatCompletionResponse{
 			Choices: []perplexity.Choice{
 				{Message: perplexity.Message{Content: "Acme Corp LinkedIn: Technology company, 200 employees, NYC."}},
 			},
 			Usage: perplexity.Usage{PromptTokens: 100, CompletionTokens: 50},
-		}, nil)
+		}, nil).Maybe()
 
 	// Anthropic mock - used by LinkedIn (Haiku JSON), classify, and extract.
-	aiClient := &mockAnthropicClient{}
+	aiClient := anthropicmocks.NewMockClient(t)
 
 	// CreateMessage: generic response for all direct calls (LinkedIn, classification direct, extraction).
 	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
@@ -119,14 +125,14 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 		Return(&anthropic.BatchResponse{
 			ID:               "batch-001",
 			ProcessingStatus: "ended",
-		}, nil)
+		}, nil).Maybe()
 
 	// GetBatch: poll returns ended immediately.
 	aiClient.On("GetBatch", mock.Anything, "batch-001").
 		Return(&anthropic.BatchResponse{
 			ID:               "batch-001",
 			ProcessingStatus: "ended",
-		}, nil)
+		}, nil).Maybe()
 
 	// GetBatchResults: return results for all batch items.
 	batchResults := []anthropic.BatchResultItem{}
@@ -141,20 +147,20 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 		})
 	}
 	aiClient.On("GetBatchResults", mock.Anything, "batch-001").
-		Return(newMockBatchIterator(batchResults), nil)
+		Return(setupBatchIterator(t, batchResults), nil).Maybe()
 
 	// Salesforce mock.
-	sfClient := &mockSalesforceClient{}
-	sfClient.On("UpdateOne", mock.Anything, "Account", "001ABC", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	sfClient := salesforcemocks.NewMockClient(t)
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001ABC", mock.AnythingOfType("map[string]interface {}")).Return(nil).Maybe()
 
 	// Notion mock.
-	notionClient := &mockNotionClient{}
-	notionClient.On("UpdatePage", mock.Anything, "page-123", mock.Anything).Return(nil, nil)
+	notionClient := notionmocks.NewMockClient(t)
+	notionClient.On("UpdatePage", mock.Anything, "page-123", mock.Anything).Return(nil, nil).Maybe()
 
 	// PPP mock.
-	pppClient := &mockPPPClient{}
+	pppClient := pppmocks.NewMockQuerier(t)
 	pppClient.On("FindLoans", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).
-		Return(nil, nil)
+		Return(nil, nil).Maybe()
 
 	// --- Run pipeline ---
 	p := New(cfg, st, chain, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, questions, fields)
@@ -188,14 +194,14 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 
 func TestPipeline_New(t *testing.T) {
 	cfg := &config.Config{}
-	st := &mockStore{}
+	st := storemocks.NewMockStore(t)
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil))
-	fcClient := &mockFirecrawlClient{}
-	pplxClient := &mockPerplexityClient{}
-	aiClient := &mockAnthropicClient{}
-	sfClient := &mockSalesforceClient{}
-	notionClient := &mockNotionClient{}
-	pppClient := &mockPPPClient{}
+	fcClient := firecrawlmocks.NewMockClient(t)
+	pplxClient := perplexitymocks.NewMockClient(t)
+	aiClient := anthropicmocks.NewMockClient(t)
+	sfClient := salesforcemocks.NewMockClient(t)
+	notionClient := notionmocks.NewMockClient(t)
+	pppClient := pppmocks.NewMockQuerier(t)
 
 	questions := []model.Question{{ID: "q1"}}
 	fields := model.NewFieldRegistry(nil)
