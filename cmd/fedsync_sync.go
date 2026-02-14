@@ -39,29 +39,9 @@ Use --full to perform a full reload instead of incremental sync.`,
 		}
 
 		// Parse flags.
-		phaseStr, _ := cmd.Flags().GetString("phase")
-		datasetsStr, _ := cmd.Flags().GetString("datasets")
-		force, _ := cmd.Flags().GetBool("force")
-		full, _ := cmd.Flags().GetBool("full")
-
-		opts := dataset.RunOpts{
-			Force: force,
-			Full:  full,
-		}
-
-		if phaseStr != "" {
-			p, err := dataset.ParsePhase(phaseStr)
-			if err != nil {
-				return err
-			}
-			opts.Phase = &p
-		}
-
-		if datasetsStr != "" {
-			opts.Datasets = strings.Split(datasetsStr, ",")
-			for i := range opts.Datasets {
-				opts.Datasets[i] = strings.TrimSpace(opts.Datasets[i])
-			}
+		opts, err := parseSyncOpts(cmd)
+		if err != nil {
+			return err
 		}
 
 		// Create temp directory.
@@ -103,4 +83,34 @@ func init() {
 	fedsyncSyncCmd.Flags().Bool("force", false, "ignore ShouldRun() scheduling logic")
 	fedsyncSyncCmd.Flags().Bool("full", false, "full reload instead of incremental sync")
 	fedsyncCmd.AddCommand(fedsyncSyncCmd)
+}
+
+// parseSyncOpts extracts dataset.RunOpts from the cobra command flags.
+func parseSyncOpts(cmd *cobra.Command) (dataset.RunOpts, error) {
+	phaseStr, _ := cmd.Flags().GetString("phase")
+	datasetsStr, _ := cmd.Flags().GetString("datasets")
+	force, _ := cmd.Flags().GetBool("force")
+	full, _ := cmd.Flags().GetBool("full")
+
+	opts := dataset.RunOpts{
+		Force: force,
+		Full:  full,
+	}
+
+	if phaseStr != "" {
+		p, err := dataset.ParsePhase(phaseStr)
+		if err != nil {
+			return dataset.RunOpts{}, err
+		}
+		opts.Phase = &p
+	}
+
+	if datasetsStr != "" {
+		opts.Datasets = strings.Split(datasetsStr, ",")
+		for i := range opts.Datasets {
+			opts.Datasets[i] = strings.TrimSpace(opts.Datasets[i])
+		}
+	}
+
+	return opts, nil
 }

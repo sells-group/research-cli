@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"sync/atomic"
 
@@ -34,57 +35,9 @@ var batchCmd = &cobra.Command{
 			return eris.Wrap(err, "query queued leads")
 		}
 
-		if len(leads) == 0 {
-			zap.L().Info("no queued leads found")
-			return nil
-		}
-
-		// Apply limit
-		if batchLimit > 0 && len(leads) > batchLimit {
-			leads = leads[:batchLimit]
-		}
-
-		zap.L().Info("processing batch",
-			zap.Int("leads", len(leads)),
-			zap.Int("concurrency", cfg.Batch.MaxConcurrentCompanies),
-		)
-
-		// Process leads concurrently
-		g, gctx := errgroup.WithContext(ctx)
-		g.SetLimit(cfg.Batch.MaxConcurrentCompanies)
-
-		var succeeded, failed atomic.Int64
-
-		for _, lead := range leads {
-			company := leadToCompany(lead)
-			g.Go(func() error {
-				log := zap.L().With(zap.String("company", company.URL))
-
-				result, err := env.Pipeline.Run(gctx, company)
-				if err != nil {
-					failed.Add(1)
-					log.Error("enrichment failed", zap.Error(err))
-					return nil // don't abort batch on individual failure
-				}
-
-				succeeded.Add(1)
-				log.Info("enrichment complete",
-					zap.Float64("score", result.Score),
-					zap.Int("fields_found", len(result.Answers)),
-				)
-				return nil
-			})
-		}
-
-		if err := g.Wait(); err != nil {
-			return eris.Wrap(err, "batch processing")
-		}
-
-		zap.L().Info("batch complete",
-			zap.Int64("succeeded", succeeded.Load()),
-			zap.Int64("failed", failed.Load()),
-		)
-		return nil
+		return processBatch(ctx, leads, batchLimit, cfg.Batch.MaxConcurrentCompanies, func(ctx context.Context, company model.Company) (*model.EnrichmentResult, error) {
+			return env.Pipeline.Run(ctx, company)
+		})
 	},
 }
 
@@ -134,4 +87,61 @@ func leadToCompany(page notionapi.Page) model.Company {
 	c.Location = strings.TrimSpace(c.Location)
 
 	return c
+}
+
+// enrichFunc is the callback signature for running enrichment on a company.
+type enrichFunc func(ctx context.Context, company model.Company) (*model.EnrichmentResult, error)
+
+// processBatch applies limit, then processes leads concurrently using the given enrichment function.
+func processBatch(ctx context.Context, leads []notionapi.Page, limit, concurrency int, enrich enrichFunc) error {
+	if len(leads) == 0 {
+		zap.L().Info("no queued leads found")
+		return nil
+	}
+
+	// Apply limit
+	if limit > 0 && len(leads) > limit {
+		leads = leads[:limit]
+	}
+
+	zap.L().Info("processing batch",
+		zap.Int("leads", len(leads)),
+		zap.Int("concurrency", concurrency),
+	)
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(concurrency)
+
+	var succeeded, failed atomic.Int64
+
+	for _, lead := range leads {
+		company := leadToCompany(lead)
+		g.Go(func() error {
+			log := zap.L().With(zap.String("company", company.URL))
+
+			result, err := enrich(gctx, company)
+			if err != nil {
+				failed.Add(1)
+				log.Error("enrichment failed", zap.Error(err))
+				return nil // don't abort batch on individual failure
+			}
+
+			succeeded.Add(1)
+			log.Info("enrichment complete",
+				zap.Float64("score", result.Score),
+				zap.Int("fields_found", len(result.Answers)),
+			)
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return eris.Wrap(err, "batch processing")
+	}
+
+	zap.L().Info("batch complete",
+		zap.Int64("succeeded", succeeded.Load()),
+		zap.Int64("failed", failed.Load()),
+	)
+	return nil
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 
 	"github.com/rotisserie/eris"
@@ -15,6 +16,20 @@ var (
 	runURL  string
 	runSFID string
 )
+
+// writeRunResult logs the enrichment result and writes it as indented JSON.
+func writeRunResult(w io.Writer, company model.Company, result *model.EnrichmentResult) error {
+	zap.L().Info("enrichment complete",
+		zap.String("company", company.URL),
+		zap.Float64("score", result.Score),
+		zap.Int("fields_found", len(result.Answers)),
+		zap.Int("total_tokens", result.TotalTokens),
+	)
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(result)
+}
 
 var runCmd = &cobra.Command{
 	Use:   "run",
@@ -38,17 +53,7 @@ var runCmd = &cobra.Command{
 			return eris.Wrap(err, "pipeline run")
 		}
 
-		zap.L().Info("enrichment complete",
-			zap.String("company", company.URL),
-			zap.Float64("score", result.Score),
-			zap.Int("fields_found", len(result.Answers)),
-			zap.Int("total_tokens", result.TotalTokens),
-		)
-
-		// Print result JSON to stdout
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(result)
+		return writeRunResult(os.Stdout, company, result)
 	},
 }
 
