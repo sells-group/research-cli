@@ -20,11 +20,6 @@ firecrawl:
   key: ""                     # RESEARCH_FIRECRAWL_KEY (fallback only)
   base_url: https://api.firecrawl.dev/v2
   max_pages: 50
-  exclude_paths:
-    - /blog/*
-    - /news/*
-    - /press/*
-    - /careers/*
 
 perplexity:
   key: ""                     # RESEARCH_PERPLEXITY_KEY
@@ -47,11 +42,49 @@ salesforce:
 tooljet:
   webhook_url: ""             # RESEARCH_TOOLJET_WEBHOOK
 
+ppp:
+  url: ""                     # Postgres connection string for PPP loan data
+  similarity_threshold: 0.4   # Fuzzy match threshold (0.0-1.0)
+  max_candidates: 10          # Max PPP matches to return
+
+pricing:
+  anthropic:
+    claude-haiku-4-5-20251001:
+      input: 0.80             # USD per million input tokens
+      output: 4.00            # USD per million output tokens
+      batch_discount: 0.50    # 50% discount for Batch API
+      cache_write_mul: 1.25   # Cache write multiplier
+      cache_read_mul: 0.10    # Cache read multiplier
+    claude-sonnet-4-5-20250929:
+      input: 3.00
+      output: 15.00
+      batch_discount: 0.50
+      cache_write_mul: 1.25
+      cache_read_mul: 0.10
+    claude-opus-4-6:
+      input: 15.00
+      output: 75.00
+      batch_discount: 0.50
+      cache_write_mul: 1.25
+      cache_read_mul: 0.10
+  jina:
+    per_mtok: 0.02            # USD per million tokens
+  perplexity:
+    per_query: 0.005          # USD per query
+  firecrawl:
+    plan_monthly: 19.00       # Monthly plan cost
+    credits_included: 3000    # Credits included in plan
+
 crawl:
   max_pages: 50
   max_depth: 2
   timeout_secs: 60
   cache_ttl_hours: 24
+  exclude_paths:              # URL path patterns to skip during crawl + fetch
+    - /blog/*
+    - /news/*
+    - /press/*
+    - /careers/*
 
 pipeline:
   confidence_escalation_threshold: 0.4
@@ -63,3 +96,18 @@ batch:
 
 server:
   port: 8080
+
+fedsync:
+  database_url: ""            # RESEARCH_FEDSYNC_DATABASE_URL (defaults to store.database_url)
+  temp_dir: /tmp/fedsync
+  sam_api_key: ""             # RESEARCH_FEDSYNC_SAM_API_KEY
+  fred_api_key: ""            # RESEARCH_FEDSYNC_FRED_API_KEY
+  bls_api_key: ""             # RESEARCH_FEDSYNC_BLS_API_KEY
+  census_api_key: ""          # RESEARCH_FEDSYNC_CENSUS_API_KEY
+  edgar_user_agent: "Sells Advisors blake@sellsadvisors.com"
+  n8n_webhook_url: ""         # RESEARCH_FEDSYNC_N8N_WEBHOOK_URL
+  mistral_api_key: ""         # RESEARCH_FEDSYNC_MISTRAL_API_KEY
+  mistral_ocr_model: pixtral-large-latest
+  ocr:
+    provider: local           # "local" (pdftotext) or "mistral"
+    pdftotext_path: pdftotext
