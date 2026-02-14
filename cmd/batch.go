@@ -11,14 +11,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/model"
-	"github.com/sells-group/research-cli/internal/pipeline"
-	"github.com/sells-group/research-cli/internal/registry"
-	anthropicpkg "github.com/sells-group/research-cli/pkg/anthropic"
-	"github.com/sells-group/research-cli/pkg/firecrawl"
-	"github.com/sells-group/research-cli/pkg/jina"
 	"github.com/sells-group/research-cli/pkg/notion"
-	"github.com/sells-group/research-cli/pkg/perplexity"
-	"github.com/sells-group/research-cli/pkg/ppp"
 )
 
 var batchLimit int
@@ -29,61 +22,14 @@ var batchCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		// Init store
-		st, err := initStore(ctx)
+		env, err := initPipeline(ctx)
 		if err != nil {
 			return err
 		}
-		defer st.Close()
-
-		if err := st.Migrate(ctx); err != nil {
-			return eris.Wrap(err, "migrate store")
-		}
-
-		// Init clients
-		notionClient := notion.NewClient(cfg.Notion.Token)
-		anthropicClient := anthropicpkg.NewClient(cfg.Anthropic.Key)
-		firecrawlClient := firecrawl.NewClient(cfg.Firecrawl.Key, firecrawl.WithBaseURL(cfg.Firecrawl.BaseURL))
-		jinaClient := jina.NewClient(cfg.Jina.Key, jina.WithBaseURL(cfg.Jina.BaseURL))
-		perplexityClient := perplexity.NewClient(cfg.Perplexity.Key, perplexity.WithBaseURL(cfg.Perplexity.BaseURL), perplexity.WithModel(cfg.Perplexity.Model))
-
-		sfClient, err := initSalesforce()
-		if err != nil {
-			return err
-		}
-
-		// Init PPP client (optional)
-		var pppClient ppp.Querier
-		if cfg.PPP.URL != "" {
-			pppClient, err = ppp.New(ctx, ppp.Config{
-				URL:                 cfg.PPP.URL,
-				SimilarityThreshold: cfg.PPP.SimilarityThreshold,
-				MaxCandidates:       cfg.PPP.MaxCandidates,
-			})
-			if err != nil {
-				zap.L().Warn("ppp client init failed, skipping PPP phase", zap.Error(err))
-			} else {
-				defer pppClient.Close()
-			}
-		}
-
-		// Load registries
-		questions, err := registry.LoadQuestionRegistry(ctx, notionClient, cfg.Notion.QuestionDB)
-		if err != nil {
-			return eris.Wrap(err, "load question registry")
-		}
-		fields, err := registry.LoadFieldRegistry(ctx, notionClient, cfg.Notion.FieldDB)
-		if err != nil {
-			return eris.Wrap(err, "load field registry")
-		}
-
-		zap.L().Info("registries loaded",
-			zap.Int("questions", len(questions)),
-			zap.Int("fields", len(fields.Fields)),
-		)
+		defer env.Close()
 
 		// Query queued leads from Notion
-		leads, err := notion.QueryQueuedLeads(ctx, notionClient, cfg.Notion.LeadDB)
+		leads, err := notion.QueryQueuedLeads(ctx, env.Notion, cfg.Notion.LeadDB)
 		if err != nil {
 			return eris.Wrap(err, "query queued leads")
 		}
@@ -103,9 +49,6 @@ var batchCmd = &cobra.Command{
 			zap.Int("concurrency", cfg.Batch.MaxConcurrentCompanies),
 		)
 
-		// Build pipeline
-		p := pipeline.New(cfg, st, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, pppClient, questions, fields)
-
 		// Process leads concurrently
 		g, gctx := errgroup.WithContext(ctx)
 		g.SetLimit(cfg.Batch.MaxConcurrentCompanies)
@@ -117,7 +60,7 @@ var batchCmd = &cobra.Command{
 			g.Go(func() error {
 				log := zap.L().With(zap.String("company", company.URL))
 
-				result, err := p.Run(gctx, company)
+				result, err := env.Pipeline.Run(gctx, company)
 				if err != nil {
 					failed.Add(1)
 					log.Error("enrichment failed", zap.Error(err))
