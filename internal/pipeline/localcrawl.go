@@ -16,8 +16,8 @@ import (
 	"github.com/sells-group/research-cli/internal/model"
 )
 
-// excludedPrefixes are URL path prefixes to skip during link discovery.
-var excludedPrefixes = []string{
+// defaultExcludePrefixes are URL path prefixes used when no config is provided.
+var defaultExcludePrefixes = []string{
 	"/blog/", "/blog",
 	"/news/", "/news",
 	"/press/", "/press",
@@ -26,10 +26,12 @@ var excludedPrefixes = []string{
 
 // LocalCrawler discovers links via HTTP probing and link extraction.
 type LocalCrawler struct {
-	http *http.Client
+	http           *http.Client
+	excludePaths   []string
 }
 
-// NewLocalCrawler creates a LocalCrawler with a sensible default HTTP client.
+// NewLocalCrawler creates a LocalCrawler with a sensible default HTTP client
+// and the default exclude prefixes.
 func NewLocalCrawler() *LocalCrawler {
 	return &LocalCrawler{
 		http: &http.Client{
@@ -41,7 +43,39 @@ func NewLocalCrawler() *LocalCrawler {
 				TLSHandshakeTimeout: 10 * time.Second,
 			},
 		},
+		excludePaths: defaultExcludePrefixes,
 	}
+}
+
+// NewLocalCrawlerWithExcludes creates a LocalCrawler using the given exclude
+// path patterns (glob-style, e.g. "/blog/*"). Patterns are converted to prefix
+// matching by stripping the trailing "*".
+func NewLocalCrawlerWithExcludes(patterns []string) *LocalCrawler {
+	lc := NewLocalCrawler()
+	if len(patterns) > 0 {
+		lc.excludePaths = expandExcludePatterns(patterns)
+	}
+	return lc
+}
+
+// expandExcludePatterns converts glob patterns like "/blog/*" into prefix
+// pairs like "/blog/", "/blog" for matching.
+func expandExcludePatterns(patterns []string) []string {
+	var prefixes []string
+	for _, p := range patterns {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		// Strip trailing glob star.
+		p = strings.TrimRight(p, "*")
+		// Ensure we match both "/blog/" and "/blog".
+		p = strings.TrimRight(p, "/")
+		if p != "" {
+			prefixes = append(prefixes, p+"/", p)
+		}
+	}
+	return prefixes
 }
 
 // Probe performs an HTTP probe of the given URL checking reachability,
@@ -153,7 +187,7 @@ func (lc *LocalCrawler) DiscoverLinks(ctx context.Context, rawURL string, maxPag
 			if seen[link] || len(urls)+len(queue) >= maxPages {
 				continue
 			}
-			if isExcluded(link, base) {
+			if lc.isExcluded(link, base) {
 				continue
 			}
 			seen[link] = true
@@ -278,16 +312,26 @@ func baseURL(rawURL string) string {
 	return u.Scheme + "://" + u.Host
 }
 
-func isExcluded(link string, base *url.URL) bool {
+func (lc *LocalCrawler) isExcluded(link string, base *url.URL) bool {
 	u, err := url.Parse(link)
 	if err != nil {
 		return true
 	}
 	path := strings.ToLower(u.Path)
-	for _, prefix := range excludedPrefixes {
+	for _, prefix := range lc.excludePaths {
 		if strings.HasPrefix(path, prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+// IsExcludedURL checks whether a URL matches the exclude paths. Exported for
+// use by crawl.go and scrape.go to filter discovered URLs before fetching.
+func (lc *LocalCrawler) IsExcludedURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return true
+	}
+	return lc.isExcluded(rawURL, u)
 }

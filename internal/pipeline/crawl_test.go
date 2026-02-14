@@ -91,8 +91,8 @@ func TestFetchPagesWithJina_FallbackToFirecrawl(t *testing.T) {
 	jinaClient := &mockJinaClient{}
 	fcClient := &mockFirecrawlClient{}
 
-	// First URL: Jina succeeds.
-	jinaClient.On("Read", ctx, "https://acme.com").
+	// First URL: Jina succeeds (use mock.Anything for ctx since errgroup wraps it).
+	jinaClient.On("Read", mock.Anything, "https://acme.com").
 		Return(&jina.ReadResponse{
 			Code: 200,
 			Data: jina.ReadData{
@@ -103,10 +103,10 @@ func TestFetchPagesWithJina_FallbackToFirecrawl(t *testing.T) {
 		}, nil)
 
 	// Second URL: Jina fails, Firecrawl fallback succeeds.
-	jinaClient.On("Read", ctx, "https://acme.com/about").
+	jinaClient.On("Read", mock.Anything, "https://acme.com/about").
 		Return(nil, assert.AnError)
 
-	fcClient.On("Scrape", ctx, mock.AnythingOfType("firecrawl.ScrapeRequest")).
+	fcClient.On("Scrape", mock.Anything, mock.AnythingOfType("firecrawl.ScrapeRequest")).
 		Return(&firecrawl.ScrapeResponse{
 			Success: true,
 			Data: firecrawl.PageData{
@@ -120,8 +120,13 @@ func TestFetchPagesWithJina_FallbackToFirecrawl(t *testing.T) {
 	pages := fetchPagesWithJina(ctx, urls, jinaClient, fcClient)
 
 	assert.Len(t, pages, 2)
-	assert.Equal(t, "https://acme.com", pages[0].URL)
-	assert.Equal(t, "https://acme.com/about", pages[1].URL)
+	// Order is not guaranteed with parallel fetching, check both present.
+	urlSet := map[string]bool{}
+	for _, p := range pages {
+		urlSet[p.URL] = true
+	}
+	assert.True(t, urlSet["https://acme.com"])
+	assert.True(t, urlSet["https://acme.com/about"])
 	jinaClient.AssertExpectations(t)
 	fcClient.AssertExpectations(t)
 }

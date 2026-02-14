@@ -2,10 +2,12 @@ package pipeline
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
@@ -35,7 +37,7 @@ func CrawlPhase(ctx context.Context, company model.Company, cfg config.CrawlConf
 		}, nil
 	}
 
-	lc := NewLocalCrawler()
+	lc := NewLocalCrawlerWithExcludes(cfg.ExcludePaths)
 
 	// Probe the site first.
 	probe, err := lc.Probe(ctx, company.URL)
@@ -79,6 +81,13 @@ func CrawlPhase(ctx context.Context, company model.Company, cfg config.CrawlConf
 		return crawlViaFirecrawl(ctx, company.URL, cfg, fcClient, st)
 	}
 
+	// Filter discovered URLs against exclude paths before fetching.
+	urls = filterExcludedURLs(urls, lc)
+
+	if len(urls) == 0 {
+		return crawlViaFirecrawl(ctx, company.URL, cfg, fcClient, st)
+	}
+
 	// Fetch each URL via Jina first, Firecrawl fallback.
 	pages := fetchPagesWithJina(ctx, urls, jinaClient, fcClient)
 
@@ -106,45 +115,66 @@ func CrawlPhase(ctx context.Context, company model.Company, cfg config.CrawlConf
 	}, nil
 }
 
-// fetchPagesWithJina fetches each URL via Jina, falling back to Firecrawl
-// scrape for individual URLs when Jina fails.
+// filterExcludedURLs removes URLs matching the crawler's exclude patterns.
+func filterExcludedURLs(urls []string, lc *LocalCrawler) []string {
+	filtered := make([]string, 0, len(urls))
+	for _, u := range urls {
+		if lc.IsExcludedURL(u) {
+			zap.L().Debug("crawl: excluding url", zap.String("url", u))
+			continue
+		}
+		filtered = append(filtered, u)
+	}
+	return filtered
+}
+
+// fetchPagesWithJina fetches URLs via Jina in parallel (up to 10 concurrent),
+// falling back to Firecrawl scrape for individual URLs when Jina fails.
 func fetchPagesWithJina(ctx context.Context, urls []string, jinaClient jina.Client, fcClient firecrawl.Client) []model.CrawledPage {
-	var pages []model.CrawledPage
+	var (
+		mu    sync.Mutex
+		pages []model.CrawledPage
+	)
+
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(10)
 
 	for _, u := range urls {
-		select {
-		case <-ctx.Done():
-			return pages
-		default:
-		}
+		g.Go(func() error {
+			page, err := fetchViaJina(gCtx, u, jinaClient)
+			if err == nil && page != nil {
+				mu.Lock()
+				pages = append(pages, *page)
+				mu.Unlock()
+				return nil
+			}
 
-		page, err := fetchViaJina(ctx, u, jinaClient)
-		if err == nil && page != nil {
-			pages = append(pages, *page)
-			continue
-		}
+			if err != nil {
+				zap.L().Debug("crawl: jina fetch failed, trying firecrawl",
+					zap.String("url", u),
+					zap.Error(err),
+				)
+			}
 
-		if err != nil {
-			zap.L().Debug("crawl: jina fetch failed, trying firecrawl",
-				zap.String("url", u),
-				zap.Error(err),
-			)
-		}
-
-		// Firecrawl fallback for this single URL.
-		page, err = fetchViaFirecrawlScrape(ctx, u, fcClient)
-		if err != nil {
-			zap.L().Debug("crawl: firecrawl scrape also failed",
-				zap.String("url", u),
-				zap.Error(err),
-			)
-			continue
-		}
-		if page != nil {
-			pages = append(pages, *page)
-		}
+			// Firecrawl fallback for this single URL.
+			page, err = fetchViaFirecrawlScrape(gCtx, u, fcClient)
+			if err != nil {
+				zap.L().Debug("crawl: firecrawl scrape also failed",
+					zap.String("url", u),
+					zap.Error(err),
+				)
+				return nil
+			}
+			if page != nil {
+				mu.Lock()
+				pages = append(pages, *page)
+				mu.Unlock()
+			}
+			return nil
+		})
 	}
 
+	_ = g.Wait()
 	return pages
 }
 

@@ -26,6 +26,28 @@ type Config struct {
 	Batch      BatchConfig      `yaml:"batch" mapstructure:"batch"`
 	Server     ServerConfig     `yaml:"server" mapstructure:"server"`
 	Log        LogConfig        `yaml:"log" mapstructure:"log"`
+	Fedsync    FedsyncConfig    `yaml:"fedsync" mapstructure:"fedsync"`
+}
+
+// FedsyncConfig configures the federal data sync pipeline.
+type FedsyncConfig struct {
+	DatabaseURL    string    `yaml:"database_url" mapstructure:"database_url"`
+	TempDir        string    `yaml:"temp_dir" mapstructure:"temp_dir"`
+	SAMKey         string    `yaml:"sam_api_key" mapstructure:"sam_api_key"`
+	FREDKey        string    `yaml:"fred_api_key" mapstructure:"fred_api_key"`
+	BLSKey         string    `yaml:"bls_api_key" mapstructure:"bls_api_key"`
+	CensusKey      string    `yaml:"census_api_key" mapstructure:"census_api_key"`
+	EDGARUserAgent string    `yaml:"edgar_user_agent" mapstructure:"edgar_user_agent"`
+	N8NWebhook     string    `yaml:"n8n_webhook_url" mapstructure:"n8n_webhook_url"`
+	MistralKey     string    `yaml:"mistral_api_key" mapstructure:"mistral_api_key"`
+	MistralModel   string    `yaml:"mistral_ocr_model" mapstructure:"mistral_ocr_model"`
+	OCR            OCRConfig `yaml:"ocr" mapstructure:"ocr"`
+}
+
+// OCRConfig configures PDF text extraction.
+type OCRConfig struct {
+	Provider      string `yaml:"provider" mapstructure:"provider"`
+	PdfToTextPath string `yaml:"pdftotext_path" mapstructure:"pdftotext_path"`
 }
 
 // StoreConfig configures the database backend.
@@ -50,10 +72,9 @@ type JinaConfig struct {
 
 // FirecrawlConfig holds Firecrawl API settings (fallback only).
 type FirecrawlConfig struct {
-	Key          string   `yaml:"key" mapstructure:"key"`
-	BaseURL      string   `yaml:"base_url" mapstructure:"base_url"`
-	MaxPages     int      `yaml:"max_pages" mapstructure:"max_pages"`
-	ExcludePaths []string `yaml:"exclude_paths" mapstructure:"exclude_paths"`
+	Key      string `yaml:"key" mapstructure:"key"`
+	BaseURL  string `yaml:"base_url" mapstructure:"base_url"`
+	MaxPages int    `yaml:"max_pages" mapstructure:"max_pages"`
 }
 
 // PerplexityConfig holds Perplexity API settings.
@@ -127,10 +148,11 @@ type FirecrawlPricing struct {
 
 // CrawlConfig configures the crawl phase.
 type CrawlConfig struct {
-	MaxPages      int `yaml:"max_pages" mapstructure:"max_pages"`
-	MaxDepth      int `yaml:"max_depth" mapstructure:"max_depth"`
-	TimeoutSecs   int `yaml:"timeout_secs" mapstructure:"timeout_secs"`
-	CacheTTLHours int `yaml:"cache_ttl_hours" mapstructure:"cache_ttl_hours"`
+	MaxPages      int      `yaml:"max_pages" mapstructure:"max_pages"`
+	MaxDepth      int      `yaml:"max_depth" mapstructure:"max_depth"`
+	TimeoutSecs   int      `yaml:"timeout_secs" mapstructure:"timeout_secs"`
+	CacheTTLHours int      `yaml:"cache_ttl_hours" mapstructure:"cache_ttl_hours"`
+	ExcludePaths  []string `yaml:"exclude_paths" mapstructure:"exclude_paths"`
 }
 
 // PipelineConfig configures extraction behavior.
@@ -180,13 +202,13 @@ func Load() (*Config, error) {
 	v.SetDefault("crawl.max_depth", 2)
 	v.SetDefault("crawl.timeout_secs", 60)
 	v.SetDefault("crawl.cache_ttl_hours", 24)
+	v.SetDefault("crawl.exclude_paths", []string{"/blog/*", "/news/*", "/press/*", "/careers/*"})
 	v.SetDefault("pipeline.confidence_escalation_threshold", 0.4)
 	v.SetDefault("pipeline.tier3_gate", "ambiguity_only")
 	v.SetDefault("pipeline.quality_score_threshold", 0.6)
 	v.SetDefault("jina.base_url", "https://r.jina.ai")
 	v.SetDefault("firecrawl.base_url", "https://api.firecrawl.dev/v2")
 	v.SetDefault("firecrawl.max_pages", 50)
-	v.SetDefault("firecrawl.exclude_paths", []string{"/blog/*", "/news/*", "/press/*", "/careers/*"})
 	v.SetDefault("perplexity.base_url", "https://api.perplexity.ai")
 	v.SetDefault("perplexity.model", "sonar-pro")
 	v.SetDefault("anthropic.haiku_model", "claude-haiku-4-5-20251001")
@@ -196,6 +218,11 @@ func Load() (*Config, error) {
 	v.SetDefault("salesforce.login_url", "https://login.salesforce.com")
 	v.SetDefault("ppp.similarity_threshold", 0.4)
 	v.SetDefault("ppp.max_candidates", 10)
+	v.SetDefault("fedsync.temp_dir", "/tmp/fedsync")
+	v.SetDefault("fedsync.edgar_user_agent", "Sells Advisors blake@sellsadvisors.com")
+	v.SetDefault("fedsync.mistral_ocr_model", "pixtral-large-latest")
+	v.SetDefault("fedsync.ocr.provider", "local")
+	v.SetDefault("fedsync.ocr.pdftotext_path", "pdftotext")
 	v.SetDefault("pricing.jina.per_mtok", 0.02)
 	v.SetDefault("pricing.perplexity.per_query", 0.005)
 	v.SetDefault("pricing.firecrawl.plan_monthly", 19.00)

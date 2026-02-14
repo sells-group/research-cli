@@ -54,6 +54,7 @@ func TestBaseURL(t *testing.T) {
 
 func TestIsExcluded(t *testing.T) {
 	base, _ := url.Parse("https://acme.com")
+	lc := NewLocalCrawler()
 
 	tests := []struct {
 		name     string
@@ -72,10 +73,31 @@ func TestIsExcluded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isExcluded(tt.link, base)
+			result := lc.isExcluded(tt.link, base)
 			assert.Equal(t, tt.excluded, result)
 		})
 	}
+}
+
+func TestNewLocalCrawlerWithExcludes(t *testing.T) {
+	lc := NewLocalCrawlerWithExcludes([]string{"/blog/*", "/events/*"})
+
+	assert.True(t, lc.IsExcludedURL("https://acme.com/blog/post1"))
+	assert.True(t, lc.IsExcludedURL("https://acme.com/events/2024"))
+	assert.False(t, lc.IsExcludedURL("https://acme.com/about"))
+	// Default prefixes should NOT be present when custom ones are provided.
+	assert.False(t, lc.IsExcludedURL("https://acme.com/careers/job1"))
+}
+
+func TestExpandExcludePatterns(t *testing.T) {
+	patterns := []string{"/blog/*", "/news/*", ""}
+	prefixes := expandExcludePatterns(patterns)
+
+	assert.Contains(t, prefixes, "/blog/")
+	assert.Contains(t, prefixes, "/blog")
+	assert.Contains(t, prefixes, "/news/")
+	assert.Contains(t, prefixes, "/news")
+	assert.Len(t, prefixes, 4) // No empty string entries.
 }
 
 func TestParseLinks(t *testing.T) {
@@ -281,7 +303,7 @@ func TestDiscoverLinks_BFS(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	lc := &LocalCrawler{http: srv.Client()}
+	lc := &LocalCrawler{http: srv.Client(), excludePaths: defaultExcludePrefixes}
 	ctx := context.Background()
 
 	urls, err := lc.DiscoverLinks(ctx, srv.URL, 10, 2)
