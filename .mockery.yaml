@@ -1,12 +1,9 @@
 with-expecter: true
-dir: "{{.InterfaceDir}}"
-outpkg: "{{.PackageName}}"
-filename: "mock_{{.InterfaceName | snakecase}}_test.go"
-inpackage: true
+dir: "{{.InterfaceDir}}/mocks"
+outpkg: "mocks"
+filename: "mock_{{.InterfaceName}}.go"
+mockname: "Mock{{.InterfaceName}}"
 packages:
-  github.com/sells-group/research-cli/internal/store:
-    interfaces:
-      Store:
   github.com/sells-group/research-cli/pkg/anthropic:
     interfaces:
       Client:
@@ -17,15 +14,33 @@ packages:
   github.com/sells-group/research-cli/pkg/perplexity:
     interfaces:
       Client:
+  github.com/sells-group/research-cli/pkg/jina:
+    interfaces:
+      Client:
   github.com/sells-group/research-cli/pkg/salesforce:
     interfaces:
       Client:
   github.com/sells-group/research-cli/pkg/notion:
     interfaces:
       Client:
-  github.com/sells-group/research-cli/pkg/jina:
-    interfaces:
-      Client:
   github.com/sells-group/research-cli/pkg/ppp:
     interfaces:
       Querier:
+  github.com/sells-group/research-cli/internal/store:
+    interfaces:
+      Store:
+  github.com/sells-group/research-cli/internal/fetcher:
+    interfaces:
+      Fetcher:
+  github.com/sells-group/research-cli/internal/scrape:
+    interfaces:
+      Scraper:
+  github.com/sells-group/research-cli/internal/ocr:
+    interfaces:
+      Extractor:
+  github.com/sells-group/research-cli/internal/fedsync/dataset:
+    interfaces:
+      Dataset:
+  github.com/sells-group/research-cli/internal/db:
+    interfaces:
+      Pool:
