@@ -8,12 +8,17 @@ data/
 config.yaml
 config..yaml
 
+# Secrets / keys
+*.pem
+*.key
+
 # IDE
 .idea/
 .vscode/
 
 # OS
 .DS_Store
+Thumbs.db
 
 # Go
 vendor/
@@ -21,6 +26,22 @@ vendor/
 # Coverage
 coverage.out
 coverage.html
+
+# Local databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Run logs and results (local dev artifacts)
+*.log
+results*.json
+
+# CSV inputs (may contain PII)
+*.csv
+
+# Fedsync temp downloads
+/tmp/fedsync/
 
 # Baseline test results (contain API responses)
 testdata/baseline/
