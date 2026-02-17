@@ -30,7 +30,7 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Equal(t, 60, cfg.Crawl.TimeoutSecs)
 	assert.Equal(t, 24, cfg.Crawl.CacheTTLHours)
 	assert.InDelta(t, 0.4, cfg.Pipeline.ConfidenceEscalationThreshold, 0.001)
-	assert.Equal(t, "ambiguity_only", cfg.Pipeline.Tier3Gate)
+	assert.Equal(t, "off", cfg.Pipeline.Tier3Gate)
 	assert.InDelta(t, 0.6, cfg.Pipeline.QualityScoreThreshold, 0.001)
 	assert.Equal(t, "https://r.jina.ai", cfg.Jina.BaseURL)
 	assert.Equal(t, "https://api.firecrawl.dev/v2", cfg.Firecrawl.BaseURL)

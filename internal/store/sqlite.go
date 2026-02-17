@@ -24,6 +24,10 @@ func NewSQLite(dsn string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, eris.Wrap(err, "sqlite: open")
 	}
+	// Serialize all access through a single connection to prevent SQLITE_BUSY
+	// errors during concurrent Phase 1 fan-out (1A/1B/1C/1D errgroup).
+	db.SetMaxOpenConns(1)
+
 	for _, pragma := range []string{
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA busy_timeout=5000",

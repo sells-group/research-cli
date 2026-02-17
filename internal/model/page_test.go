@@ -13,7 +13,7 @@ func TestAllPageTypes(t *testing.T) {
 
 	t.Run("has expected count", func(t *testing.T) {
 		t.Parallel()
-		assert.Len(t, types, 17)
+		assert.Len(t, types, 21)
 	})
 
 	t.Run("contains all known types", func(t *testing.T) {
@@ -25,6 +25,7 @@ func TestAllPageTypes(t *testing.T) {
 			PageTypeNews, PageTypeFAQ, PageTypeTestimonials,
 			PageTypeCaseStudies, PageTypePartners, PageTypeLegal,
 			PageTypeInvestors, PageTypeOther,
+			PageTypeBBB, PageTypeGoogleMaps, PageTypeSoS, PageTypeLinkedIn,
 		}
 		assert.Equal(t, expected, types)
 	})

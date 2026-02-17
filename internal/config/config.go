@@ -22,6 +22,7 @@ type Config struct {
 	PPP        PPPConfig        `yaml:"ppp" mapstructure:"ppp"`
 	Pricing    PricingConfig    `yaml:"pricing" mapstructure:"pricing"`
 	Crawl      CrawlConfig      `yaml:"crawl" mapstructure:"crawl"`
+	Scrape     ScrapeConfig     `yaml:"scrape" mapstructure:"scrape"`
 	Pipeline   PipelineConfig   `yaml:"pipeline" mapstructure:"pipeline"`
 	Batch      BatchConfig      `yaml:"batch" mapstructure:"batch"`
 	Server     ServerConfig     `yaml:"server" mapstructure:"server"`
@@ -66,8 +67,9 @@ type NotionConfig struct {
 
 // JinaConfig holds Jina AI Reader settings.
 type JinaConfig struct {
-	Key     string `yaml:"key" mapstructure:"key"`
-	BaseURL string `yaml:"base_url" mapstructure:"base_url"`
+	Key           string `yaml:"key" mapstructure:"key"`
+	BaseURL       string `yaml:"base_url" mapstructure:"base_url"`
+	SearchBaseURL string `yaml:"search_base_url" mapstructure:"search_base_url"`
 }
 
 // FirecrawlConfig holds Firecrawl API settings (fallback only).
@@ -86,11 +88,13 @@ type PerplexityConfig struct {
 
 // AnthropicConfig holds Anthropic API settings.
 type AnthropicConfig struct {
-	Key          string `yaml:"key" mapstructure:"key"`
-	HaikuModel   string `yaml:"haiku_model" mapstructure:"haiku_model"`
-	SonnetModel  string `yaml:"sonnet_model" mapstructure:"sonnet_model"`
-	OpusModel    string `yaml:"opus_model" mapstructure:"opus_model"`
-	MaxBatchSize int    `yaml:"max_batch_size" mapstructure:"max_batch_size"`
+	Key                 string `yaml:"key" mapstructure:"key"`
+	HaikuModel          string `yaml:"haiku_model" mapstructure:"haiku_model"`
+	SonnetModel         string `yaml:"sonnet_model" mapstructure:"sonnet_model"`
+	OpusModel           string `yaml:"opus_model" mapstructure:"opus_model"`
+	MaxBatchSize        int    `yaml:"max_batch_size" mapstructure:"max_batch_size"`
+	NoBatch             bool   `yaml:"no_batch" mapstructure:"no_batch"`
+	SmallBatchThreshold int    `yaml:"small_batch_threshold" mapstructure:"small_batch_threshold"`
 }
 
 // SalesforceConfig holds Salesforce JWT auth settings.
@@ -155,6 +159,12 @@ type CrawlConfig struct {
 	ExcludePaths  []string `yaml:"exclude_paths" mapstructure:"exclude_paths"`
 }
 
+// ScrapeConfig configures the Phase 1B external scrape behavior.
+type ScrapeConfig struct {
+	SearchTimeoutSecs int `yaml:"search_timeout_secs" mapstructure:"search_timeout_secs"`
+	SearchRetries     int `yaml:"search_retries" mapstructure:"search_retries"`
+}
+
 // PipelineConfig configures extraction behavior.
 type PipelineConfig struct {
 	ConfidenceEscalationThreshold float64 `yaml:"confidence_escalation_threshold" mapstructure:"confidence_escalation_threshold"`
@@ -203,10 +213,13 @@ func Load() (*Config, error) {
 	v.SetDefault("crawl.timeout_secs", 60)
 	v.SetDefault("crawl.cache_ttl_hours", 24)
 	v.SetDefault("crawl.exclude_paths", []string{"/blog/*", "/news/*", "/press/*", "/careers/*"})
+	v.SetDefault("scrape.search_timeout_secs", 15)
+	v.SetDefault("scrape.search_retries", 1)
 	v.SetDefault("pipeline.confidence_escalation_threshold", 0.4)
-	v.SetDefault("pipeline.tier3_gate", "ambiguity_only")
+	v.SetDefault("pipeline.tier3_gate", "off")
 	v.SetDefault("pipeline.quality_score_threshold", 0.6)
 	v.SetDefault("jina.base_url", "https://r.jina.ai")
+	v.SetDefault("jina.search_base_url", "https://s.jina.ai")
 	v.SetDefault("firecrawl.base_url", "https://api.firecrawl.dev/v2")
 	v.SetDefault("firecrawl.max_pages", 50)
 	v.SetDefault("perplexity.base_url", "https://api.perplexity.ai")
@@ -215,6 +228,7 @@ func Load() (*Config, error) {
 	v.SetDefault("anthropic.sonnet_model", "claude-sonnet-4-5-20250929")
 	v.SetDefault("anthropic.opus_model", "claude-opus-4-6")
 	v.SetDefault("anthropic.max_batch_size", 100)
+	v.SetDefault("anthropic.small_batch_threshold", 3)
 	v.SetDefault("salesforce.login_url", "https://login.salesforce.com")
 	v.SetDefault("ppp.similarity_threshold", 0.4)
 	v.SetDefault("ppp.max_candidates", 10)

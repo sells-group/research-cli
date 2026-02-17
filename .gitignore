@@ -6,6 +6,7 @@ data/
 
 # Config (contains secrets)
 config.yaml
+config..yaml
 
 # IDE
 .idea/
@@ -20,5 +21,8 @@ vendor/
 # Coverage
 coverage.out
 coverage.html
+
+# Baseline test results (contain API responses)
+testdata/baseline/
 
 # Mockery output tracked separately

@@ -27,6 +27,10 @@ type Company struct {
 	SalesforceID string `json:"salesforce_id"`
 	NotionPageID string `json:"notion_page_id"`
 	Location     string `json:"location"`
+	City         string `json:"city,omitempty"`
+	State        string `json:"state,omitempty"`
+	ZipCode      string `json:"zip_code,omitempty"`
+	Street       string `json:"street,omitempty"`
 }
 
 // Run represents a single enrichment run for a company.

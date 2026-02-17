@@ -23,6 +23,12 @@ const (
 	PageTypeLegal        PageType = "legal"
 	PageTypeInvestors    PageType = "investors"
 	PageTypeOther        PageType = "other"
+
+	// External source page types (auto-classified by title prefix).
+	PageTypeBBB        PageType = "bbb_profile"
+	PageTypeGoogleMaps PageType = "google_maps"
+	PageTypeSoS        PageType = "government_registry"
+	PageTypeLinkedIn   PageType = "linkedin"
 )
 
 // AllPageTypes returns all defined page types.
@@ -45,7 +51,31 @@ func AllPageTypes() []PageType {
 		PageTypeLegal,
 		PageTypeInvestors,
 		PageTypeOther,
+		PageTypeBBB,
+		PageTypeGoogleMaps,
+		PageTypeSoS,
+		PageTypeLinkedIn,
 	}
+}
+
+// ExternalPageTypes returns the page types for external sources.
+// These are always included as supplementary context during routing.
+func ExternalPageTypes() []PageType {
+	return []PageType{
+		PageTypeBBB,
+		PageTypeGoogleMaps,
+		PageTypeSoS,
+		PageTypeLinkedIn,
+	}
+}
+
+// IsExternalPageType returns true if the page type is an external source.
+func IsExternalPageType(pt PageType) bool {
+	switch pt {
+	case PageTypeBBB, PageTypeGoogleMaps, PageTypeSoS, PageTypeLinkedIn:
+		return true
+	}
+	return false
 }
 
 // CrawledPage represents a page fetched during crawling.

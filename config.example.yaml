@@ -15,6 +15,7 @@ notion:
 jina:
   key: ""                     # RESEARCH_JINA_KEY
   base_url: https://r.jina.ai
+  search_base_url: https://s.jina.ai
 
 firecrawl:
   key: ""                     # RESEARCH_FIRECRAWL_KEY (fallback only)
@@ -61,6 +62,12 @@ pricing:
       batch_discount: 0.50
       cache_write_mul: 1.25
       cache_read_mul: 0.10
+    claude-sonnet-4-6:
+      input: 3.00
+      output: 15.00
+      batch_discount: 0.50
+      cache_write_mul: 1.25
+      cache_read_mul: 0.10
     claude-opus-4-6:
       input: 15.00
       output: 75.00
@@ -75,6 +82,10 @@ pricing:
     plan_monthly: 19.00       # Monthly plan cost
     credits_included: 3000    # Credits included in plan
 
+scrape:
+  search_timeout_secs: 15
+  search_retries: 1
+
 crawl:
   max_pages: 50
   max_depth: 2
@@ -88,7 +99,7 @@ crawl:
 
 pipeline:
   confidence_escalation_threshold: 0.4
-  tier3_gate: ambiguity_only  # "always" or "ambiguity_only"
+  tier3_gate: "off"           # "off" (default), "ambiguity_only", or "always" (use --with-t3 flag)
   quality_score_threshold: 0.6
 
 batch:
