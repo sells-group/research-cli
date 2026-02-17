@@ -8,6 +8,7 @@ import (
 
 	"github.com/k-capehart/go-salesforce/v3"
 	"github.com/rotisserie/eris"
+	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/store"
 	sfpkg "github.com/sells-group/research-cli/pkg/salesforce"
@@ -28,7 +29,8 @@ func initStore(_ context.Context) (store.Store, error) {
 
 func initSalesforce() (sfpkg.Client, error) {
 	if cfg.Salesforce.ClientID == "" {
-		return nil, eris.New("salesforce client ID is required (RESEARCH_SF_CLIENT_ID)")
+		zap.L().Warn("salesforce not configured, SF writes will be skipped")
+		return nil, nil
 	}
 
 	pemData, err := os.ReadFile(cfg.Salesforce.KeyPath)

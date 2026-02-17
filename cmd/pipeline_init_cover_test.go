@@ -121,8 +121,8 @@ func TestInitPipeline_FailsOnMigrateError(t *testing.T) {
 }
 
 func TestInitPipeline_FailsOnSalesforce_ClosesStore(t *testing.T) {
-	// Store succeeds (SQLite), but Salesforce init fails (no client ID).
-	// This verifies the store is closed on SF failure.
+	// Store succeeds (SQLite), SF returns nil gracefully, then fixture
+	// loading fails because testdata/ doesn't exist in the temp dir.
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(tmpDir))
@@ -134,14 +134,14 @@ func TestInitPipeline_FailsOnSalesforce_ClosesStore(t *testing.T) {
 			DatabaseURL: filepath.Join(tmpDir, "test_sf_close.db"),
 		},
 		Salesforce: config.SalesforceConfig{
-			ClientID: "", // triggers error
+			ClientID: "", // returns nil gracefully
 		},
 	}
 
 	env, err := initPipeline(context.Background())
 	assert.Nil(t, env)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "salesforce client ID is required")
+	assert.Contains(t, err.Error(), "load question fixtures")
 }
 
 func TestInitPipeline_SFKeyNotFound_ClosesStore(t *testing.T) {

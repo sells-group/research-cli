@@ -1,0 +1,152 @@
+[
+  {
+    "id": "q_legal_name",
+    "text": "What is the company's full legal name?",
+    "tier": 1,
+    "field_key": "legal_name",
+    "page_types": ["homepage", "about", "contact"],
+    "instructions": "Extract the exact legal entity name including any suffix (Inc., LLC, etc.).",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_year_founded",
+    "text": "What year was the company founded?",
+    "tier": 2,
+    "field_key": "year_founded",
+    "page_types": ["about", "homepage"],
+    "instructions": "Extract the founding year as a 4-digit number. If a full date is given (e.g. 2/22/2011), extract just the year (2011). Check BBB, SoS, and LinkedIn data for founding dates.",
+    "output_format": "integer",
+    "status": "Active"
+  },
+  {
+    "id": "q_phone",
+    "text": "What is the company's primary phone number?",
+    "tier": 1,
+    "field_key": "phone",
+    "page_types": ["contact", "homepage"],
+    "instructions": "Extract the main business phone number.",
+    "output_format": "phone",
+    "status": "Active"
+  },
+  {
+    "id": "q_email",
+    "text": "What is the company's primary email address?",
+    "tier": 1,
+    "field_key": "email",
+    "page_types": ["contact", "homepage"],
+    "instructions": "Extract the main business email address.",
+    "output_format": "email",
+    "status": "Active"
+  },
+  {
+    "id": "q_address",
+    "text": "What is the company's primary business address?",
+    "tier": 1,
+    "field_key": "address",
+    "page_types": ["contact", "about", "homepage"],
+    "instructions": "Extract the full street address including city, state, and zip.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_services",
+    "text": "What services does the company provide?",
+    "tier": 1,
+    "field_key": "services_list",
+    "page_types": ["services", "homepage", "about"],
+    "instructions": "List the main services offered as a comma-separated list.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_service_area",
+    "text": "What geographic area does the company serve?",
+    "tier": 2,
+    "field_key": "service_area",
+    "page_types": ["about", "services", "homepage"],
+    "instructions": "Identify the geographic service area (cities, states, or regions). Check BBB 'Serving Area' data for authoritative coverage information.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_licenses",
+    "text": "What licenses or certifications does the company hold?",
+    "tier": 1,
+    "field_key": "licenses",
+    "page_types": ["about", "homepage", "services"],
+    "instructions": "List any professional licenses, certifications, or accreditations.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_owner_name",
+    "text": "Who is the owner or CEO of the company?",
+    "tier": 1,
+    "field_key": "owner_name",
+    "page_types": ["about", "team", "homepage"],
+    "instructions": "Extract the name and title of the primary owner, CEO, or president.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_employee_count",
+    "text": "How many employees does the company have?",
+    "tier": 1,
+    "field_key": "employee_count",
+    "page_types": ["about", "homepage", "team"],
+    "instructions": "Extract the employee count or headcount. Return as an integer.",
+    "output_format": "integer",
+    "status": "Active"
+  },
+  {
+    "id": "q_revenue_range",
+    "text": "What is the company's estimated annual revenue range?",
+    "tier": 2,
+    "field_key": "revenue_range",
+    "page_types": ["about", "homepage", "services", "case_studies"],
+    "instructions": "Synthesize information from multiple pages to estimate annual revenue. Look for project volumes, team size, and market indicators.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_customer_types",
+    "text": "What types of customers does the company primarily serve?",
+    "tier": 2,
+    "field_key": "customer_types",
+    "page_types": ["about", "services", "homepage", "testimonials", "case_studies"],
+    "instructions": "Identify the primary customer segments (residential, commercial, industrial, government, etc.).",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_differentiators",
+    "text": "What are the company's key competitive differentiators?",
+    "tier": 2,
+    "field_key": "differentiators",
+    "page_types": ["about", "homepage", "services", "testimonials"],
+    "instructions": "Identify what sets this company apart from competitors (warranties, certifications, specialties, history, etc.).",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_reputation",
+    "text": "What is the company's reputation based on reviews and testimonials?",
+    "tier": 2,
+    "field_key": "reputation_summary",
+    "page_types": ["testimonials", "homepage", "about"],
+    "instructions": "Summarize the company's reputation including review ratings, notable testimonials, and any awards or recognition.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_acquisition_assessment",
+    "text": "Provide a comprehensive assessment of this company's suitability as an acquisition target.",
+    "tier": 3,
+    "field_key": "acquisition_assessment",
+    "page_types": ["about", "homepage", "services", "team", "testimonials", "case_studies"],
+    "instructions": "Evaluate the company as a potential acquisition target considering: market position, service quality, team depth, geographic presence, growth indicators, and potential risks. Provide a structured assessment.",
+    "output_format": "string",
+    "status": "Active"
+  }
+]

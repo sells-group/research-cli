@@ -31,7 +31,8 @@ func TestBatchCmd_RunE_FailsOnInitPipeline_BadDriver(t *testing.T) {
 }
 
 func TestBatchCmd_RunE_FailsOnInitPipeline_BadSF(t *testing.T) {
-	// Store succeeds (SQLite), but Salesforce init fails.
+	// Store succeeds (SQLite), SF returns nil gracefully, then fixture
+	// loading fails because testdata/ doesn't exist in the temp dir.
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(tmpDir))
@@ -52,5 +53,5 @@ func TestBatchCmd_RunE_FailsOnInitPipeline_BadSF(t *testing.T) {
 
 	err := batchCmd.RunE(batchCmd, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "salesforce client ID is required")
+	assert.Contains(t, err.Error(), "load question fixtures")
 }

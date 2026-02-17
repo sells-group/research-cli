@@ -56,7 +56,11 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 	notionClient := notion.NewClient(cfg.Notion.Token)
 	anthropicClient := anthropicpkg.NewClient(cfg.Anthropic.Key)
 	firecrawlClient := firecrawl.NewClient(cfg.Firecrawl.Key, firecrawl.WithBaseURL(cfg.Firecrawl.BaseURL))
-	jinaClient := jina.NewClient(cfg.Jina.Key, jina.WithBaseURL(cfg.Jina.BaseURL))
+	jinaOpts := []jina.Option{jina.WithBaseURL(cfg.Jina.BaseURL)}
+	if cfg.Jina.SearchBaseURL != "" {
+		jinaOpts = append(jinaOpts, jina.WithSearchBaseURL(cfg.Jina.SearchBaseURL))
+	}
+	jinaClient := jina.NewClient(cfg.Jina.Key, jinaOpts...)
 	perplexityClient := perplexity.NewClient(cfg.Perplexity.Key, perplexity.WithBaseURL(cfg.Perplexity.BaseURL), perplexity.WithModel(cfg.Perplexity.Model))
 
 	sfClient, err := initSalesforce()
@@ -78,21 +82,44 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 		}
 	}
 
-	questions, err := registry.LoadQuestionRegistry(ctx, notionClient, cfg.Notion.QuestionDB)
-	if err != nil {
-		if pppClient != nil {
-			pppClient.Close()
+	var questions []model.Question
+	var fields *model.FieldRegistry
+
+	if cfg.Notion.Token == "" || cfg.Notion.QuestionDB == "" || cfg.Notion.FieldDB == "" {
+		zap.L().Warn("notion not configured, loading registries from fixture files")
+		questions, err = registry.LoadQuestionsFromFile("testdata/questions.json")
+		if err != nil {
+			if pppClient != nil {
+				pppClient.Close()
+			}
+			st.Close()
+			return nil, eris.Wrap(err, "load question fixtures")
 		}
-		st.Close()
-		return nil, eris.Wrap(err, "load question registry")
-	}
-	fields, err := registry.LoadFieldRegistry(ctx, notionClient, cfg.Notion.FieldDB)
-	if err != nil {
-		if pppClient != nil {
-			pppClient.Close()
+		fields, err = registry.LoadFieldsFromFile("testdata/fields.json")
+		if err != nil {
+			if pppClient != nil {
+				pppClient.Close()
+			}
+			st.Close()
+			return nil, eris.Wrap(err, "load field fixtures")
 		}
-		st.Close()
-		return nil, eris.Wrap(err, "load field registry")
+	} else {
+		questions, err = registry.LoadQuestionRegistry(ctx, notionClient, cfg.Notion.QuestionDB)
+		if err != nil {
+			if pppClient != nil {
+				pppClient.Close()
+			}
+			st.Close()
+			return nil, eris.Wrap(err, "load question registry")
+		}
+		fields, err = registry.LoadFieldRegistry(ctx, notionClient, cfg.Notion.FieldDB)
+		if err != nil {
+			if pppClient != nil {
+				pppClient.Close()
+			}
+			st.Close()
+			return nil, eris.Wrap(err, "load field registry")
+		}
 	}
 
 	zap.L().Info("registries loaded",
@@ -107,7 +134,7 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 		scrape.NewFirecrawlAdapter(firecrawlClient),
 	)
 
-	p := pipeline.New(cfg, st, chain, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, pppClient, questions, fields)
+	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, pppClient, questions, fields)
 
 	return &pipelineEnv{
 		Store:     st,

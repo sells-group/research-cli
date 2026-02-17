@@ -61,7 +61,8 @@ func TestInitPipeline_FailsOnBadDriver(t *testing.T) {
 }
 
 func TestInitPipeline_FailsOnBadSalesforce(t *testing.T) {
-	// SQLite store will succeed, but Salesforce will fail (no client ID).
+	// SQLite store will succeed, SF returns nil gracefully, then fixture
+	// loading fails because testdata/ doesn't exist in the temp dir.
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(tmpDir))
@@ -73,12 +74,12 @@ func TestInitPipeline_FailsOnBadSalesforce(t *testing.T) {
 			DatabaseURL: filepath.Join(tmpDir, "test_pipe.db"),
 		},
 		Salesforce: config.SalesforceConfig{
-			ClientID: "", // triggers error
+			ClientID: "", // returns nil gracefully
 		},
 	}
 
 	env, err := initPipeline(context.Background())
 	assert.Nil(t, env)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "salesforce client ID is required")
+	assert.Contains(t, err.Error(), "load question fixtures")
 }

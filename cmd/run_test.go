@@ -66,7 +66,7 @@ func TestRunCmd_RunE_FailsOnInitPipeline_BadSF(t *testing.T) {
 
 	err := runCmd.RunE(runCmd, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "salesforce client ID is required")
+	assert.Contains(t, err.Error(), "load question fixtures")
 }
 
 func TestRunCmd_Flags_Exist(t *testing.T) {

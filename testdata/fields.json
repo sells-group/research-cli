@@ -1,0 +1,149 @@
+[
+  {
+    "id": "f_legal_name",
+    "key": "legal_name",
+    "sf_field": "Legal_Name__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": true,
+    "max_length": 255,
+    "status": "Active"
+  },
+  {
+    "id": "f_year_founded",
+    "key": "year_founded",
+    "sf_field": "Year_Founded__c",
+    "sf_object": "Account",
+    "data_type": "integer",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_phone",
+    "key": "phone",
+    "sf_field": "Phone",
+    "sf_object": "Account",
+    "data_type": "phone",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_email",
+    "key": "email",
+    "sf_field": "Primary_Email__c",
+    "sf_object": "Account",
+    "data_type": "email",
+    "required": false,
+    "max_length": 255,
+    "status": "Active"
+  },
+  {
+    "id": "f_address",
+    "key": "address",
+    "sf_field": "BillingStreet",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 500,
+    "status": "Active"
+  },
+  {
+    "id": "f_services_list",
+    "key": "services_list",
+    "sf_field": "Services__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 1000,
+    "status": "Active"
+  },
+  {
+    "id": "f_service_area",
+    "key": "service_area",
+    "sf_field": "Service_Area__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 500,
+    "status": "Active"
+  },
+  {
+    "id": "f_licenses",
+    "key": "licenses",
+    "sf_field": "Licenses_Certifications__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 1000,
+    "status": "Active"
+  },
+  {
+    "id": "f_owner_name",
+    "key": "owner_name",
+    "sf_field": "Owner_CEO__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 255,
+    "status": "Active"
+  },
+  {
+    "id": "f_employee_count",
+    "key": "employee_count",
+    "sf_field": "NumberOfEmployees",
+    "sf_object": "Account",
+    "data_type": "integer",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_revenue_range",
+    "key": "revenue_range",
+    "sf_field": "Revenue_Range__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 100,
+    "status": "Active"
+  },
+  {
+    "id": "f_customer_types",
+    "key": "customer_types",
+    "sf_field": "Customer_Types__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 500,
+    "status": "Active"
+  },
+  {
+    "id": "f_differentiators",
+    "key": "differentiators",
+    "sf_field": "Differentiators__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 2000,
+    "status": "Active"
+  },
+  {
+    "id": "f_reputation_summary",
+    "key": "reputation_summary",
+    "sf_field": "Reputation_Summary__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 2000,
+    "status": "Active"
+  },
+  {
+    "id": "f_acquisition_assessment",
+    "key": "acquisition_assessment",
+    "sf_field": "Acquisition_Assessment__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 5000,
+    "status": "Active"
+  }
+]
