@@ -109,7 +109,7 @@ func TestClassifyDirect_ErrorFallsToOther(t *testing.T) {
 	}
 
 	aiClient := anthropicmocks.NewMockClient(t)
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(nil, errors.New("api error")).Once()
 
 	usage := &model.TokenUsage{}

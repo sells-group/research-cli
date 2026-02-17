@@ -43,6 +43,8 @@ func RouteQuestions(questions []model.Question, index model.PageIndex) *model.Ro
 
 // findPagesForQuestion returns classified pages matching the question's
 // preferred page types. If no preferred types are set, all pages are eligible.
+// External source pages (BBB, Google Maps, SoS, LinkedIn) are always included
+// as supplementary context regardless of the question's PageTypes filter.
 func findPagesForQuestion(q model.Question, index model.PageIndex) []model.ClassifiedPage {
 	if len(q.PageTypes) == 0 {
 		// No preference: return all pages.
@@ -56,7 +58,22 @@ func findPagesForQuestion(q model.Question, index model.PageIndex) []model.Class
 	var result []model.ClassifiedPage
 	seen := make(map[string]bool)
 
+	// First, add pages matching the question's preferred types.
 	for _, pt := range q.PageTypes {
+		pages, ok := index[pt]
+		if !ok {
+			continue
+		}
+		for _, p := range pages {
+			if !seen[p.URL] {
+				seen[p.URL] = true
+				result = append(result, p)
+			}
+		}
+	}
+
+	// Always append external source pages as supplementary context.
+	for _, pt := range model.ExternalPageTypes() {
 		pages, ok := index[pt]
 		if !ok {
 			continue

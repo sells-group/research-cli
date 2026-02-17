@@ -47,6 +47,21 @@ func TestMergeAnswers_LowConfidenceHigherTierIgnored(t *testing.T) {
 	assert.Equal(t, "$10M", merged[0].Value)
 }
 
+func TestMergeAnswers_NullT1_AnyT2Wins(t *testing.T) {
+	t1 := []model.ExtractionAnswer{
+		{QuestionID: "q1", FieldKey: "year_founded", Value: nil, Confidence: 0.1, Tier: 1},
+	}
+	t2 := []model.ExtractionAnswer{
+		{QuestionID: "q1", FieldKey: "year_founded", Value: 2011, Confidence: 0.2, Tier: 2},
+	}
+
+	merged := MergeAnswers(t1, t2, nil)
+	assert.Len(t, merged, 1)
+	// T2 should win even with low confidence because T1 is null.
+	assert.Equal(t, 2011, merged[0].Value)
+	assert.Equal(t, 2, merged[0].Tier)
+}
+
 func TestMergeAnswers_EmptyFieldKeySkipped(t *testing.T) {
 	t1 := []model.ExtractionAnswer{
 		{QuestionID: "q1", FieldKey: "", Value: "no key", Confidence: 0.9, Tier: 1},

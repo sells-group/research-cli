@@ -139,6 +139,53 @@ func TestEscalateQuestions_NoneEscalated(t *testing.T) {
 	assert.Len(t, escalated, 0)
 }
 
+func TestRouteQuestions_ExternalPagesIncludedWithPageTypes(t *testing.T) {
+	questions := []model.Question{
+		{ID: "q1", Text: "When was the company founded?", Tier: 1, FieldKey: "year_founded", PageTypes: []model.PageType{model.PageTypeAbout}},
+	}
+
+	index := model.PageIndex{
+		model.PageTypeAbout: {
+			{CrawledPage: model.CrawledPage{URL: "https://acme.com/about", Title: "About"}},
+		},
+		model.PageTypeBBB: {
+			{CrawledPage: model.CrawledPage{URL: "https://bbb.org/acme", Title: "[bbb] Acme Corp"}},
+		},
+		model.PageTypeGoogleMaps: {
+			{CrawledPage: model.CrawledPage{URL: "https://maps.google.com/acme", Title: "[google_maps] Acme"}},
+		},
+	}
+
+	batches := RouteQuestions(questions, index)
+
+	assert.Len(t, batches.Tier1, 1)
+	// Should include about page + BBB + Google Maps = 3 pages.
+	assert.Len(t, batches.Tier1[0].Pages, 3)
+	assert.Len(t, batches.Skipped, 0)
+}
+
+func TestRouteQuestions_ExternalPagesNotDuplicated(t *testing.T) {
+	// If question already includes an external page type, don't duplicate.
+	questions := []model.Question{
+		{ID: "q1", Text: "Reputation?", Tier: 2, FieldKey: "reputation", PageTypes: []model.PageType{model.PageTypeGoogleMaps}},
+	}
+
+	index := model.PageIndex{
+		model.PageTypeGoogleMaps: {
+			{CrawledPage: model.CrawledPage{URL: "https://maps.google.com/acme", Title: "[google_maps] Acme"}},
+		},
+		model.PageTypeBBB: {
+			{CrawledPage: model.CrawledPage{URL: "https://bbb.org/acme", Title: "[bbb] Acme"}},
+		},
+	}
+
+	batches := RouteQuestions(questions, index)
+
+	assert.Len(t, batches.Tier2, 1)
+	// Google Maps (from PageTypes) + BBB (from external supplement) = 2 pages.
+	assert.Len(t, batches.Tier2[0].Pages, 2)
+}
+
 func TestFindPagesForQuestion_Deduplication(t *testing.T) {
 	q := model.Question{
 		PageTypes: []model.PageType{model.PageTypeAbout, model.PageTypeHomepage},

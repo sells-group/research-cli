@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"fmt"
+	"net/mail"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,8 +31,8 @@ func MergeAnswers(t1, t2, t3 []model.ExtractionAnswer) []model.ExtractionAnswer 
 				continue
 			}
 
-			// Higher tier always wins if it has reasonable confidence.
-			if a.Tier > existing.Tier && a.Confidence >= 0.3 {
+			// Higher tier always wins if existing is null or new has reasonable confidence.
+			if a.Tier > existing.Tier && (existing.Value == nil || a.Confidence >= 0.3) {
 				best[a.FieldKey] = a
 				continue
 			}
@@ -70,8 +72,9 @@ func ValidateField(answer model.ExtractionAnswer, field *model.FieldMapping) *mo
 			s = s[:field.MaxLength]
 		}
 		if field.Validation != "" && !matchesValidation(s, field.Validation) {
-			zap.L().Debug("aggregate: validation failed",
+			zap.L().Warn("aggregate: validation failed",
 				zap.String("field", field.Key),
+				zap.String("raw_value", s),
 				zap.String("validation", field.Validation),
 			)
 			return nil
@@ -101,14 +104,23 @@ func ValidateField(answer model.ExtractionAnswer, field *model.FieldMapping) *mo
 
 	case "url":
 		s := fmt.Sprintf("%v", value)
-		if !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
+		u, parseErr := url.Parse(s)
+		if parseErr != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			zap.L().Warn("aggregate: invalid URL",
+				zap.String("field", field.Key),
+				zap.String("raw_value", s),
+			)
 			return nil
 		}
 		coerced = s
 
 	case "email":
 		s := fmt.Sprintf("%v", value)
-		if !strings.Contains(s, "@") {
+		if _, parseErr := mail.ParseAddress(s); parseErr != nil {
+			zap.L().Warn("aggregate: invalid email",
+				zap.String("field", field.Key),
+				zap.String("raw_value", s),
+			)
 			return nil
 		}
 		coerced = s
@@ -142,9 +154,10 @@ func ValidateField(answer model.ExtractionAnswer, field *model.FieldMapping) *mo
 }
 
 // BuildFieldValues validates all answers against the field registry and
-// returns a map of field key -> FieldValue.
+// returns a map of field key -> FieldValue. Logs a summary of validation failures.
 func BuildFieldValues(answers []model.ExtractionAnswer, fields *model.FieldRegistry) map[string]model.FieldValue {
 	result := make(map[string]model.FieldValue)
+	var failures int
 
 	for _, a := range answers {
 		field := fields.ByKey(a.FieldKey)
@@ -154,9 +167,18 @@ func BuildFieldValues(answers []model.ExtractionAnswer, fields *model.FieldRegis
 
 		fv := ValidateField(a, field)
 		if fv == nil {
+			failures++
 			continue
 		}
 		result[a.FieldKey] = *fv
+	}
+
+	if failures > 0 {
+		zap.L().Warn("aggregate: field validation summary",
+			zap.Int("validation_failures", failures),
+			zap.Int("fields_valid", len(result)),
+			zap.Int("answers_total", len(answers)),
+		)
 	}
 
 	return result

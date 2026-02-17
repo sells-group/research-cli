@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
@@ -26,7 +29,95 @@ Page content (first 2000 chars):
 Respond with a valid JSON object:
 {"page_type": "<category>", "confidence": <0.0-1.0>}`
 
+// externalPrefixToPageType maps title prefixes from scrape.go to page types.
+// Pages with these prefixes are auto-classified without an LLM call.
+var externalPrefixToPageType = map[string]model.PageType{
+	"[bbb] ":         model.PageTypeBBB,
+	"[google_maps] ": model.PageTypeGoogleMaps,
+	"[sos] ":         model.PageTypeSoS,
+	"[linkedin] ":    model.PageTypeLinkedIn,
+}
+
+// classifyByPrefix checks if a page has a known external source prefix
+// and returns the corresponding page type. Returns ("", false) if no match.
+func classifyByPrefix(title string) (model.PageType, bool) {
+	lower := strings.ToLower(title)
+	for prefix, pt := range externalPrefixToPageType {
+		if strings.HasPrefix(lower, prefix) {
+			return pt, true
+		}
+	}
+	return "", false
+}
+
+// urlPathPatterns maps URL path segments to page types. The path is cleaned
+// (lowercase, stripped of leading/trailing slashes) before matching.
+var urlPathPatterns = map[string]model.PageType{
+	"about":              model.PageTypeAbout,
+	"about-us":           model.PageTypeAbout,
+	"about_us":           model.PageTypeAbout,
+	"aboutus":            model.PageTypeAbout,
+	"who-we-are":         model.PageTypeAbout,
+	"our-story":          model.PageTypeAbout,
+	"contact":            model.PageTypeContact,
+	"contact-us":         model.PageTypeContact,
+	"contact_us":         model.PageTypeContact,
+	"contactus":          model.PageTypeContact,
+	"services":           model.PageTypeServices,
+	"our-services":       model.PageTypeServices,
+	"what-we-do":         model.PageTypeServices,
+	"products":           model.PageTypeProducts,
+	"pricing":            model.PageTypePricing,
+	"careers":            model.PageTypeCareers,
+	"jobs":               model.PageTypeCareers,
+	"team":               model.PageTypeTeam,
+	"our-team":           model.PageTypeTeam,
+	"leadership":         model.PageTypeTeam,
+	"staff":              model.PageTypeTeam,
+	"faq":                model.PageTypeFAQ,
+	"faqs":               model.PageTypeFAQ,
+	"blog":               model.PageTypeBlog,
+	"news":               model.PageTypeNews,
+	"testimonials":       model.PageTypeTestimonials,
+	"reviews":            model.PageTypeTestimonials,
+	"case-studies":       model.PageTypeCaseStudies,
+	"case_studies":       model.PageTypeCaseStudies,
+	"partners":           model.PageTypePartners,
+	"investors":          model.PageTypeInvestors,
+	"investor-relations": model.PageTypeInvestors,
+	"legal":              model.PageTypeLegal,
+	"privacy":            model.PageTypeLegal,
+	"privacy-policy":     model.PageTypeLegal,
+	"terms":              model.PageTypeLegal,
+	"terms-of-service":   model.PageTypeLegal,
+}
+
+// classifyByURL checks if a page URL path matches a known page type pattern.
+// Returns ("", false) if no match. Only matches the first path segment to avoid
+// false positives on deep paths like /blog/about-our-team.
+func classifyByURL(rawURL string) (model.PageType, bool) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", false
+	}
+	path := strings.Trim(u.Path, "/")
+	if path == "" {
+		return model.PageTypeHomepage, true
+	}
+	// Use the first path segment only.
+	if idx := strings.Index(path, "/"); idx > 0 {
+		path = path[:idx]
+	}
+	path = strings.ToLower(path)
+	if pt, ok := urlPathPatterns[path]; ok {
+		return pt, true
+	}
+	return "", false
+}
+
 // ClassifyPhase implements Phase 2: classify crawled pages using Haiku.
+// External pages (BBB, Google Maps, SoS, LinkedIn) are auto-classified
+// by title prefix without an LLM call.
 func ClassifyPhase(ctx context.Context, pages []model.CrawledPage, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (model.PageIndex, *model.TokenUsage, error) {
 	index := make(model.PageIndex)
 	totalUsage := &model.TokenUsage{}
@@ -35,9 +126,53 @@ func ClassifyPhase(ctx context.Context, pages []model.CrawledPage, aiClient anth
 		return index, totalUsage, nil
 	}
 
-	// Build batch request items for classification.
+	// Separate pages that can be auto-classified from those needing LLM.
+	var llmPages []model.CrawledPage
+	for _, page := range pages {
+		// 1. External source prefix (BBB, Google Maps, SoS, LinkedIn).
+		if pt, ok := classifyByPrefix(page.Title); ok {
+			cp := model.ClassifiedPage{
+				CrawledPage: page,
+				Classification: model.PageClassification{
+					PageType:   pt,
+					Confidence: 1.0,
+				},
+			}
+			index[pt] = append(index[pt], cp)
+			zap.L().Debug("classify: auto-classified external page",
+				zap.String("url", page.URL),
+				zap.String("page_type", string(pt)),
+			)
+			continue
+		}
+
+		// 2. URL path pattern (e.g., /about → about, /contact → contact).
+		if pt, ok := classifyByURL(page.URL); ok {
+			cp := model.ClassifiedPage{
+				CrawledPage: page,
+				Classification: model.PageClassification{
+					PageType:   pt,
+					Confidence: 0.9,
+				},
+			}
+			index[pt] = append(index[pt], cp)
+			zap.L().Debug("classify: auto-classified by URL pattern",
+				zap.String("url", page.URL),
+				zap.String("page_type", string(pt)),
+			)
+			continue
+		}
+
+		llmPages = append(llmPages, page)
+	}
+
+	if len(llmPages) == 0 {
+		return index, totalUsage, nil
+	}
+
+	// Build batch request items for LLM classification.
 	var batchItems []anthropic.BatchRequestItem
-	for i, page := range pages {
+	for i, page := range llmPages {
 		content := page.Markdown
 		if len(content) > 2000 {
 			content = content[:2000]
@@ -56,48 +191,95 @@ func ClassifyPhase(ctx context.Context, pages []model.CrawledPage, aiClient anth
 		})
 	}
 
-	// If only a few pages, use direct messages instead of batch.
-	if len(batchItems) <= 3 {
-		return classifyDirect(ctx, pages, batchItems, aiClient, totalUsage)
+	// If no-batch mode or only a few pages, use direct messages instead of batch.
+	var llmIndex model.PageIndex
+	var llmUsage *model.TokenUsage
+	var err error
+	threshold := aiCfg.SmallBatchThreshold
+	if threshold <= 0 {
+		threshold = 3
+	}
+	if aiCfg.NoBatch || len(batchItems) <= threshold {
+		llmIndex, llmUsage, err = classifyDirect(ctx, llmPages, batchItems, aiClient, totalUsage)
+	} else {
+		llmIndex, llmUsage, err = classifyBatch(ctx, llmPages, batchItems, aiClient, totalUsage)
+	}
+	if err != nil {
+		return nil, totalUsage, err
 	}
 
-	// Use batch API for larger sets.
-	return classifyBatch(ctx, pages, batchItems, aiClient, totalUsage)
+	// Merge LLM-classified pages into the index.
+	for pt, pages := range llmIndex {
+		index[pt] = append(index[pt], pages...)
+	}
+	if llmUsage != nil {
+		totalUsage = llmUsage
+	}
+
+	return index, totalUsage, nil
 }
 
 func classifyDirect(ctx context.Context, pages []model.CrawledPage, items []anthropic.BatchRequestItem, aiClient anthropic.Client, usage *model.TokenUsage) (model.PageIndex, *model.TokenUsage, error) {
 	index := make(model.PageIndex)
 
+	type classifyResult struct {
+		page           model.CrawledPage
+		classification model.PageClassification
+		usage          anthropic.TokenUsage
+	}
+
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(maxDirectConcurrency)
+
+	var mu sync.Mutex
+	var results []classifyResult
+
 	for i, item := range items {
-		resp, err := aiClient.CreateMessage(ctx, item.Params)
-		if err != nil {
-			zap.L().Warn("classify: failed to classify page",
-				zap.String("url", pages[i].URL),
-				zap.Error(err),
-			)
-			// Default to "other" on error.
-			cp := model.ClassifiedPage{
-				CrawledPage: pages[i],
-				Classification: model.PageClassification{
-					PageType:   model.PageTypeOther,
-					Confidence: 0.0,
-				},
+		g.Go(func() error {
+			resp, err := aiClient.CreateMessage(gCtx, item.Params)
+			if err != nil {
+				zap.L().Warn("classify: failed to classify page",
+					zap.String("url", pages[i].URL),
+					zap.Error(err),
+				)
+				mu.Lock()
+				results = append(results, classifyResult{
+					page: pages[i],
+					classification: model.PageClassification{
+						PageType:   model.PageTypeOther,
+						Confidence: 0.0,
+					},
+				})
+				mu.Unlock()
+				return nil
 			}
-			index[model.PageTypeOther] = append(index[model.PageTypeOther], cp)
-			continue
-		}
 
-		usage.InputTokens += int(resp.Usage.InputTokens)
-		usage.OutputTokens += int(resp.Usage.OutputTokens)
-		usage.CacheCreationTokens += int(resp.Usage.CacheCreationInputTokens)
-		usage.CacheReadTokens += int(resp.Usage.CacheReadInputTokens)
+			classification := parseClassification(extractText(resp))
 
-		classification := parseClassification(extractText(resp))
+			mu.Lock()
+			results = append(results, classifyResult{
+				page:           pages[i],
+				classification: classification,
+				usage:          resp.Usage,
+			})
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	_ = g.Wait()
+
+	for _, r := range results {
+		usage.InputTokens += int(r.usage.InputTokens)
+		usage.OutputTokens += int(r.usage.OutputTokens)
+		usage.CacheCreationTokens += int(r.usage.CacheCreationInputTokens)
+		usage.CacheReadTokens += int(r.usage.CacheReadInputTokens)
+
 		cp := model.ClassifiedPage{
-			CrawledPage:    pages[i],
-			Classification: classification,
+			CrawledPage:    r.page,
+			Classification: r.classification,
 		}
-		index[classification.PageType] = append(index[classification.PageType], cp)
+		index[r.classification.PageType] = append(index[r.classification.PageType], cp)
 	}
 
 	return index, usage, nil
