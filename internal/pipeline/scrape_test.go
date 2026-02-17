@@ -3,17 +3,21 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/scrape"
 	scrapemocks "github.com/sells-group/research-cli/internal/scrape/mocks"
 	"github.com/sells-group/research-cli/pkg/jina"
 	jinamocks "github.com/sells-group/research-cli/pkg/jina/mocks"
 )
+
+var defaultScrapeConfig = config.ScrapeConfig{SearchTimeoutSecs: 15, SearchRetries: 0}
 
 func TestScrapePhase_SearchThenScrape(t *testing.T) {
 	ctx := context.Background()
@@ -31,28 +35,43 @@ func TestScrapePhase_SearchThenScrape(t *testing.T) {
 			},
 		}, nil).Maybe()
 
-	// Mock scrape chain.
+	// Mock scrape chain — return distinct content per URL so dedup doesn't collapse them.
 	s := scrapemocks.NewMockScraper(t)
 	s.On("Name").Return("mock").Maybe()
 	s.On("Supports", mock.Anything).Return(true).Maybe()
-	s.On("Scrape", mock.Anything, mock.Anything).Return(&scrape.Result{
-		Page: model.CrawledPage{
-			URL:      "https://example.com",
-			Title:    "External Source",
-			Markdown: "Acme Corp is a registered business entity in Springfield, IL with a BBB rating of A+.",
+	s.On("Scrape", mock.Anything, mock.Anything).Return(
+		func(ctx context.Context, u string) *scrape.Result {
+			return &scrape.Result{
+				Page: model.CrawledPage{
+					URL:      u,
+					Title:    "External Source",
+					Markdown: "Acme Corp in Springfield, Illinois. Source URL: " + u,
+				},
+				Source: "mock",
+			}
 		},
-		Source: "mock",
-	}, nil).Maybe()
+		func(ctx context.Context, u string) error {
+			return nil
+		},
+	).Maybe()
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	pages, addrMatches := ScrapePhase(ctx, company, jinaClient, chain)
+	pages, addrMatches, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, defaultScrapeConfig)
 
-	assert.Len(t, pages, 3) // Google Maps, BBB, SoS
+	assert.Len(t, pages, 3) // Google Maps, BBB, SoS (distinct content per URL)
 	for _, p := range pages {
 		assert.Contains(t, p.Title, "[")
 	}
 
-	// Address cross-reference should find Springfield and IL.
+	// All 3 sources should have results.
+	assert.Len(t, sourceResults, 3)
+	for _, sr := range sourceResults {
+		assert.Empty(t, sr.Error)
+		assert.NotNil(t, sr.Page)
+		assert.True(t, sr.Duration > 0)
+	}
+
+	// Address cross-reference should find Springfield and Illinois.
 	assert.NotEmpty(t, addrMatches)
 }
 
@@ -77,9 +96,11 @@ func TestScrapePhase_ChainAllFail(t *testing.T) {
 	s.On("Scrape", mock.Anything, mock.Anything).Return(nil, errors.New("fail")).Maybe()
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	pages, _ := ScrapePhase(ctx, company, jinaClient, chain)
+	pages, _, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, defaultScrapeConfig)
 
 	assert.Len(t, pages, 0)
+	// All 3 source results should exist, each with an error.
+	assert.Len(t, sourceResults, 3)
 }
 
 func TestScrapePhase_SearchNoResults(t *testing.T) {
@@ -92,10 +113,231 @@ func TestScrapePhase_SearchNoResults(t *testing.T) {
 
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil))
 
-	pages, addrMatches := ScrapePhase(ctx, company, jinaClient, chain)
+	pages, addrMatches, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, defaultScrapeConfig)
 
 	assert.Len(t, pages, 0)
 	assert.Nil(t, addrMatches)
+	assert.Len(t, sourceResults, 3) // All 3 sources attempted
+}
+
+func TestScrapePhase_PartialFailure(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
+
+	callCount := atomic.Int32{}
+
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string"), mock.Anything).
+		Return(&jina.SearchResponse{
+			Code: 200,
+			Data: []jina.SearchResult{
+				{Title: "Acme Corp", URL: "https://www.bbb.org/us/il/profile/construction/acme-corp-0001-12345", Content: "Acme Corp BBB"},
+				{Title: "Acme Corp - SoS", URL: "https://www.ilsos.gov/corp/acme", Content: "Acme Corp filing"},
+			},
+		}, nil).Maybe()
+
+	s := scrapemocks.NewMockScraper(t)
+	s.On("Name").Return("mock").Maybe()
+	s.On("Supports", mock.Anything).Return(true).Maybe()
+	s.On("Scrape", mock.Anything, mock.Anything).Return(
+		func(ctx context.Context, u string) *scrape.Result {
+			n := callCount.Add(1)
+			if n == 1 {
+				return &scrape.Result{
+					Page: model.CrawledPage{
+						URL:      u,
+						Title:    "Success Page",
+						Markdown: "content",
+					},
+					Source: "mock",
+				}
+			}
+			return nil
+		},
+		func(ctx context.Context, u string) error {
+			n := callCount.Load()
+			if n == 1 {
+				return nil
+			}
+			return errors.New("fail")
+		},
+	).Maybe()
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
+
+	pages, _, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, defaultScrapeConfig)
+
+	// At least 1 page from the successful source.
+	assert.GreaterOrEqual(t, len(pages), 1)
+	// All 3 sources should have source results.
+	assert.Len(t, sourceResults, 3)
+
+	// At least one source result should have an error.
+	hasError := false
+	for _, sr := range sourceResults {
+		if sr.Error != "" {
+			hasError = true
+		}
+	}
+	assert.True(t, hasError)
+}
+
+func TestScrapePhase_ContentDedup(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
+
+	identicalMarkdown := "Acme Corp, 123 Main St"
+
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string"), mock.Anything).
+		Return(&jina.SearchResponse{
+			Code: 200,
+			Data: []jina.SearchResult{
+				{Title: "Acme Corp BBB", URL: "https://www.bbb.org/us/il/profile/construction/acme-corp-0001-12345", Content: "Acme Corp BBB"},
+				{Title: "Acme Corp SoS", URL: "https://www.ilsos.gov/corp/acme", Content: "Acme Corp filing"},
+			},
+		}, nil).Maybe()
+
+	s := scrapemocks.NewMockScraper(t)
+	s.On("Name").Return("mock").Maybe()
+	s.On("Supports", mock.Anything).Return(true).Maybe()
+	s.On("Scrape", mock.Anything, mock.Anything).Return(&scrape.Result{
+		Page: model.CrawledPage{
+			URL:      "https://example.com",
+			Title:    "Page",
+			Markdown: identicalMarkdown,
+		},
+		Source: "mock",
+	}, nil).Maybe()
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
+
+	pages, _, _ := ScrapePhase(ctx, company, jinaClient, chain, defaultScrapeConfig)
+
+	// All 3 sources return identical markdown → dedup to 1 page.
+	assert.Equal(t, 1, len(pages))
+}
+
+func TestScrapeSource_RetryOnFailure(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp"}
+
+	callCount := atomic.Int32{}
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string"), mock.Anything).
+		Return(
+			func(ctx context.Context, query string, opts ...jina.SearchOption) *jina.SearchResponse {
+				n := callCount.Add(1)
+				if n == 1 {
+					return nil
+				}
+				return &jina.SearchResponse{
+					Code: 200,
+					Data: []jina.SearchResult{
+						{Title: "Acme Corp BBB", URL: "https://www.bbb.org/us/il/profile/construction/acme-corp-0001-12345", Content: "Acme Corp BBB"},
+					},
+				}
+			},
+			func(ctx context.Context, query string, opts ...jina.SearchOption) error {
+				if callCount.Load() == 1 {
+					return errors.New("temporary failure")
+				}
+				return nil
+			},
+		).Maybe()
+
+	s := scrapemocks.NewMockScraper(t)
+	s.On("Name").Return("mock").Maybe()
+	s.On("Supports", mock.Anything).Return(true).Maybe()
+	s.On("Scrape", mock.Anything, mock.Anything).Return(&scrape.Result{
+		Page: model.CrawledPage{
+			URL:      "https://example.com",
+			Title:    "BBB Profile",
+			Markdown: "content",
+		},
+		Source: "mock",
+	}, nil).Maybe()
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
+
+	src := ExternalSource{
+		Name: "bbb",
+		SearchQueryFunc: func(c model.Company) (string, string) {
+			return c.Name, "bbb.org"
+		},
+		ResultFilter: filterBBBResult,
+	}
+
+	cfg := config.ScrapeConfig{SearchTimeoutSecs: 5, SearchRetries: 1}
+	page, err := scrapeSource(ctx, src, company, jinaClient, chain, cfg)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, page)
+	assert.Equal(t, int32(2), callCount.Load()) // Called twice: fail + retry succeed
+}
+
+func TestScrapeSource_RetryExhausted(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp"}
+
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string"), mock.Anything).
+		Return((*jina.SearchResponse)(nil), errors.New("persistent failure")).Maybe()
+
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil))
+
+	src := ExternalSource{
+		Name: "bbb",
+		SearchQueryFunc: func(c model.Company) (string, string) {
+			return c.Name, "bbb.org"
+		},
+		ResultFilter: filterBBBResult,
+	}
+
+	cfg := config.ScrapeConfig{SearchTimeoutSecs: 5, SearchRetries: 1}
+	page, err := scrapeSource(ctx, src, company, jinaClient, chain, cfg)
+
+	assert.Error(t, err)
+	assert.Nil(t, page)
+	assert.Contains(t, err.Error(), "search failed")
+}
+
+func TestScrapeSource_NoDuplicatePrefix(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp"}
+
+	s := scrapemocks.NewMockScraper(t)
+	s.On("Name").Return("mock").Maybe()
+	s.On("Supports", mock.Anything).Return(true).Maybe()
+	s.On("Scrape", mock.Anything, mock.Anything).Return(&scrape.Result{
+		Page: model.CrawledPage{
+			URL:      "https://www.google.com/maps/search/Acme+Corp",
+			Title:    "[google_maps] Acme Corp",
+			Markdown: "content",
+		},
+		Source: "mock",
+	}, nil).Maybe()
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
+
+	src := ExternalSource{
+		Name: "google_maps",
+		URLFunc: func(c model.Company) string {
+			return "https://www.google.com/maps/search/Acme+Corp"
+		},
+	}
+
+	page, err := scrapeSource(ctx, src, company, nil, chain, defaultScrapeConfig)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, page)
+	assert.Equal(t, "[google_maps] Acme Corp", page.Title) // Not doubled.
+}
+
+func TestContentHash(t *testing.T) {
+	h1 := contentHash("hello world")
+	h2 := contentHash("hello world")
+	h3 := contentHash("different content")
+
+	assert.Equal(t, h1, h2, "same input should produce same hash")
+	assert.NotEqual(t, h1, h3, "different input should produce different hash")
+	assert.Len(t, h1, 32, "hash should be 16 bytes = 32 hex chars")
 }
 
 func TestDefaultExternalSources(t *testing.T) {

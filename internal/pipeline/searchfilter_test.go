@@ -26,11 +26,18 @@ func TestFilterBBBResult(t *testing.T) {
 			wantURL: "https://www.bbb.org/us/il/springfield/profile/construction/abc-construction-0001-12345",
 		},
 		{
-			name: "profile URL without name match falls back",
+			name: "profile URL without name match — no blanket fallback",
 			results: []jina.SearchResult{
 				{Title: "Some Other Company", URL: "https://www.bbb.org/us/il/springfield/profile/plumbing/other-co-0001-99999", Content: "profile"},
 			},
-			wantURL: "https://www.bbb.org/us/il/springfield/profile/plumbing/other-co-0001-99999",
+			wantURL: "",
+		},
+		{
+			name: "profile URL with name in URL slug",
+			results: []jina.SearchResult{
+				{Title: "BBB Business Profile", URL: "https://www.bbb.org/us/il/springfield/profile/construction/abc-construction-0001-12345", Content: "profile"},
+			},
+			wantURL: "https://www.bbb.org/us/il/springfield/profile/construction/abc-construction-0001-12345",
 		},
 		{
 			name: "search page only — no match",
@@ -103,9 +110,23 @@ func TestFilterSoSResult(t *testing.T) {
 			wantURL: "https://sos.state.il.us/corp/abc",
 		},
 		{
-			name: "gov URL without name match — no match",
+			name: "gov URL without name match — no match, no entity pattern",
 			results: []jina.SearchResult{
 				{Title: "Business Search", URL: "https://www.sos.gov/search", Content: "results page"},
+			},
+			wantURL: "",
+		},
+		{
+			name: "gov URL with entity ID pattern",
+			results: []jina.SearchResult{
+				{Title: "Business Search", URL: "https://www.ilsos.gov/corporatellc/CorporateLlcController?command=detail&id=12345", Content: "results page"},
+			},
+			wantURL: "https://www.ilsos.gov/corporatellc/CorporateLlcController?command=detail&id=12345",
+		},
+		{
+			name: "gov URL without entity ID or name match",
+			results: []jina.SearchResult{
+				{Title: "SoS Homepage", URL: "https://www.sos.gov/about", Content: "about us"},
 			},
 			wantURL: "",
 		},
@@ -128,6 +149,24 @@ func TestFilterSoSResult(t *testing.T) {
 				assert.Equal(t, tc.wantURL, got.URL)
 			}
 		})
+	}
+}
+
+func TestURLSlug(t *testing.T) {
+	tests := []struct {
+		rawURL string
+		want   string
+	}{
+		{"https://www.bbb.org/us/il/springfield/profile/construction/abc-construction-0001-12345", "abc-construction-0001-12345"},
+		{"https://www.bbb.org/us/il/profile/plumbing/other-co-0001-99999/", "other-co-0001-99999"},
+		{"https://www.bbb.org/", ""},
+		{"https://www.bbb.org", ""},
+		{"not a url ://bad", ""},
+	}
+
+	for _, tc := range tests {
+		got := urlSlug(tc.rawURL)
+		assert.Equal(t, tc.want, got, "urlSlug(%q)", tc.rawURL)
 	}
 }
 
