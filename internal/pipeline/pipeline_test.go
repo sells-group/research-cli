@@ -16,6 +16,8 @@ import (
 	"github.com/sells-group/research-cli/pkg/anthropic"
 	anthropicmocks "github.com/sells-group/research-cli/pkg/anthropic/mocks"
 	firecrawlmocks "github.com/sells-group/research-cli/pkg/firecrawl/mocks"
+	"github.com/sells-group/research-cli/pkg/jina"
+	jinamocks "github.com/sells-group/research-cli/pkg/jina/mocks"
 	notionmocks "github.com/sells-group/research-cli/pkg/notion/mocks"
 	"github.com/sells-group/research-cli/pkg/perplexity"
 	perplexitymocks "github.com/sells-group/research-cli/pkg/perplexity/mocks"
@@ -100,6 +102,16 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 
 	fcClient := firecrawlmocks.NewMockClient(t)
 
+	// Jina mock for search-then-scrape.
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string"), mock.Anything).
+		Return(&jina.SearchResponse{
+			Code: 200,
+			Data: []jina.SearchResult{
+				{Title: "External", URL: "https://example.com/profile", Content: "content"},
+			},
+		}, nil).Maybe()
+
 	// Perplexity mock for LinkedIn phase.
 	pplxClient := perplexitymocks.NewMockClient(t)
 	pplxClient.On("ChatCompletion", mock.Anything, mock.AnythingOfType("perplexity.ChatCompletionRequest")).
@@ -120,34 +132,9 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 			Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
 		}, nil)
 
-	// CreateBatch: for classification (7 pages > 3 threshold) and extraction batches.
-	aiClient.On("CreateBatch", mock.Anything, mock.AnythingOfType("anthropic.BatchRequest")).
-		Return(&anthropic.BatchResponse{
-			ID:               "batch-001",
-			ProcessingStatus: "ended",
-		}, nil).Maybe()
-
-	// GetBatch: poll returns ended immediately.
-	aiClient.On("GetBatch", mock.Anything, "batch-001").
-		Return(&anthropic.BatchResponse{
-			ID:               "batch-001",
-			ProcessingStatus: "ended",
-		}, nil).Maybe()
-
-	// GetBatchResults: return results for all batch items.
-	batchResults := []anthropic.BatchResultItem{}
-	for i := 0; i < 20; i++ { // enough for any batch size
-		batchResults = append(batchResults, anthropic.BatchResultItem{
-			CustomID: "",
-			Type:     "succeeded",
-			Message: &anthropic.MessageResponse{
-				Content: []anthropic.ContentBlock{{Text: `{"page_type": "about", "confidence": 0.9, "value": "Technology", "reasoning": "from page", "source_url": "https://acme.com/about"}`}},
-				Usage:   anthropic.TokenUsage{InputTokens: 50, OutputTokens: 10},
-			},
-		})
-	}
-	aiClient.On("GetBatchResults", mock.Anything, "batch-001").
-		Return(setupBatchIterator(t, batchResults), nil).Maybe()
+	// Batch API mocks not needed: external pages are auto-classified,
+	// leaving <=3 pages for LLM classify (direct mode), and <=3 questions
+	// for extraction (direct mode). No batch path is hit.
 
 	// Salesforce mock.
 	sfClient := salesforcemocks.NewMockClient(t)
@@ -163,7 +150,7 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 		Return(nil, nil).Maybe()
 
 	// --- Run pipeline ---
-	p := New(cfg, st, chain, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, questions, fields)
+	p := New(cfg, st, chain, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, questions, fields)
 
 	result, err := p.Run(ctx, company)
 
@@ -196,6 +183,7 @@ func TestPipeline_New(t *testing.T) {
 	cfg := &config.Config{}
 	st := storemocks.NewMockStore(t)
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil))
+	jinaClient := jinamocks.NewMockClient(t)
 	fcClient := firecrawlmocks.NewMockClient(t)
 	pplxClient := perplexitymocks.NewMockClient(t)
 	aiClient := anthropicmocks.NewMockClient(t)
@@ -206,7 +194,7 @@ func TestPipeline_New(t *testing.T) {
 	questions := []model.Question{{ID: "q1"}}
 	fields := model.NewFieldRegistry(nil)
 
-	p := New(cfg, st, chain, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, questions, fields)
+	p := New(cfg, st, chain, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, questions, fields)
 
 	assert.NotNil(t, p)
 	assert.Equal(t, cfg, p.cfg)

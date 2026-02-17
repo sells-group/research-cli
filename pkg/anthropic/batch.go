@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	defaultBatchPollInitial = 5 * time.Second
-	defaultBatchPollCap     = 30 * time.Second
+	defaultBatchPollInitial = 2 * time.Second
+	defaultBatchPollCap     = 15 * time.Second
 	defaultBatchPollTimeout = 30 * time.Minute
 )
 

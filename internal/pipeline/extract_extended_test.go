@@ -34,7 +34,7 @@ func TestExtractTier1_WithInstructions(t *testing.T) {
 	}
 
 	aiClient := anthropicmocks.NewMockClient(t)
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: `{"value": "Technology (541511)", "confidence": 0.95, "reasoning": "NAICS code found", "source_url": "https://acme.com"}`}},
 			Usage:   anthropic.TokenUsage{InputTokens: 200, OutputTokens: 50},
@@ -63,7 +63,7 @@ func TestExtractTier1_LongContent(t *testing.T) {
 	}
 
 	aiClient := anthropicmocks.NewMockClient(t)
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: `{"value": "answer", "confidence": 0.9, "reasoning": "ok", "source_url": "https://acme.com"}`}},
 			Usage:   anthropic.TokenUsage{InputTokens: 500, OutputTokens: 50},
@@ -107,7 +107,7 @@ func TestExtractTier2_SingleQuestion(t *testing.T) {
 
 	aiClient := anthropicmocks.NewMockClient(t)
 	// Only 1 direct call (no primer for single item).
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: `{"value": "$10M", "confidence": 0.9, "reasoning": "found on page", "source_url": "https://acme.com"}`}},
 			Usage:   anthropic.TokenUsage{InputTokens: 300, OutputTokens: 60},
@@ -162,14 +162,14 @@ func TestExtractTier3_MultipleQuestions_BatchPath(t *testing.T) {
 	aiClient := anthropicmocks.NewMockClient(t)
 
 	// First call: Haiku summarization in prepareTier3Context.
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: "Summary of company data."}},
 			Usage:   anthropic.TokenUsage{InputTokens: 500, OutputTokens: 100},
 		}, nil).Once()
 
 	// Second call: T3 primer request (first of 5 items).
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: `{"value": "primer", "confidence": 0.9}`}},
 			Usage:   anthropic.TokenUsage{InputTokens: 400, OutputTokens: 80, CacheCreationInputTokens: 200},
@@ -233,7 +233,7 @@ func TestExtractTier3_ContextPreparationFails(t *testing.T) {
 	aiClient := anthropicmocks.NewMockClient(t)
 
 	// Summarization fails.
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(nil, errors.New("api error")).Once()
 
 	aiCfg := config.AnthropicConfig{
@@ -266,7 +266,7 @@ func TestPrepareTier3Context_LongPages(t *testing.T) {
 	}
 
 	aiClient := anthropicmocks.NewMockClient(t)
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: "Compact summary of all the data."}},
 			Usage:   anthropic.TokenUsage{InputTokens: 1000, OutputTokens: 200},
@@ -358,7 +358,7 @@ func TestExecuteBatch_Tier2_Prefix(t *testing.T) {
 	aiClient.On("GetBatchResults", mock.Anything, "batch-t2").
 		Return(setupBatchIterator(t, resultItems), nil)
 
-	answers, usage, err := executeBatch(ctx, items, routed, 2, aiClient)
+	answers, usage, err := executeBatch(ctx, items, routed, 2, aiClient, config.AnthropicConfig{SmallBatchThreshold: 3})
 
 	require.NoError(t, err)
 	assert.Len(t, answers, 5)
@@ -410,7 +410,7 @@ func TestExecuteBatch_Tier3_Prefix(t *testing.T) {
 	aiClient.On("GetBatchResults", mock.Anything, "batch-t3").
 		Return(setupBatchIterator(t, resultItems), nil)
 
-	answers, usage, err := executeBatch(ctx, items, routed, 3, aiClient)
+	answers, usage, err := executeBatch(ctx, items, routed, 3, aiClient, config.AnthropicConfig{SmallBatchThreshold: 3})
 
 	require.NoError(t, err)
 	assert.Len(t, answers, 4)

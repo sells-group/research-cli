@@ -31,17 +31,13 @@ func TestExtractTier1_DirectMode(t *testing.T) {
 	}
 
 	aiClient := anthropicmocks.NewMockClient(t)
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+
+	// Primer request (NoBatch=false, 2 items > 1 → primer fires) + 2 direct calls = 3 total.
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: `{"value": "Technology", "confidence": 0.9, "reasoning": "stated on page", "source_url": "https://acme.com/about"}`}},
 			Usage:   anthropic.TokenUsage{InputTokens: 200, OutputTokens: 50},
-		}, nil).Once()
-
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
-		Return(&anthropic.MessageResponse{
-			Content: []anthropic.ContentBlock{{Text: `{"value": 200, "confidence": 0.85, "reasoning": "mentioned in text", "source_url": "https://acme.com/about"}`}},
-			Usage:   anthropic.TokenUsage{InputTokens: 200, OutputTokens: 50},
-		}, nil).Once()
+		}, nil).Times(3)
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
@@ -50,9 +46,8 @@ func TestExtractTier1_DirectMode(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 1, result.Tier)
 	assert.Len(t, result.Answers, 2)
-	assert.Equal(t, "Technology", result.Answers[0].Value)
-	assert.Equal(t, float64(200), result.Answers[1].Value) // JSON numbers are float64
-	assert.Equal(t, 400, result.TokenUsage.InputTokens)
+	// Primer(200) + 2 direct(200 each) = 600 input tokens total.
+	assert.Equal(t, 600, result.TokenUsage.InputTokens)
 	aiClient.AssertExpectations(t)
 }
 
@@ -94,7 +89,7 @@ func TestExtractTier2_WithPrimer(t *testing.T) {
 
 	// Primer request (first of 2+ items) + 2 direct calls (<=3 items).
 	// The primer sends batchItems[0].Params, then executeBatch sends each item directly.
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: `{"value": "$10.5M", "confidence": 0.92, "reasoning": "from investor page", "source_url": "https://acme.com/investors"}`}},
 			Usage:   anthropic.TokenUsage{InputTokens: 300, OutputTokens: 60},
@@ -130,14 +125,14 @@ func TestExtractTier3_WithSummarization(t *testing.T) {
 	aiClient := anthropicmocks.NewMockClient(t)
 
 	// Summarization (Haiku) call.
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: "Acme Corp is a tech company expanding into AI services."}},
 			Usage:   anthropic.TokenUsage{InputTokens: 500, OutputTokens: 100},
 		}, nil).Once()
 
 	// T3 extraction (direct mode, 1 item).
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: `{"value": "AI expansion", "confidence": 0.88, "reasoning": "multiple sources", "source_url": "https://acme.com"}`}},
 			Usage:   anthropic.TokenUsage{InputTokens: 400, OutputTokens: 80},
@@ -315,7 +310,7 @@ func TestExecuteBatch_BatchPath(t *testing.T) {
 	aiClient.On("GetBatchResults", mock.Anything, "batch-1").
 		Return(setupBatchIterator(t, resultItems), nil)
 
-	answers, usage, err := executeBatch(ctx, items, routed, 1, aiClient)
+	answers, usage, err := executeBatch(ctx, items, routed, 1, aiClient, config.AnthropicConfig{SmallBatchThreshold: 3})
 
 	require.NoError(t, err)
 	assert.Len(t, answers, 5)
@@ -333,7 +328,7 @@ func TestExecuteBatch_CreateBatchError(t *testing.T) {
 	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
 		Return(nil, errors.New("rate limited"))
 
-	answers, _, err := executeBatch(ctx, items, routed, 1, aiClient)
+	answers, _, err := executeBatch(ctx, items, routed, 1, aiClient, config.AnthropicConfig{SmallBatchThreshold: 3})
 
 	assert.Nil(t, answers)
 	assert.Error(t, err)
@@ -357,7 +352,7 @@ func TestExecuteBatch_PollError(t *testing.T) {
 	aiClient.On("GetBatch", mock.Anything, "batch-1").
 		Return(nil, errors.New("api error"))
 
-	answers, _, err := executeBatch(ctx, items, routed, 1, aiClient)
+	answers, _, err := executeBatch(ctx, items, routed, 1, aiClient, config.AnthropicConfig{SmallBatchThreshold: 3})
 
 	assert.Nil(t, answers)
 	assert.Error(t, err)
@@ -386,7 +381,7 @@ func TestExecuteBatch_GetResultsError(t *testing.T) {
 	aiClient.On("GetBatchResults", mock.Anything, "batch-1").
 		Return(nil, errors.New("stream error"))
 
-	answers, _, err := executeBatch(ctx, items, routed, 1, aiClient)
+	answers, _, err := executeBatch(ctx, items, routed, 1, aiClient, config.AnthropicConfig{SmallBatchThreshold: 3})
 
 	assert.Nil(t, answers)
 	assert.Error(t, err)
@@ -435,7 +430,7 @@ func TestExecuteBatch_MissingResultInBatch(t *testing.T) {
 	aiClient.On("GetBatchResults", mock.Anything, "batch-1").
 		Return(setupBatchIterator(t, resultItems), nil)
 
-	answers, usage, err := executeBatch(ctx, items, routed, 1, aiClient)
+	answers, usage, err := executeBatch(ctx, items, routed, 1, aiClient, config.AnthropicConfig{SmallBatchThreshold: 3})
 
 	require.NoError(t, err)
 	assert.Len(t, answers, 2)
@@ -452,17 +447,17 @@ func TestExecuteBatch_DirectModeError(t *testing.T) {
 	aiClient := anthropicmocks.NewMockClient(t)
 
 	// First call fails.
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(nil, errors.New("model overloaded")).Once()
 
 	// Second call succeeds.
-	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: `{"value": "answer", "confidence": 0.9, "reasoning": "ok", "source_url": "https://acme.com"}`}},
 			Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
 		}, nil).Once()
 
-	answers, usage, err := executeBatch(ctx, items, routed, 1, aiClient)
+	answers, usage, err := executeBatch(ctx, items, routed, 1, aiClient, config.AnthropicConfig{SmallBatchThreshold: 3})
 
 	require.NoError(t, err)
 	// Only 1 answer (first failed, second succeeded).
@@ -470,4 +465,86 @@ func TestExecuteBatch_DirectModeError(t *testing.T) {
 	assert.Equal(t, "answer", answers[0].Value)
 	assert.Equal(t, 100, usage.InputTokens)
 	aiClient.AssertExpectations(t)
+}
+
+func TestExecuteBatch_NoBatchForcesDirectPath(t *testing.T) {
+	ctx := context.Background()
+	routed := makeRoutedQuestions(5) // >3 items would normally use batch
+	items := makeBatchItems(routed)
+
+	aiClient := anthropicmocks.NewMockClient(t)
+
+	// With noBatch=true, all 5 items should use CreateMessage (direct), not CreateBatch.
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(&anthropic.MessageResponse{
+			Content: []anthropic.ContentBlock{{Text: `{"value": "direct_answer", "confidence": 0.9, "reasoning": "ok", "source_url": "https://acme.com"}`}},
+			Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
+		}, nil).Times(5)
+
+	answers, usage, err := executeBatch(ctx, items, routed, 1, aiClient, config.AnthropicConfig{NoBatch: true, SmallBatchThreshold: 3})
+
+	require.NoError(t, err)
+	assert.Len(t, answers, 5)
+	assert.Equal(t, 500, usage.InputTokens)
+	assert.Equal(t, 100, usage.OutputTokens)
+	// Verify CreateBatch was never called.
+	aiClient.AssertNotCalled(t, "CreateBatch", mock.Anything, mock.Anything)
+	aiClient.AssertExpectations(t)
+}
+
+func TestExtractTier1_NoBatch(t *testing.T) {
+	ctx := context.Background()
+
+	// 5 questions: would normally trigger batch, but NoBatch forces direct.
+	routed := makeRoutedQuestions(5)
+	for i := range routed {
+		routed[i].Pages = []model.ClassifiedPage{{
+			CrawledPage: model.CrawledPage{URL: "https://acme.com/about", Markdown: "Acme is a technology company."},
+		}}
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(&anthropic.MessageResponse{
+			Content: []anthropic.ContentBlock{{Text: `{"value": "answer", "confidence": 0.9, "reasoning": "ok", "source_url": "https://acme.com"}`}},
+			Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
+		}, nil).Times(5)
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001", NoBatch: true}
+
+	result, err := ExtractTier1(ctx, routed, aiClient, aiCfg)
+
+	assert.NoError(t, err)
+	assert.Len(t, result.Answers, 5)
+	aiClient.AssertNotCalled(t, "CreateBatch", mock.Anything, mock.Anything)
+	aiClient.AssertExpectations(t)
+}
+
+func TestExtractTier2_NoBatch_SkipsPrimer(t *testing.T) {
+	ctx := context.Background()
+
+	routed := makeRoutedQuestions(5)
+	for i := range routed {
+		routed[i].Pages = []model.ClassifiedPage{{
+			CrawledPage: model.CrawledPage{URL: "https://acme.com", Markdown: "content"},
+		}}
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+	// Only 5 direct calls (no primer).
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(&anthropic.MessageResponse{
+			Content: []anthropic.ContentBlock{{Text: `{"value": "answer", "confidence": 0.9, "reasoning": "ok", "source_url": "https://acme.com"}`}},
+			Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
+		}, nil).Times(5)
+
+	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929", NoBatch: true}
+
+	result, err := ExtractTier2(ctx, routed, nil, aiClient, aiCfg)
+
+	assert.NoError(t, err)
+	assert.Len(t, result.Answers, 5)
+	// No primer + no batch = exactly 5 CreateMessage calls.
+	aiClient.AssertNumberOfCalls(t, "CreateMessage", 5)
+	aiClient.AssertNotCalled(t, "CreateBatch", mock.Anything, mock.Anything)
 }

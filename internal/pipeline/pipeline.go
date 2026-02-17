@@ -17,6 +17,7 @@ import (
 	"github.com/sells-group/research-cli/internal/store"
 	"github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
+	"github.com/sells-group/research-cli/pkg/jina"
 	"github.com/sells-group/research-cli/pkg/notion"
 	"github.com/sells-group/research-cli/pkg/perplexity"
 	"github.com/sells-group/research-cli/pkg/ppp"
@@ -28,6 +29,7 @@ type Pipeline struct {
 	cfg        *config.Config
 	store      store.Store
 	chain      *scrape.Chain
+	jina       jina.Client
 	firecrawl  firecrawl.Client
 	perplexity perplexity.Client
 	anthropic  anthropic.Client
@@ -44,6 +46,7 @@ func New(
 	cfg *config.Config,
 	st store.Store,
 	chain *scrape.Chain,
+	jinaClient jina.Client,
 	fcClient firecrawl.Client,
 	pplxClient perplexity.Client,
 	aiClient anthropic.Client,
@@ -63,6 +66,7 @@ func New(
 		cfg:        cfg,
 		store:      st,
 		chain:      chain,
+		jina:       jinaClient,
 		firecrawl:  fcClient,
 		perplexity: pplxClient,
 		anthropic:  aiClient,
@@ -195,15 +199,20 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		return nil
 	})
 
-	// Phase 1B: External Scrape
+	// Phase 1B: External Scrape (search-then-scrape)
 	g.Go(func() error {
 		pr := trackPhase("1b_scrape", func() (*model.PhaseResult, error) {
-			ep := ScrapePhase(gCtx, company, p.chain)
+			ep, addrMatches, sourceResults := ScrapePhase(gCtx, company, p.jina, p.chain, p.cfg.Scrape)
 			externalPages = ep
+			metadata := map[string]any{
+				"external_pages": len(ep),
+				"source_results": sourceResults,
+			}
+			if len(addrMatches) > 0 {
+				metadata["address_matches"] = addrMatches
+			}
 			return &model.PhaseResult{
-				Metadata: map[string]any{
-					"external_pages": len(ep),
-				},
+				Metadata: metadata,
 			}, nil
 		})
 		_ = pr
@@ -309,45 +318,83 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		}, nil
 	})
 
-	// ===== Phase 4: Tier 1 Extraction =====
+	// ===== Phases 4+5: T1 and T2-native run in parallel =====
 	setStatus(model.RunStatusExtracting)
 	var t1Answers []model.ExtractionAnswer
+	var t2NativeAnswers []model.ExtractionAnswer
+	var t2NativeUsage model.TokenUsage
 
-	trackPhase("4_extract_t1", func() (*model.PhaseResult, error) {
-		t1Result, t1Err := ExtractTier1(ctx, batches.Tier1, p.anthropic, p.cfg.Anthropic)
-		if t1Err != nil {
-			return nil, t1Err
-		}
-		t1Answers = t1Result.Answers
-		totalUsage.Add(t1Result.TokenUsage)
-		return &model.PhaseResult{
-			TokenUsage: t1Result.TokenUsage,
-			Metadata: map[string]any{
-				"answers":     len(t1Result.Answers),
-				"duration_ms": t1Result.Duration,
-			},
-		}, nil
+	g2, g2Ctx := errgroup.WithContext(ctx)
+
+	// Phase 4: T1 extraction (concurrent with T2-native).
+	g2.Go(func() error {
+		trackPhase("4_extract_t1", func() (*model.PhaseResult, error) {
+			t1Result, t1Err := ExtractTier1(g2Ctx, batches.Tier1, p.anthropic, p.cfg.Anthropic)
+			if t1Err != nil {
+				return nil, t1Err
+			}
+			t1Answers = t1Result.Answers
+			totalUsage.Add(t1Result.TokenUsage)
+			return &model.PhaseResult{
+				TokenUsage: t1Result.TokenUsage,
+				Metadata: map[string]any{
+					"answers":     len(t1Result.Answers),
+					"duration_ms": t1Result.Duration,
+				},
+			}, nil
+		})
+		return nil
 	})
+
+	// T2-native: questions routed directly to T2 (no T1 dependency).
+	if len(batches.Tier2) > 0 {
+		g2.Go(func() error {
+			t2Result, t2Err := ExtractTier2(g2Ctx, batches.Tier2, nil, p.anthropic, p.cfg.Anthropic)
+			if t2Err != nil {
+				zap.L().Warn("pipeline: t2-native extraction failed", zap.Error(t2Err))
+				return nil
+			}
+			t2NativeAnswers = t2Result.Answers
+			t2NativeUsage = t2Result.TokenUsage
+			return nil
+		})
+	}
+
+	_ = g2.Wait()
 
 	// Escalate low-confidence T1 answers to T2.
 	escalated := EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold)
-	t2Questions := append(batches.Tier2, escalated...)
 
-	// ===== Phase 5: Tier 2 Extraction =====
+	// ===== Phase 5: T2 escalated + combine with native results =====
 	var t2Answers []model.ExtractionAnswer
 
 	trackPhase("5_extract_t2", func() (*model.PhaseResult, error) {
-		t2Result, t2Err := ExtractTier2(ctx, t2Questions, t1Answers, p.anthropic, p.cfg.Anthropic)
-		if t2Err != nil {
-			return nil, t2Err
+		var escalatedAnswers []model.ExtractionAnswer
+		var escalatedUsage model.TokenUsage
+
+		if len(escalated) > 0 {
+			t2Result, t2Err := ExtractTier2(ctx, escalated, t1Answers, p.anthropic, p.cfg.Anthropic)
+			if t2Err != nil {
+				return nil, t2Err
+			}
+			escalatedAnswers = t2Result.Answers
+			escalatedUsage = t2Result.TokenUsage
 		}
-		t2Answers = t2Result.Answers
-		totalUsage.Add(t2Result.TokenUsage)
+
+		// Merge T2-native + T2-escalated.
+		t2Answers = append(t2NativeAnswers, escalatedAnswers...)
+
+		// Combine usage for reporting.
+		combinedUsage := t2NativeUsage
+		combinedUsage.Add(escalatedUsage)
+		totalUsage.Add(combinedUsage)
+
 		return &model.PhaseResult{
-			TokenUsage: t2Result.TokenUsage,
+			TokenUsage: combinedUsage,
 			Metadata: map[string]any{
-				"answers":   len(t2Result.Answers),
+				"answers":   len(t2Answers),
 				"escalated": len(escalated),
+				"native":    len(t2NativeAnswers),
 			},
 		}, nil
 	})
@@ -357,7 +404,10 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 
 	// Determine if T3 should run.
 	shouldRunT3 := len(batches.Tier3) > 0
-	if p.cfg.Pipeline.Tier3Gate == "ambiguity_only" {
+	switch p.cfg.Pipeline.Tier3Gate {
+	case "always":
+		// Run T3 unconditionally (if there are T3 questions).
+	case "ambiguity_only":
 		// Only run T3 if there are ambiguous answers.
 		allCurrent := MergeAnswers(t1Answers, t2Answers, nil)
 		hasAmbiguity := false
@@ -368,6 +418,8 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			}
 		}
 		shouldRunT3 = shouldRunT3 && hasAmbiguity
+	default: // "off" or unrecognized — skip T3 entirely.
+		shouldRunT3 = false
 	}
 
 	if shouldRunT3 {
@@ -386,11 +438,15 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			}, nil
 		})
 	} else {
+		skipReason := "not needed"
+		if p.cfg.Pipeline.Tier3Gate == "off" || p.cfg.Pipeline.Tier3Gate == "" {
+			skipReason = "tier3_gate=off (use --with-t3 to enable)"
+		}
 		trackPhase("6_extract_t3", func() (*model.PhaseResult, error) {
 			return &model.PhaseResult{
 				Status: model.PhaseStatusSkipped,
 				Metadata: map[string]any{
-					"reason": "not needed",
+					"reason": skipReason,
 				},
 			}, nil
 		})
@@ -417,6 +473,13 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	result.FieldValues = fieldValues
 
 	// ===== Phase 8: Report =====
+	// Set totalUsage.Cost from per-phase costs so the report shows the correct total.
+	var reportCost float64
+	for _, ph := range result.Phases {
+		reportCost += ph.TokenUsage.Cost
+	}
+	totalUsage.Cost = reportCost
+
 	trackPhase("8_report", func() (*model.PhaseResult, error) {
 		report := FormatReport(company, allAnswers, fieldValues, result.Phases, totalUsage)
 		result.Report = report
@@ -480,7 +543,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 // computePhaseCost maps a phase name to the correct model and computes cost.
 func (p *Pipeline) computePhaseCost(phase string, usage model.TokenUsage) float64 {
 	var modelName string
-	isBatch := true // most extraction phases use batch
+	isBatch := !p.cfg.Anthropic.NoBatch
 
 	switch phase {
 	case "1c_linkedin", "2_classify", "4_extract_t1":
@@ -491,6 +554,14 @@ func (p *Pipeline) computePhaseCost(phase string, usage model.TokenUsage) float6
 		modelName = p.cfg.Anthropic.OpusModel
 	default:
 		return 0
+	}
+
+	// Warn if model has no pricing entry — cost will report as $0.
+	if _, ok := p.cfg.Pricing.Anthropic[modelName]; !ok {
+		zap.L().Warn("pipeline: no pricing entry for model, cost will be $0",
+			zap.String("model", modelName),
+			zap.String("phase", phase),
+		)
 	}
 
 	return p.costCalc.Claude(modelName, isBatch,
