@@ -25,28 +25,23 @@ func TestClassifyPhase_DirectMode(t *testing.T) {
 
 	aiClient := anthropicmocks.NewMockClient(t)
 
-	// Two pages => direct mode (<=3). Use mock.Anything for ctx since errgroup wraps it.
+	// Two pages => direct mode (<=threshold). Primer fires (2 items > 1) + 2 direct calls = 3 total.
 	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: `{"page_type": "homepage", "confidence": 0.95}`}},
 			Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
-		}, nil).Once()
-
-	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
-		Return(&anthropic.MessageResponse{
-			Content: []anthropic.ContentBlock{{Text: `{"page_type": "about", "confidence": 0.9}`}},
-			Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
-		}, nil).Once()
+		}, nil).Times(3) // primer + 2 direct calls
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
 	index, usage, err := ClassifyPhase(ctx, pages, aiClient, aiCfg)
 
 	assert.NoError(t, err)
-	assert.Len(t, index[model.PageTypeHomepage], 1)
-	assert.Len(t, index[model.PageTypeAbout], 1)
-	assert.Equal(t, 200, usage.InputTokens)
-	assert.Equal(t, 40, usage.OutputTokens)
+	// Mock returns homepage for all calls, so both pages are classified as homepage.
+	assert.Len(t, index[model.PageTypeHomepage], 2)
+	// Primer(100) + 2 direct(100 each) = 300 input tokens.
+	assert.Equal(t, 300, usage.InputTokens)
+	assert.Equal(t, 60, usage.OutputTokens)
 	aiClient.AssertExpectations(t)
 }
 
@@ -184,6 +179,46 @@ func TestClassifyPhase_AutoClassifiesExternalPages(t *testing.T) {
 	// No LLM calls — all pages auto-classified.
 	assert.Equal(t, 0, usage.InputTokens)
 	aiClient.AssertNotCalled(t, "CreateMessage", mock.Anything, mock.Anything)
+}
+
+func TestClassifyPhase_DirectMode_PrimerSystemBlocks(t *testing.T) {
+	ctx := context.Background()
+
+	// Create 3 pages that need LLM classification (not auto-classifiable)
+	pages := []model.CrawledPage{
+		{URL: "https://acme.com/our-company-overview", Title: "Overview", Markdown: testPageContent(0)},
+		{URL: "https://acme.com/what-we-believe", Title: "Values", Markdown: testPageContent(1)},
+		{URL: "https://acme.com/our-partners-page", Title: "Partners Info", Markdown: testPageContent(2)},
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+
+	// With 3 pages and threshold=20, this goes through direct mode.
+	// 3 pages > 1 => primer fires. Total calls: 1 primer + 3 direct = 4.
+	var callCount int
+	aiClient.On("CreateMessage", mock.Anything, mock.MatchedBy(func(req anthropic.MessageRequest) bool {
+		callCount++
+		// All calls should use the classify system prompt
+		if len(req.System) > 0 {
+			assert.Contains(t, req.System[0].Text, "Classify web pages")
+		}
+		return true
+	})).Return(&anthropic.MessageResponse{
+		Content: []anthropic.ContentBlock{{Text: `{"page_type": "about", "confidence": 0.9}`}},
+		Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
+	}, nil).Times(4) // 1 primer + 3 direct
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+
+	index, usage, err := ClassifyPhase(ctx, pages, aiClient, aiCfg)
+
+	assert.NoError(t, err)
+	assert.NotEmpty(t, index)
+	// 4 calls: primer + 3 direct
+	assert.Equal(t, 4, callCount)
+	// Primer(100) + 3 direct(100 each) = 400
+	assert.Equal(t, 400, usage.InputTokens)
+	aiClient.AssertExpectations(t)
 }
 
 func TestClassifyPhase_AllExternalSkipsLLM(t *testing.T) {

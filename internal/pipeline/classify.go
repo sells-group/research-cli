@@ -217,7 +217,7 @@ func ClassifyPhase(ctx context.Context, pages []model.CrawledPage, aiClient anth
 	var err error
 	threshold := aiCfg.SmallBatchThreshold
 	if threshold <= 0 {
-		threshold = 8
+		threshold = smallBatchThresholdClassify
 	}
 	if aiCfg.NoBatch || len(batchItems) <= threshold {
 		llmIndex, llmUsage, err = classifyDirect(ctx, llmPages, batchItems, aiClient, totalUsage)
@@ -270,6 +270,22 @@ func classifyDirect(ctx context.Context, pages []model.CrawledPage, items []anth
 		usage          anthropic.TokenUsage
 	}
 
+	// Fire primer asynchronously to warm cache for classification.
+	var primerUsage anthropic.TokenUsage
+	var primerWg sync.WaitGroup
+	if len(items) > 1 {
+		primerWg.Add(1)
+		go func() {
+			defer primerWg.Done()
+			primerResp, primerErr := anthropic.PrimerRequest(ctx, aiClient, items[0].Params)
+			if primerErr != nil {
+				zap.L().Warn("classify: primer failed", zap.Error(primerErr))
+			} else if primerResp != nil {
+				primerUsage = primerResp.Usage
+			}
+		}()
+	}
+
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(maxDirectConcurrency)
 
@@ -310,6 +326,13 @@ func classifyDirect(ctx context.Context, pages []model.CrawledPage, items []anth
 	}
 
 	_ = g.Wait()
+	primerWg.Wait()
+
+	// Add primer usage.
+	usage.InputTokens += int(primerUsage.InputTokens)
+	usage.OutputTokens += int(primerUsage.OutputTokens)
+	usage.CacheCreationTokens += int(primerUsage.CacheCreationInputTokens)
+	usage.CacheReadTokens += int(primerUsage.CacheReadInputTokens)
 
 	for _, r := range results {
 		usage.InputTokens += int(r.usage.InputTokens)
