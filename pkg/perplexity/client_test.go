@@ -3,6 +3,7 @@ package perplexity
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -198,4 +199,78 @@ func TestErrorResponseIncludesBody(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "403")
 	assert.Contains(t, err.Error(), "invalid api key")
+}
+
+func TestChatCompletion_Temperature(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req ChatCompletionRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+
+		// Verify temperature is present and set to 0.2
+		require.NotNil(t, req.Temperature)
+		assert.InDelta(t, 0.2, *req.Temperature, 0.001)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"1","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{}}`))
+	}))
+	defer srv.Close()
+
+	temp := 0.2
+	client := NewClient("test-key", WithBaseURL(srv.URL))
+	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages:    []Message{{Role: "user", Content: "test"}},
+		Temperature: &temp,
+	})
+	require.NoError(t, err)
+}
+
+func TestChatCompletion_NoTemperature(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Read raw body to check temperature is absent
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var raw map[string]any
+		err = json.Unmarshal(body, &raw)
+		require.NoError(t, err)
+
+		// temperature should be absent (omitempty)
+		_, hasTemp := raw["temperature"]
+		assert.False(t, hasTemp, "temperature should not be in request body when nil")
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"1","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{}}`))
+	}))
+	defer srv.Close()
+
+	client := NewClient("test-key", WithBaseURL(srv.URL))
+	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "test"}},
+		// Temperature is nil (not set)
+	})
+	require.NoError(t, err)
+}
+
+func TestChatCompletion_MaxTokens(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req ChatCompletionRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+
+		require.NotNil(t, req.MaxTokens)
+		assert.Equal(t, 500, *req.MaxTokens)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"1","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{}}`))
+	}))
+	defer srv.Close()
+
+	maxTokens := 500
+	client := NewClient("test-key", WithBaseURL(srv.URL))
+	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages:  []Message{{Role: "user", Content: "test"}},
+		MaxTokens: &maxTokens,
+	})
+	require.NoError(t, err)
 }

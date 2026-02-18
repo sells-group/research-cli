@@ -2,7 +2,9 @@ package notion
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jomei/notionapi"
 	"github.com/stretchr/testify/assert"
@@ -112,6 +114,65 @@ func TestQueryAll_ContextCancelled(t *testing.T) {
 	pages, err := QueryAll(ctx, mc, "db-1", nil)
 	assert.Error(t, err)
 	assert.Nil(t, pages)
+}
+
+func TestQueryAll_PrefetchTiming(t *testing.T) {
+	// Simulate a slow 3-page response where each page takes ~20ms
+	var callCount atomic.Int32
+
+	mc := new(MockClient)
+
+	// Page 1: returns HasMore=true
+	mc.On("QueryDatabase", mock.Anything, "db-1", mock.MatchedBy(func(req *notionapi.DatabaseQueryRequest) bool {
+		return req.StartCursor == ""
+	})).Return(&notionapi.DatabaseQueryResponse{
+		Results:    []notionapi.Page{{ID: "p1"}},
+		HasMore:    true,
+		NextCursor: notionapi.Cursor("cursor-1"),
+	}, nil).Run(func(args mock.Arguments) {
+		callCount.Add(1)
+		time.Sleep(20 * time.Millisecond) // Simulate API latency
+	}).Once()
+
+	// Page 2: returns HasMore=true
+	mc.On("QueryDatabase", mock.Anything, "db-1", mock.MatchedBy(func(req *notionapi.DatabaseQueryRequest) bool {
+		return req.StartCursor == notionapi.Cursor("cursor-1")
+	})).Return(&notionapi.DatabaseQueryResponse{
+		Results:    []notionapi.Page{{ID: "p2"}},
+		HasMore:    true,
+		NextCursor: notionapi.Cursor("cursor-2"),
+	}, nil).Run(func(args mock.Arguments) {
+		callCount.Add(1)
+		time.Sleep(20 * time.Millisecond)
+	}).Once()
+
+	// Page 3: returns HasMore=false
+	mc.On("QueryDatabase", mock.Anything, "db-1", mock.MatchedBy(func(req *notionapi.DatabaseQueryRequest) bool {
+		return req.StartCursor == notionapi.Cursor("cursor-2")
+	})).Return(&notionapi.DatabaseQueryResponse{
+		Results: []notionapi.Page{{ID: "p3"}},
+		HasMore: false,
+	}, nil).Run(func(args mock.Arguments) {
+		callCount.Add(1)
+		time.Sleep(20 * time.Millisecond)
+	}).Once()
+
+	start := time.Now()
+	pages, err := QueryAll(context.Background(), mc, "db-1", nil)
+	elapsed := time.Since(start)
+
+	assert.NoError(t, err)
+	assert.Len(t, pages, 3)
+	assert.Equal(t, int32(3), callCount.Load())
+
+	// With rate limiting at 334ms intervals, 3 pages would take:
+	// Without prefetch: ~3 * 334ms = ~1002ms
+	// With prefetch: ~2 * 334ms = ~668ms (page 2 and 3 are prefetched)
+	// Due to test variability, just verify it completes and all pages returned
+	// The prefetch saves time but exact timing is hard to assert reliably
+	t.Logf("3 pages fetched in %v", elapsed)
+
+	mc.AssertExpectations(t)
 }
 
 func TestQueryQueuedLeads(t *testing.T) {

@@ -9,8 +9,7 @@ import (
 )
 
 const (
-	defaultPollInitial = 5 * time.Second
-	defaultPollStep    = 5 * time.Second
+	defaultPollInitial = 2 * time.Second
 	defaultPollCap     = 15 * time.Second
 	defaultPollTimeout = 5 * time.Minute
 )
@@ -20,7 +19,6 @@ type PollOption func(*pollConfig)
 
 type pollConfig struct {
 	initial time.Duration
-	step    time.Duration
 	cap     time.Duration
 	timeout time.Duration
 }
@@ -28,7 +26,6 @@ type pollConfig struct {
 func defaultPollConfig() pollConfig {
 	return pollConfig{
 		initial: defaultPollInitial,
-		step:    defaultPollStep,
 		cap:     defaultPollCap,
 		timeout: defaultPollTimeout,
 	}
@@ -41,11 +38,10 @@ func WithPollInterval(d time.Duration) PollOption {
 	}
 }
 
-// WithPollStep overrides the backoff step increment.
+// WithPollStep is a no-op retained for backward compatibility.
+// Polling now uses exponential backoff (doubling) instead of linear increments.
 func WithPollStep(d time.Duration) PollOption {
-	return func(c *pollConfig) {
-		c.step = d
-	}
+	return func(c *pollConfig) {}
 }
 
 // WithPollCap overrides the maximum poll interval.
@@ -64,7 +60,7 @@ func WithPollTimeout(d time.Duration) PollOption {
 }
 
 // PollCrawl polls GetCrawlStatus until the crawl completes, fails, or the
-// context expires. Uses linear backoff: 5s -> 10s -> 15s (capped).
+// context expires. Uses exponential backoff: 2s -> 4s -> 8s -> 15s (capped).
 func PollCrawl(ctx context.Context, client Client, id string, opts ...PollOption) (*CrawlStatusResponse, error) {
 	cfg := defaultPollConfig()
 	for _, opt := range opts {
@@ -97,7 +93,7 @@ func PollCrawl(ctx context.Context, client Client, id string, opts ...PollOption
 		case <-time.After(interval):
 		}
 
-		interval += cfg.step
+		interval *= 2
 		if interval > cfg.cap {
 			interval = cfg.cap
 		}
@@ -105,7 +101,7 @@ func PollCrawl(ctx context.Context, client Client, id string, opts ...PollOption
 }
 
 // PollBatchScrape polls GetBatchScrapeStatus until the batch completes, fails,
-// or the context expires. Uses the same backoff as PollCrawl.
+// or the context expires. Uses exponential backoff: 2s -> 4s -> 8s -> 15s (capped).
 func PollBatchScrape(ctx context.Context, client Client, id string, opts ...PollOption) (*BatchScrapeStatusResponse, error) {
 	cfg := defaultPollConfig()
 	for _, opt := range opts {
@@ -138,7 +134,7 @@ func PollBatchScrape(ctx context.Context, client Client, id string, opts ...Poll
 		case <-time.After(interval):
 		}
 
-		interval += cfg.step
+		interval *= 2
 		if interval > cfg.cap {
 			interval = cfg.cap
 		}
