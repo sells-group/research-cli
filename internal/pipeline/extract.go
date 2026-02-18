@@ -82,11 +82,11 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient a
 		return result, nil
 	}
 
-	const t1SystemText = "You are a research analyst extracting specific data from a web page. Return a valid JSON object with value, confidence, reasoning, and source_url."
+	const t1SystemText = "You are a research analyst extracting specific data from a web page. Return a valid JSON object with value, confidence, reasoning, and source_url. If the requested information is not found on the page, return {\"value\": null, \"confidence\": 0.0, \"reasoning\": \"Information not found on page\", \"source_url\": \"<page URL>\"}."
 
-	// Primer gets cache_control; batch items use plain system blocks to save tokens.
-	primerSystemBlocks := anthropic.BuildCachedSystemBlocks(t1SystemText)
-	batchSystemBlocks := []anthropic.SystemBlock{{Text: t1SystemText}}
+	// Both primer and batch items use cached system blocks so batch items
+	// signal a cache read and benefit from the primer's warm cache.
+	systemBlocks := anthropic.BuildCachedSystemBlocks(t1SystemText)
 
 	// Pre-compute external snippets per routed question (dedup: one call per
 	// unique page set instead of per-question inside the loop).
@@ -127,7 +127,7 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient a
 			Params: anthropic.MessageRequest{
 				Model:     aiCfg.HaikuModel,
 				MaxTokens: 512,
-				System:    batchSystemBlocks,
+				System:    systemBlocks,
 				Messages: []anthropic.Message{
 					{Role: "user", Content: prompt},
 				},
@@ -144,7 +144,6 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient a
 		go func() {
 			defer primerWg.Done()
 			primerReq := batchItems[0].Params
-			primerReq.System = primerSystemBlocks // primer uses cached system blocks
 			primerResp, primerErr := anthropic.PrimerRequest(ctx, aiClient, primerReq)
 			if primerErr != nil {
 				zap.L().Warn("extract: tier 1 primer failed", zap.Error(primerErr))
@@ -180,11 +179,11 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 		return result, nil
 	}
 
-	const t2SystemText = "You are a senior research analyst. Synthesize data from multiple sources to provide accurate answers."
+	const t2SystemText = "You are a senior research analyst. Synthesize data from multiple sources to provide accurate answers. If the requested information is not found on the page, return {\"value\": null, \"confidence\": 0.0, \"reasoning\": \"Information not found on page\", \"source_url\": \"<page URL>\"}."
 
-	// Primer gets cache_control; batch items use plain system blocks.
-	primerSystemBlocks := anthropic.BuildCachedSystemBlocks(t2SystemText)
-	batchSystemBlocks := []anthropic.SystemBlock{{Text: t2SystemText}}
+	// Both primer and batch items use cached system blocks so batch items
+	// signal a cache read and benefit from the primer's warm cache.
+	systemBlocks := anthropic.BuildCachedSystemBlocks(t2SystemText)
 
 	// Filter T1 answers to only include low-confidence ones for T2 context.
 	// High-confidence answers are already reliable and just add noise/cost.
@@ -222,7 +221,7 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 			Params: anthropic.MessageRequest{
 				Model:     aiCfg.SonnetModel,
 				MaxTokens: 1024,
-				System:    batchSystemBlocks,
+				System:    systemBlocks,
 				Messages: []anthropic.Message{
 					{Role: "user", Content: prompt},
 				},
@@ -239,7 +238,6 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 		go func() {
 			defer primerWg.Done()
 			primerReq := batchItems[0].Params
-			primerReq.System = primerSystemBlocks
 			primerResp, primerErr := anthropic.PrimerRequest(ctx, aiClient, primerReq)
 			if primerErr != nil {
 				zap.L().Warn("extract: tier 2 primer failed", zap.Error(primerErr))
@@ -284,11 +282,11 @@ func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers
 	var totalUsage model.TokenUsage
 	totalUsage.Add(*summaryUsage)
 
-	const t3SystemText = "You are an expert research analyst providing definitive, well-reasoned answers."
+	const t3SystemText = "You are an expert research analyst providing definitive, well-reasoned answers. If the requested information is not found on the page, return {\"value\": null, \"confidence\": 0.0, \"reasoning\": \"Information not found on page\", \"source_url\": \"<page URL>\"}."
 
-	// Primer gets cache_control; batch items use plain system blocks.
-	primerSystemBlocks := anthropic.BuildCachedSystemBlocks(t3SystemText)
-	batchSystemBlocks := []anthropic.SystemBlock{{Text: t3SystemText}}
+	// Both primer and batch items use cached system blocks so batch items
+	// signal a cache read and benefit from the primer's warm cache.
+	systemBlocks := anthropic.BuildCachedSystemBlocks(t3SystemText)
 
 	// Build requests for each T3 question.
 	var batchItems []anthropic.BatchRequestItem
@@ -310,7 +308,7 @@ func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers
 			Params: anthropic.MessageRequest{
 				Model:     aiCfg.OpusModel,
 				MaxTokens: 2048,
-				System:    batchSystemBlocks,
+				System:    systemBlocks,
 				Messages: []anthropic.Message{
 					{Role: "user", Content: prompt},
 				},
@@ -327,7 +325,6 @@ func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers
 		go func() {
 			defer primerWg.Done()
 			primerReq := batchItems[0].Params
-			primerReq.System = primerSystemBlocks
 			primerResp, primerErr := anthropic.PrimerRequest(ctx, aiClient, primerReq)
 			if primerErr != nil {
 				zap.L().Warn("extract: tier 3 primer failed", zap.Error(primerErr))

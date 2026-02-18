@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
@@ -30,7 +31,16 @@ func fedsyncPool(ctx context.Context) (*pgxpool.Pool, error) {
 		return nil, eris.New("fedsync: no database_url configured (set fedsync.database_url or store.database_url)")
 	}
 
-	pool, err := pgxpool.New(ctx, dsn)
+	poolCfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, eris.Wrap(err, "fedsync: parse connection string")
+	}
+	poolCfg.MaxConns = 15
+	poolCfg.MinConns = 2
+	poolCfg.MaxConnLifetime = 30 * time.Minute
+	poolCfg.MaxConnIdleTime = 5 * time.Minute
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, eris.Wrap(err, "fedsync: create connection pool")
 	}

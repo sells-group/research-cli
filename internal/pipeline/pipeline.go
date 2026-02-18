@@ -161,7 +161,13 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		}
 
 		if phase != nil {
-			_ = p.store.CompletePhase(ctx, phase.ID, phaseResult)
+			if cpErr := p.store.CompletePhase(ctx, phase.ID, phaseResult); cpErr != nil {
+				log.Warn("pipeline: failed to persist phase result",
+					zap.String("phase", name),
+					zap.String("phase_id", phase.ID),
+					zap.Error(cpErr),
+				)
+			}
 		}
 		phasesMu.Lock()
 		result.Phases = append(result.Phases, *phaseResult)

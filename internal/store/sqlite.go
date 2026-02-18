@@ -105,6 +105,10 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 );
 `
 
+func (s *SQLiteStore) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}
+
 func (s *SQLiteStore) Migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, sqliteMigration)
 	return eris.Wrap(err, "sqlite: migrate")
@@ -331,6 +335,28 @@ func (s *SQLiteStore) DeleteExpiredCrawls(ctx context.Context) (int, error) {
 	)
 	if err != nil {
 		return 0, eris.Wrap(err, "sqlite: delete expired crawls")
+	}
+	n, err := res.RowsAffected()
+	return int(n), eris.Wrap(err, "sqlite: rows affected")
+}
+
+func (s *SQLiteStore) DeleteExpiredLinkedIn(ctx context.Context) (int, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM linkedin_cache WHERE expires_at <= datetime('now')`,
+	)
+	if err != nil {
+		return 0, eris.Wrap(err, "sqlite: delete expired linkedin")
+	}
+	n, err := res.RowsAffected()
+	return int(n), eris.Wrap(err, "sqlite: rows affected")
+}
+
+func (s *SQLiteStore) DeleteExpiredScrapes(ctx context.Context) (int, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM scrape_cache WHERE expires_at <= datetime('now')`,
+	)
+	if err != nil {
+		return 0, eris.Wrap(err, "sqlite: delete expired scrapes")
 	}
 	n, err := res.RowsAffected()
 	return int(n), eris.Wrap(err, "sqlite: rows affected")

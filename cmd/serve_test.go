@@ -273,7 +273,7 @@ func TestWebhookEnrich_AcceptsUnderCapacity(t *testing.T) {
 	// Use the real buildMux (with the production semaphore of size 20) to
 	// verify that a single request is accepted when far under capacity.
 	ctx := context.Background()
-	mux := buildMux(ctx, nil)
+	mux := buildMux(ctx, nil, nil)
 
 	ts := httptest.NewServer(mux)
 	defer ts.Close()

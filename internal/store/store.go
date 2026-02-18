@@ -49,7 +49,12 @@ type Store interface {
 	LoadCheckpoint(ctx context.Context, companyID string) (*model.Checkpoint, error)
 	DeleteCheckpoint(ctx context.Context, companyID string) error
 
+	// Cache cleanup
+	DeleteExpiredLinkedIn(ctx context.Context) (int, error)
+	DeleteExpiredScrapes(ctx context.Context) (int, error)
+
 	// Lifecycle
+	Ping(ctx context.Context) error
 	Migrate(ctx context.Context) error
 	Close() error
 }

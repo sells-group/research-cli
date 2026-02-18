@@ -112,6 +112,19 @@ func TestInitPipeline_FailsOnMigrateError(t *testing.T) {
 			Driver:      "sqlite",
 			DatabaseURL: badDir, // directories are not valid SQLite databases
 		},
+		Anthropic: config.AnthropicConfig{Key: "test-key"},
+		Notion: config.NotionConfig{
+			Token:      "test-token",
+			LeadDB:     "test-lead-db",
+			QuestionDB: "test-question-db",
+			FieldDB:    "test-field-db",
+		},
+		Batch: config.BatchConfig{MaxConcurrentCompanies: 15},
+		Pipeline: config.PipelineConfig{
+			ConfidenceEscalationThreshold: 0.4,
+			QualityScoreThreshold:         0.6,
+			SkipConfidenceThreshold:       0.8,
+		},
 	}
 
 	env, pErr := initPipeline(context.Background())
@@ -121,8 +134,8 @@ func TestInitPipeline_FailsOnMigrateError(t *testing.T) {
 }
 
 func TestInitPipeline_FailsOnSalesforce_ClosesStore(t *testing.T) {
-	// Store succeeds (SQLite), SF returns nil gracefully, then fixture
-	// loading fails because testdata/ doesn't exist in the temp dir.
+	// Store succeeds (SQLite), SF returns nil gracefully, then
+	// loading fails because the Notion token is fake.
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(tmpDir))
@@ -133,15 +146,28 @@ func TestInitPipeline_FailsOnSalesforce_ClosesStore(t *testing.T) {
 			Driver:      "sqlite",
 			DatabaseURL: filepath.Join(tmpDir, "test_sf_close.db"),
 		},
+		Anthropic: config.AnthropicConfig{Key: "test-key"},
+		Notion: config.NotionConfig{
+			Token:      "test-token",
+			LeadDB:     "test-lead-db",
+			QuestionDB: "test-question-db",
+			FieldDB:    "test-field-db",
+		},
 		Salesforce: config.SalesforceConfig{
 			ClientID: "", // returns nil gracefully
+		},
+		Batch: config.BatchConfig{MaxConcurrentCompanies: 15},
+		Pipeline: config.PipelineConfig{
+			ConfidenceEscalationThreshold: 0.4,
+			QualityScoreThreshold:         0.6,
+			SkipConfidenceThreshold:       0.8,
 		},
 	}
 
 	env, err := initPipeline(context.Background())
 	assert.Nil(t, env)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "load question fixtures")
+	assert.Contains(t, err.Error(), "load question registry")
 }
 
 func TestInitPipeline_SFKeyNotFound_ClosesStore(t *testing.T) {
@@ -156,9 +182,22 @@ func TestInitPipeline_SFKeyNotFound_ClosesStore(t *testing.T) {
 			Driver:      "sqlite",
 			DatabaseURL: filepath.Join(tmpDir, "test_sf_key.db"),
 		},
+		Anthropic: config.AnthropicConfig{Key: "test-key"},
+		Notion: config.NotionConfig{
+			Token:      "test-token",
+			LeadDB:     "test-lead-db",
+			QuestionDB: "test-question-db",
+			FieldDB:    "test-field-db",
+		},
 		Salesforce: config.SalesforceConfig{
 			ClientID: "test-client-id",
 			KeyPath:  "/nonexistent/key.pem",
+		},
+		Batch: config.BatchConfig{MaxConcurrentCompanies: 15},
+		Pipeline: config.PipelineConfig{
+			ConfidenceEscalationThreshold: 0.4,
+			QualityScoreThreshold:         0.6,
+			SkipConfidenceThreshold:       0.8,
 		},
 	}
 

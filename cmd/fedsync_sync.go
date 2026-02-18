@@ -31,6 +31,10 @@ Use --full to perform a full reload instead of incremental sync.`,
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
+		if err := cfg.Validate("fedsync"); err != nil {
+			return err
+		}
+
 		log := zap.L().With(zap.String("command", "fedsync.sync"))
 
 		pool, err := fedsyncPool(ctx)

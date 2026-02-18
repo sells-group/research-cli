@@ -544,27 +544,20 @@ func TestExtractTier2_NoBatch_SkipsPrimer(t *testing.T) {
 
 // --- Cache control stripping ---
 
-func TestExtractTier1_BatchItems_NoCacheControl(t *testing.T) {
-	// Verify that batch item system blocks have NO CacheControl, while
-	// primer system blocks DO have CacheControl. This is a unit test of
-	// the block construction logic rather than an integration test.
+func TestExtractTier1_BatchItems_HaveCacheControl(t *testing.T) {
+	// Verify that both primer and batch items use BuildCachedSystemBlocks
+	// so batch items signal cache reads and benefit from the primer's warm cache.
 	const systemText = "You are a research analyst."
 
-	// Batch items use plain system blocks (no CacheControl).
-	batchBlocks := []anthropic.SystemBlock{{Text: systemText}}
-	require.Len(t, batchBlocks, 1)
-	assert.Nil(t, batchBlocks[0].CacheControl, "batch item system blocks should NOT have CacheControl")
-	assert.Equal(t, systemText, batchBlocks[0].Text)
-
-	// Primer uses BuildCachedSystemBlocks (has CacheControl).
-	primerBlocks := anthropic.BuildCachedSystemBlocks(systemText)
-	require.Len(t, primerBlocks, 1)
-	require.NotNil(t, primerBlocks[0].CacheControl, "primer system blocks SHOULD have CacheControl")
-	assert.Equal(t, "1h", primerBlocks[0].CacheControl.TTL)
-	assert.Equal(t, systemText, primerBlocks[0].Text)
+	// Both primer and batch items should use BuildCachedSystemBlocks.
+	blocks := anthropic.BuildCachedSystemBlocks(systemText)
+	require.Len(t, blocks, 1)
+	require.NotNil(t, blocks[0].CacheControl, "system blocks SHOULD have CacheControl")
+	assert.Equal(t, "1h", blocks[0].CacheControl.TTL)
+	assert.Equal(t, systemText, blocks[0].Text)
 }
 
-func TestExtractTier1_PrimerUsesCachedBlocks(t *testing.T) {
+func TestExtractTier1_AllRequestsUseCachedBlocks(t *testing.T) {
 	ctx := context.Background()
 
 	// Need 2+ items and NoBatch=false to trigger primer path.
@@ -577,29 +570,13 @@ func TestExtractTier1_PrimerUsesCachedBlocks(t *testing.T) {
 
 	aiClient := anthropicmocks.NewMockClient(t)
 
-	// Capture the primer request to verify it uses cached system blocks.
+	// All requests (primer + direct) should have CacheControl on system blocks.
 	aiClient.On("CreateMessage", mock.Anything, mock.MatchedBy(func(req anthropic.MessageRequest) bool {
-		// Primer request should have CacheControl on its system blocks.
-		if len(req.System) > 0 && req.System[0].CacheControl != nil {
-			return true
-		}
-		return false
-	})).Return(&anthropic.MessageResponse{
-		Content: []anthropic.ContentBlock{{Text: `{"value": "primer", "confidence": 0.9, "reasoning": "ok", "source_url": "https://acme.com"}`}},
-		Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
-	}, nil).Once()
-
-	// Direct calls for the 3 items (below default smallBatchThresholdT1=20).
-	aiClient.On("CreateMessage", mock.Anything, mock.MatchedBy(func(req anthropic.MessageRequest) bool {
-		// Non-primer requests should NOT have CacheControl.
-		if len(req.System) > 0 && req.System[0].CacheControl == nil {
-			return true
-		}
-		return false
+		return len(req.System) > 0 && req.System[0].CacheControl != nil
 	})).Return(&anthropic.MessageResponse{
 		Content: []anthropic.ContentBlock{{Text: `{"value": "answer", "confidence": 0.9, "reasoning": "ok", "source_url": "https://acme.com"}`}},
 		Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
-	}, nil).Times(3)
+	}, nil).Times(4) // 1 primer + 3 direct calls
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 	result, err := ExtractTier1(ctx, routed, aiClient, aiCfg)

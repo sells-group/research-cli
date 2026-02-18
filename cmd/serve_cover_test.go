@@ -12,8 +12,8 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 )
 
-func TestServeCmd_RunE_FailsOnInitPipeline(t *testing.T) {
-	// initPipeline will fail because store driver is unsupported.
+func TestServeCmd_RunE_FailsOnValidation(t *testing.T) {
+	// Config validation should fail fast with missing required fields.
 	cfg = &config.Config{
 		Store: config.StoreConfig{
 			Driver: "postgres",
@@ -25,5 +25,6 @@ func TestServeCmd_RunE_FailsOnInitPipeline(t *testing.T) {
 
 	err := serveCmd.RunE(serveCmd, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported store driver")
+	assert.Contains(t, err.Error(), "config: validation failed")
+	assert.Contains(t, err.Error(), "server.port must be > 0")
 }

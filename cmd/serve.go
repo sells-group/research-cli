@@ -15,6 +15,7 @@ import (
 
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/pipeline"
+	"github.com/sells-group/research-cli/internal/store"
 )
 
 var servePort int
@@ -24,12 +25,19 @@ const webhookSemSize = 20
 
 // buildMux constructs the HTTP handler for the webhook server.
 // It is extracted as a named function so it can be tested independently.
-func buildMux(ctx context.Context, p *pipeline.Pipeline) *http.ServeMux {
+func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store) *http.ServeMux {
 	mux := http.NewServeMux()
 	sem := make(chan struct{}, webhookSemSize)
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if st != nil {
+			if err := st.Ping(r.Context()); err != nil {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				json.NewEncoder(w).Encode(map[string]string{"status": "unhealthy", "error": err.Error()})
+				return
+			}
+		}
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
@@ -68,6 +76,15 @@ func buildMux(ctx context.Context, p *pipeline.Pipeline) *http.ServeMux {
 		// Run enrichment asynchronously
 		go func() {
 			defer func() { <-sem }()
+			defer func() {
+				if r := recover(); r != nil {
+					zap.L().Error("webhook enrichment panicked",
+						zap.String("company", company.URL),
+						zap.Any("panic", r),
+						zap.Stack("stack"),
+					)
+				}
+			}()
 			if p == nil {
 				zap.L().Error("webhook enrichment skipped: pipeline not initialized",
 					zap.String("company", company.URL))
@@ -105,13 +122,17 @@ var serveCmd = &cobra.Command{
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
+		if err := cfg.Validate("serve"); err != nil {
+			return err
+		}
+
 		env, err := initPipeline(ctx)
 		if err != nil {
 			return err
 		}
 		defer env.Close()
 
-		mux := buildMux(ctx, env.Pipeline)
+		mux := buildMux(ctx, env.Pipeline, env.Store)
 		port := resolvePort(servePort, cfg.Server.Port)
 		return startServer(ctx, mux, port)
 	},
@@ -125,8 +146,12 @@ func init() {
 // startServer creates and runs the HTTP server with graceful shutdown.
 func startServer(ctx context.Context, handler http.Handler, port int) error {
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: handler,
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      5 * time.Minute,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Graceful shutdown — use a fresh context since ctx is already cancelled.

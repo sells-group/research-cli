@@ -8,7 +8,6 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/packages/jsonl"
 	"github.com/rotisserie/eris"
-	"go.uber.org/zap"
 )
 
 // Client defines the Anthropic API operations used by the pipeline.
@@ -75,42 +74,6 @@ type TokenUsage struct {
 	OutputTokens             int64
 	CacheCreationInputTokens int64
 	CacheReadInputTokens     int64
-}
-
-// modelPricing holds per-million-token pricing for known models.
-var modelPricing = map[string][2]float64{
-	// model → {input $/MTok, output $/MTok}
-	"claude-haiku-4-5-20251001":  {0.80, 4.00},
-	"claude-sonnet-4-5-20250929": {3.00, 15.00},
-	"claude-opus-4-6":            {15.00, 75.00},
-}
-
-// EstimateCost computes an estimated cost in USD from a TokenUsage and model ID.
-// Returns 0 for unknown models.
-func (u TokenUsage) EstimateCost(model string) float64 {
-	pricing, ok := modelPricing[model]
-	if !ok {
-		return 0
-	}
-	inCost := (float64(u.InputTokens) / 1e6) * pricing[0]
-	outCost := (float64(u.OutputTokens) / 1e6) * pricing[1]
-	cacheWriteCost := (float64(u.CacheCreationInputTokens) / 1e6) * pricing[0] * 1.25
-	cacheReadCost := (float64(u.CacheReadInputTokens) / 1e6) * pricing[0] * 0.1
-	return inCost + outCost + cacheWriteCost + cacheReadCost
-}
-
-// LogCost logs token usage and estimated cost with structured zap fields.
-func (u TokenUsage) LogCost(model, phase string) {
-	cost := u.EstimateCost(model)
-	zap.L().Info("cost attribution",
-		zap.String("model", model),
-		zap.String("phase", phase),
-		zap.Int64("input_tokens", u.InputTokens),
-		zap.Int64("output_tokens", u.OutputTokens),
-		zap.Int64("cache_write_tokens", u.CacheCreationInputTokens),
-		zap.Int64("cache_read_tokens", u.CacheReadInputTokens),
-		zap.Float64("estimated_cost_usd", cost),
-	)
 }
 
 // BatchRequest is our own request type for CreateBatch.

@@ -15,6 +15,10 @@ var fedsyncMigrateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
+		if err := cfg.Validate("fedsync"); err != nil {
+			return err
+		}
+
 		pool, err := fedsyncPool(ctx)
 		if err != nil {
 			return err

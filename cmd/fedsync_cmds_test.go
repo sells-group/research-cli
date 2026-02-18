@@ -24,7 +24,7 @@ func TestFedsyncMigrateCmd_RunE_NoDSN(t *testing.T) {
 
 	err := fedsyncMigrateCmd.RunE(fedsyncMigrateCmd, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no database_url configured")
+	assert.Contains(t, err.Error(), "database_url")
 }
 
 func TestFedsyncStatusCmd_RunE_NoDSN(t *testing.T) {
@@ -57,7 +57,7 @@ func TestFedsyncSyncCmd_RunE_NoDSN(t *testing.T) {
 
 	err := fedsyncSyncCmd.RunE(fedsyncSyncCmd, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no database_url configured")
+	assert.Contains(t, err.Error(), "database_url")
 }
 
 func TestFedsyncXrefCmd_RunE_NoDSN(t *testing.T) {

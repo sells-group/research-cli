@@ -16,7 +16,7 @@ import (
 )
 
 func TestBuildMux_HealthEndpoint(t *testing.T) {
-	mux := buildMux(context.Background(), nil)
+	mux := buildMux(context.Background(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
@@ -33,7 +33,7 @@ func TestBuildMux_HealthEndpoint(t *testing.T) {
 
 func TestBuildMux_WebhookEnrich_Valid_NilPipeline(t *testing.T) {
 	// With a nil pipeline, the goroutine skips enrichment gracefully.
-	mux := buildMux(context.Background(), nil)
+	mux := buildMux(context.Background(), nil, nil)
 
 	payload := map[string]string{
 		"url":           "https://acme.com",
@@ -61,7 +61,7 @@ func TestBuildMux_WebhookEnrich_Valid_NilPipeline(t *testing.T) {
 }
 
 func TestBuildMux_WebhookEnrich_MissingURL(t *testing.T) {
-	mux := buildMux(context.Background(), nil)
+	mux := buildMux(context.Background(), nil, nil)
 
 	payload := map[string]string{
 		"salesforce_id": "001ABC",
@@ -79,7 +79,7 @@ func TestBuildMux_WebhookEnrich_MissingURL(t *testing.T) {
 }
 
 func TestBuildMux_WebhookEnrich_InvalidJSON(t *testing.T) {
-	mux := buildMux(context.Background(), nil)
+	mux := buildMux(context.Background(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhook/enrich", bytes.NewReader([]byte("not json")))
 	req.Header.Set("Content-Type", "application/json")
@@ -91,7 +91,7 @@ func TestBuildMux_WebhookEnrich_InvalidJSON(t *testing.T) {
 }
 
 func TestBuildMux_WebhookEnrich_EmptyBody(t *testing.T) {
-	mux := buildMux(context.Background(), nil)
+	mux := buildMux(context.Background(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhook/enrich", bytes.NewReader([]byte("{}")))
 	req.Header.Set("Content-Type", "application/json")
@@ -103,7 +103,7 @@ func TestBuildMux_WebhookEnrich_EmptyBody(t *testing.T) {
 }
 
 func TestBuildMux_WebhookEnrich_URLOnly_NilPipeline(t *testing.T) {
-	mux := buildMux(context.Background(), nil)
+	mux := buildMux(context.Background(), nil, nil)
 
 	payload := map[string]string{
 		"url": "https://minimal.com",

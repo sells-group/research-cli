@@ -43,6 +43,10 @@ func (pe *pipelineEnv) Close() {
 // initPipeline sets up the store, all API clients, loads registries, and
 // builds the Pipeline. Callers should defer env.Close().
 func initPipeline(ctx context.Context) (*pipelineEnv, error) {
+	if err := cfg.Validate("enrichment"); err != nil {
+		return nil, err
+	}
+
 	st, err := initStore(ctx)
 	if err != nil {
 		return nil, err

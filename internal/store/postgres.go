@@ -64,6 +64,8 @@ func NewPostgres(ctx context.Context, connString string, poolCfg *PoolConfig) (*
 	}
 	pgxCfg.MaxConns = maxConns
 	pgxCfg.MinConns = minConns
+	pgxCfg.MaxConnLifetime = 30 * time.Minute
+	pgxCfg.MaxConnIdleTime = 5 * time.Minute
 
 	// Prepare frequently-used statements on each new connection.
 	pgxCfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
@@ -148,6 +150,11 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 `
+
+func (s *PostgresStore) Ping(ctx context.Context) error {
+	_, err := s.pool.Exec(ctx, "SELECT 1")
+	return eris.Wrap(err, "postgres: ping")
+}
 
 func (s *PostgresStore) Migrate(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, postgresMigration)
@@ -423,6 +430,26 @@ func (s *PostgresStore) DeleteExpiredCrawls(ctx context.Context) (int, error) {
 	)
 	if err != nil {
 		return 0, eris.Wrap(err, "postgres: delete expired crawls")
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+func (s *PostgresStore) DeleteExpiredLinkedIn(ctx context.Context) (int, error) {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM linkedin_cache WHERE expires_at <= now()`,
+	)
+	if err != nil {
+		return 0, eris.Wrap(err, "postgres: delete expired linkedin")
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+func (s *PostgresStore) DeleteExpiredScrapes(ctx context.Context) (int, error) {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM scrape_cache WHERE expires_at <= now()`,
+	)
+	if err != nil {
+		return 0, eris.Wrap(err, "postgres: delete expired scrapes")
 	}
 	return int(tag.RowsAffected()), nil
 }

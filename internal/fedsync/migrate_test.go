@@ -33,12 +33,24 @@ func migrationFileNames(t *testing.T) []string {
 	return names
 }
 
+// expectAdvisoryLock adds the expected advisory lock acquire + release expectations.
+func expectAdvisoryLock(mock pgxmock.PgxPoolIface) {
+	mock.ExpectExec("SELECT pg_advisory_lock").WillReturnResult(pgxmock.NewResult("SELECT", 1))
+}
+
+func expectAdvisoryUnlock(mock pgxmock.PgxPoolIface) {
+	mock.ExpectExec("SELECT pg_advisory_unlock").WillReturnResult(pgxmock.NewResult("SELECT", 1))
+}
+
 func TestMigrate_FreshDB(t *testing.T) {
 	mock, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer mock.Close()
 
 	names := migrationFileNames(t)
+
+	// Advisory lock
+	expectAdvisoryLock(mock)
 
 	// ensureMigrationTable: CREATE SCHEMA + TABLE
 	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS").WillReturnResult(pgxmock.NewResult("CREATE", 0))
@@ -54,6 +66,9 @@ func TestMigrate_FreshDB(t *testing.T) {
 			WithArgs(name).
 			WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	}
+
+	// Advisory unlock
+	expectAdvisoryUnlock(mock)
 
 	err = Migrate(context.Background(), mock)
 	assert.NoError(t, err)
@@ -71,6 +86,9 @@ func TestMigrate_SomeAlreadyApplied(t *testing.T) {
 	// Mark first 3 as already applied.
 	alreadyApplied := names[:3]
 	pending := names[3:]
+
+	// Advisory lock
+	expectAdvisoryLock(mock)
 
 	// ensureMigrationTable
 	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS").WillReturnResult(pgxmock.NewResult("CREATE", 0))
@@ -90,6 +108,9 @@ func TestMigrate_SomeAlreadyApplied(t *testing.T) {
 			WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	}
 
+	// Advisory unlock
+	expectAdvisoryUnlock(mock)
+
 	err = Migrate(context.Background(), mock)
 	assert.NoError(t, err)
 	assert.NoError(t, mock.ExpectationsWereMet())
@@ -101,6 +122,9 @@ func TestMigrate_AllAlreadyApplied(t *testing.T) {
 	defer mock.Close()
 
 	names := migrationFileNames(t)
+
+	// Advisory lock
+	expectAdvisoryLock(mock)
 
 	// ensureMigrationTable
 	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS").WillReturnResult(pgxmock.NewResult("CREATE", 0))
@@ -114,6 +138,9 @@ func TestMigrate_AllAlreadyApplied(t *testing.T) {
 
 	// No Exec calls expected for migrations
 
+	// Advisory unlock
+	expectAdvisoryUnlock(mock)
+
 	err = Migrate(context.Background(), mock)
 	assert.NoError(t, err)
 	assert.NoError(t, mock.ExpectationsWereMet())
@@ -124,8 +151,14 @@ func TestMigrate_EnsureTableError(t *testing.T) {
 	require.NoError(t, err)
 	defer mock.Close()
 
+	// Advisory lock
+	expectAdvisoryLock(mock)
+
 	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS").
 		WillReturnError(fmt.Errorf("permission denied"))
+
+	// Advisory unlock (deferred)
+	expectAdvisoryUnlock(mock)
 
 	err = Migrate(context.Background(), mock)
 	require.Error(t, err)
@@ -138,9 +171,15 @@ func TestMigrate_QueryAppliedError(t *testing.T) {
 	require.NoError(t, err)
 	defer mock.Close()
 
+	// Advisory lock
+	expectAdvisoryLock(mock)
+
 	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectQuery("SELECT filename FROM fed_data.schema_migrations").
 		WillReturnError(fmt.Errorf("relation does not exist"))
+
+	// Advisory unlock (deferred)
+	expectAdvisoryUnlock(mock)
 
 	err = Migrate(context.Background(), mock)
 	require.Error(t, err)
@@ -156,12 +195,18 @@ func TestMigrate_ExecMigrationError(t *testing.T) {
 	names := migrationFileNames(t)
 	require.True(t, len(names) >= 1)
 
+	// Advisory lock
+	expectAdvisoryLock(mock)
+
 	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectQuery("SELECT filename FROM fed_data.schema_migrations").
 		WillReturnRows(pgxmock.NewRows([]string{"filename"}))
 
 	// First migration Exec fails
 	mock.ExpectExec(".*").WillReturnError(fmt.Errorf("syntax error"))
+
+	// Advisory unlock (deferred)
+	expectAdvisoryUnlock(mock)
 
 	err = Migrate(context.Background(), mock)
 	require.Error(t, err)
@@ -177,6 +222,9 @@ func TestMigrate_RecordMigrationError(t *testing.T) {
 	names := migrationFileNames(t)
 	require.True(t, len(names) >= 1)
 
+	// Advisory lock
+	expectAdvisoryLock(mock)
+
 	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectQuery("SELECT filename FROM fed_data.schema_migrations").
 		WillReturnRows(pgxmock.NewRows([]string{"filename"}))
@@ -188,9 +236,26 @@ func TestMigrate_RecordMigrationError(t *testing.T) {
 		WithArgs(names[0]).
 		WillReturnError(fmt.Errorf("disk full"))
 
+	// Advisory unlock (deferred)
+	expectAdvisoryUnlock(mock)
+
 	err = Migrate(context.Background(), mock)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "record migration")
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestMigrate_AdvisoryLockError(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectExec("SELECT pg_advisory_lock").
+		WillReturnError(fmt.Errorf("could not obtain lock"))
+
+	err = Migrate(context.Background(), mock)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "acquire migration advisory lock")
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 

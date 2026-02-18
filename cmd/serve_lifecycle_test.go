@@ -32,7 +32,7 @@ func TestBuildMux_ServerLifecycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mux := buildMux(ctx, nil)
+	mux := buildMux(ctx, nil, nil)
 
 	port := getFreePort(t)
 	srv := &http.Server{

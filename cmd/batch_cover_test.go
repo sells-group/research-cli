@@ -14,8 +14,8 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 )
 
-func TestBatchCmd_RunE_FailsOnInitPipeline_BadDriver(t *testing.T) {
-	// initPipeline will fail because store driver is unsupported.
+func TestBatchCmd_RunE_FailsOnValidation(t *testing.T) {
+	// Config validation should fail fast with missing required fields.
 	cfg = &config.Config{
 		Store: config.StoreConfig{
 			Driver: "postgres",
@@ -27,7 +27,7 @@ func TestBatchCmd_RunE_FailsOnInitPipeline_BadDriver(t *testing.T) {
 
 	err := batchCmd.RunE(batchCmd, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported store driver")
+	assert.Contains(t, err.Error(), "config: validation failed")
 }
 
 func TestBatchCmd_RunE_FailsOnInitPipeline_BadSF(t *testing.T) {
@@ -43,8 +43,21 @@ func TestBatchCmd_RunE_FailsOnInitPipeline_BadSF(t *testing.T) {
 			Driver:      "sqlite",
 			DatabaseURL: filepath.Join(tmpDir, "test_batch.db"),
 		},
+		Anthropic: config.AnthropicConfig{Key: "test-key"},
+		Notion: config.NotionConfig{
+			Token:      "test-token",
+			LeadDB:     "test-lead-db",
+			QuestionDB: "test-question-db",
+			FieldDB:    "test-field-db",
+		},
 		Salesforce: config.SalesforceConfig{
 			ClientID: "",
+		},
+		Batch: config.BatchConfig{MaxConcurrentCompanies: 15},
+		Pipeline: config.PipelineConfig{
+			ConfidenceEscalationThreshold: 0.4,
+			QualityScoreThreshold:         0.6,
+			SkipConfidenceThreshold:       0.8,
 		},
 	}
 
@@ -53,5 +66,6 @@ func TestBatchCmd_RunE_FailsOnInitPipeline_BadSF(t *testing.T) {
 
 	err := batchCmd.RunE(batchCmd, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "load question fixtures")
+	// Fails loading registries from Notion (fake token).
+	assert.Contains(t, err.Error(), "load question registry")
 }

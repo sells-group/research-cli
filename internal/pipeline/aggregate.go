@@ -58,8 +58,8 @@ func MergeAnswers(t1, t2, t3 []model.ExtractionAnswer) []model.ExtractionAnswer 
 				}
 			}
 
-			// Higher tier always wins if existing is null or new has reasonable confidence.
-			if a.Tier > existing.Tier && (existing.Value == nil || a.Confidence >= 0.3) {
+			// Higher tier wins if existing is null or new has at least half the existing confidence.
+			if a.Tier > existing.Tier && (existing.Value == nil || a.Confidence >= existing.Confidence*0.5) {
 				best[a.FieldKey] = a
 				continue
 			}

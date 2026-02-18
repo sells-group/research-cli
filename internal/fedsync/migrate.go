@@ -20,6 +20,16 @@ var migrationFS embed.FS
 func Migrate(ctx context.Context, pool db.Pool) error {
 	log := zap.L().With(zap.String("component", "fedsync.migrate"))
 
+	// Advisory lock prevents concurrent migration runs (e.g. overlapping deploys).
+	if _, err := pool.Exec(ctx, "SELECT pg_advisory_lock(8675309)"); err != nil {
+		return eris.Wrap(err, "fedsync: acquire migration advisory lock")
+	}
+	defer func() {
+		if _, err := pool.Exec(ctx, "SELECT pg_advisory_unlock(8675309)"); err != nil {
+			log.Warn("fedsync: failed to release migration advisory lock", zap.Error(err))
+		}
+	}()
+
 	// Ensure schema and tracking table exist.
 	if err := ensureMigrationTable(ctx, pool); err != nil {
 		return err
