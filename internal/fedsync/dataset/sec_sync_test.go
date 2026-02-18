@@ -180,6 +180,7 @@ func TestEDGARSubmissions_Sync_MultipleEntities(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
+	pool.MatchExpectationsInOrder(false)
 
 	f := fetchermocks.NewMockFetcher(t)
 	tempDir := t.TempDir()

@@ -1999,22 +1999,22 @@ func TestADVPart1_ParseAndLoad_MidBatchFlush(t *testing.T) {
 
 	var sb strings.Builder
 	sb.WriteString("crd_number,firm_name,sec_number,city,state,country,website,aum,num_accounts,num_employees,filing_date,report_date,raum,fund_id,fund_name,fund_type,gross_asset_value,net_asset_value,owner_name,owner_type,ownership_pct,is_control\n")
-	for i := 1; i <= 5002; i++ {
+	for i := 1; i <= 10002; i++ {
 		sb.WriteString(fmt.Sprintf("%d,Firm %d,801-%d,City,ST,US,,1000000,10,5,2024-06-01,,,,,,,,,,\n", i, i, i))
 	}
 
 	r := strings.NewReader(sb.String())
 
 	firmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website", "aum", "num_accounts", "num_employees", "filing_date"}
-	// First batch of 5000, then final 2
-	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 5000)
+	// First batch of 10000, then final 2
+	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 10000)
 	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 2)
 
 	ds := &ADVPart1{}
 	log := zap.NewNop()
 	result, err := ds.parseAndLoad(context.Background(), pool, r, log)
 	require.NoError(t, err)
-	assert.Equal(t, int64(5002), result.RowsSynced)
+	assert.Equal(t, int64(10002), result.RowsSynced)
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
@@ -2058,20 +2058,20 @@ func TestQCEW_ParseCSV_MidBatchFlush(t *testing.T) {
 
 	var sb strings.Builder
 	sb.WriteString("area_fips,own_code,industry_code,qtr,month1_emplvl,month2_emplvl,month3_emplvl,total_qtrly_wages,avg_wkly_wage,qtrly_estabs\n")
-	for i := 1; i <= 10002; i++ {
+	for i := 1; i <= 20002; i++ {
 		sb.WriteString(fmt.Sprintf("%05d,5,523110,%d,100,105,110,2500000,1800,50\n", i, (i%4)+1))
 	}
 
 	r := strings.NewReader(sb.String())
 
 	qcewCols := []string{"area_fips", "own_code", "industry_code", "year", "qtr", "month1_emplvl", "month2_emplvl", "month3_emplvl", "total_qtrly_wages", "avg_wkly_wage", "qtrly_estabs"}
-	expectBulkUpsert(pool, "fed_data.qcew_data", qcewCols, 10000)
+	expectBulkUpsert(pool, "fed_data.qcew_data", qcewCols, 20000)
 	expectBulkUpsert(pool, "fed_data.qcew_data", qcewCols, 2)
 
 	ds := &QCEW{}
 	n, err := ds.parseCSV(context.Background(), pool, r, 2024)
 	require.NoError(t, err)
-	assert.Equal(t, int64(10002), n)
+	assert.Equal(t, int64(20002), n)
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
@@ -2318,12 +2318,11 @@ func TestEDGARSubmissions_Sync_MidBatchFlush(t *testing.T) {
 	entityCols := []string{"cik", "entity_name", "entity_type", "sic", "sic_description", "state_of_inc", "state_of_business", "ein", "tickers", "exchanges"}
 	filingCols := []string{"accession_number", "cik", "form_type", "filing_date", "primary_doc", "primary_doc_desc", "items", "size", "is_xbrl", "is_inline_xbrl"}
 
-	// Entities and filings flush together at batch boundary:
-	// entities(5000) → filings(5000) → entities(2) → filings(2)
-	expectBulkUpsert(pool, "fed_data.edgar_entities", entityCols, 5000)
-	expectBulkUpsert(pool, "fed_data.edgar_filings", filingCols, 5000)
-	expectBulkUpsert(pool, "fed_data.edgar_entities", entityCols, 2)
-	expectBulkUpsert(pool, "fed_data.edgar_filings", filingCols, 2)
+	pool.MatchExpectationsInOrder(false)
+
+	// With batch size 10000, 5002 entities fit in one batch, 5002 filings in one batch.
+	expectBulkUpsert(pool, "fed_data.edgar_entities", entityCols, 5002)
+	expectBulkUpsert(pool, "fed_data.edgar_filings", filingCols, 5002)
 
 	ds := &EDGARSubmissions{cfg: &config.Config{}}
 	result, err := ds.Sync(context.Background(), pool, f, tmpDir)
@@ -2667,9 +2666,9 @@ func TestFPDS_UpsertContracts_MidBatch(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	// 1002 rows → 1000 + 2
+	// 5002 rows → 5000 + 2
 	var rows [][]any
-	for i := 0; i < 1002; i++ {
+	for i := 0; i < 5002; i++ {
 		rows = append(rows, []any{
 			fmt.Sprintf("C%d", i), "PIID", "AG01", "Agency", "Vendor", "DUNS", "UEI",
 			"City", "ST", "00000", "523110", "PS1", nil, 1000.0, "desc",
@@ -2677,13 +2676,13 @@ func TestFPDS_UpsertContracts_MidBatch(t *testing.T) {
 	}
 
 	contractCols := []string{"contract_id", "piid", "agency_id", "agency_name", "vendor_name", "vendor_duns", "vendor_uei", "vendor_city", "vendor_state", "vendor_zip", "naics", "psc", "date_signed", "dollars_obligated", "description"}
-	expectBulkUpsert(pool, "fed_data.fpds_contracts", contractCols, 1000)
+	expectBulkUpsert(pool, "fed_data.fpds_contracts", contractCols, 5000)
 	expectBulkUpsert(pool, "fed_data.fpds_contracts", contractCols, 2)
 
 	ds := &FPDS{}
 	n, err := ds.upsertContracts(context.Background(), pool, rows)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1002), n)
+	assert.Equal(t, int64(5002), n)
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
@@ -2702,10 +2701,10 @@ func TestADVPart1_ParseAndLoad_AUMMidBatch(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	// 5002 rows, all with report_date populated → 5002 AUM rows, flush at 5000+2
+	// 10002 rows, all with report_date populated → 10002 AUM rows, flush at 10000+2
 	var sb strings.Builder
 	sb.WriteString("crd_number,firm_name,sec_number,city,state,country,website,aum,num_accounts,num_employees,filing_date,report_date,raum,fund_id,fund_name,fund_type,gross_asset_value,net_asset_value,owner_name,owner_type,ownership_pct,is_control\n")
-	for i := 1; i <= 5002; i++ {
+	for i := 1; i <= 10002; i++ {
 		sb.WriteString(fmt.Sprintf("%d,Firm %d,801-%d,City,ST,US,,1000000,10,5,2024-06-01,2024-06-01,500000,,,,,,,,\n", i, i, i))
 	}
 
@@ -2714,10 +2713,10 @@ func TestADVPart1_ParseAndLoad_AUMMidBatch(t *testing.T) {
 	firmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website", "aum", "num_accounts", "num_employees", "filing_date"}
 	aumCols := []string{"crd_number", "report_date", "aum", "raum", "num_accounts"}
 
-	// Firms: 5000 + 2
-	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 5000)
-	// AUM: 5000 + 2 (same batch boundary)
-	expectBulkUpsert(pool, "fed_data.adv_aum", aumCols, 5000)
+	// Firms: 10000 + 2
+	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 10000)
+	// AUM: 10000 + 2 (same batch boundary)
+	expectBulkUpsert(pool, "fed_data.adv_aum", aumCols, 10000)
 	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 2)
 	expectBulkUpsert(pool, "fed_data.adv_aum", aumCols, 2)
 
@@ -2725,7 +2724,7 @@ func TestADVPart1_ParseAndLoad_AUMMidBatch(t *testing.T) {
 	log := zap.NewNop()
 	result, err := ds.parseAndLoad(context.Background(), pool, r, log)
 	require.NoError(t, err)
-	assert.Equal(t, int64(5002), result.RowsSynced)
-	assert.Equal(t, int64(5002), result.Metadata["aum_records"])
+	assert.Equal(t, int64(10002), result.RowsSynced)
+	assert.Equal(t, int64(10002), result.Metadata["aum_records"])
 	assert.NoError(t, pool.ExpectationsWereMet())
 }

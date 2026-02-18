@@ -129,6 +129,7 @@ func TestCBP_Sync_Success(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
+	pool.MatchExpectationsInOrder(false)
 
 	f := fetchermocks.NewMockFetcher(t)
 
@@ -178,6 +179,7 @@ func TestCBP_Sync_FiltersIrrelevantNAICS(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
+	pool.MatchExpectationsInOrder(false)
 
 	f := fetchermocks.NewMockFetcher(t)
 
@@ -494,6 +496,7 @@ func TestQCEW_Sync_Success(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
+	pool.MatchExpectationsInOrder(false)
 
 	f := fetchermocks.NewMockFetcher(t)
 
@@ -545,6 +548,7 @@ func TestQCEW_Sync_SkipsAnnualAggregate(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
+	pool.MatchExpectationsInOrder(false)
 
 	f := fetchermocks.NewMockFetcher(t)
 
@@ -585,6 +589,7 @@ func TestQCEW_Sync_SkipsIrrelevantFiles(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
+	pool.MatchExpectationsInOrder(false)
 
 	f := fetchermocks.NewMockFetcher(t)
 
@@ -624,6 +629,7 @@ func TestQCEW_Sync_MultipleRelevantFiles(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
+	pool.MatchExpectationsInOrder(false)
 
 	f := fetchermocks.NewMockFetcher(t)
 
@@ -662,6 +668,7 @@ func TestQCEW_Sync_FiltersIrrelevantNAICS(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
+	pool.MatchExpectationsInOrder(false)
 
 	f := fetchermocks.NewMockFetcher(t)
 

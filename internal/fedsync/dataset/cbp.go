@@ -9,11 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/rotisserie/eris"
 	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/fedsync/transform"
 	"github.com/sells-group/research-cli/internal/fetcher"
@@ -38,40 +40,45 @@ func (d *CBP) ShouldRun(now time.Time, lastSync *time.Time) bool {
 
 func (d *CBP) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "cbp"))
-	var totalRows int64
+	var totalRows atomic.Int64
 
 	currentYear := time.Now().Year() - 1 // CBP data lags by ~1 year
 
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(3)
+
 	for year := cbpStartYear; year <= currentYear; year++ {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
+		year := year
+		g.Go(func() error {
+			yy := fmt.Sprintf("%02d", year%100)
+			url := fmt.Sprintf("https://www2.census.gov/programs-surveys/cbp/datasets/%d/cbp%sco.zip", year, yy)
 
-		yy := fmt.Sprintf("%02d", year%100)
-		url := fmt.Sprintf("https://www2.census.gov/programs-surveys/cbp/datasets/%d/cbp%sco.zip", year, yy)
+			log.Info("downloading CBP data", zap.Int("year", year), zap.String("url", url))
 
-		log.Info("downloading CBP data", zap.Int("year", year), zap.String("url", url))
+			zipPath := filepath.Join(tempDir, fmt.Sprintf("cbp%sco.zip", yy))
+			if _, err := f.DownloadToFile(gctx, url, zipPath); err != nil {
+				return eris.Wrapf(err, "cbp: download year %d", year)
+			}
 
-		zipPath := filepath.Join(tempDir, fmt.Sprintf("cbp%sco.zip", yy))
-		if _, err := f.DownloadToFile(ctx, url, zipPath); err != nil {
-			return nil, eris.Wrapf(err, "cbp: download year %d", year)
-		}
+			rows, err := d.processZip(gctx, pool, zipPath, year)
+			if err != nil {
+				return eris.Wrapf(err, "cbp: process year %d", year)
+			}
 
-		rows, err := d.processZip(ctx, pool, zipPath, year)
-		if err != nil {
-			return nil, eris.Wrapf(err, "cbp: process year %d", year)
-		}
+			totalRows.Add(rows)
+			log.Info("processed CBP year", zap.Int("year", year), zap.Int64("rows", rows))
 
-		totalRows += rows
-		log.Info("processed CBP year", zap.Int("year", year), zap.Int64("rows", rows))
+			_ = os.Remove(zipPath)
+			return nil
+		})
+	}
 
-		_ = os.Remove(zipPath)
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 
 	return &SyncResult{
-		RowsSynced: totalRows,
+		RowsSynced: totalRows.Load(),
 		Metadata:   map[string]any{"start_year": cbpStartYear, "end_year": currentYear},
 	}, nil
 }

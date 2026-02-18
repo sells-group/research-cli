@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rotisserie/eris"
 	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/fetcher"
@@ -20,7 +22,7 @@ import (
 
 const (
 	submissionsZipURL    = "https://data.sec.gov/submissions/submissions.zip"
-	submissionsBatchSize = 5000
+	submissionsBatchSize = 10000
 )
 
 // EDGARSubmissions implements the EDGAR Submissions bulk JSON dataset.
@@ -95,145 +97,127 @@ func (d *EDGARSubmissions) Sync(ctx context.Context, pool db.Pool, f fetcher.Fet
 
 	log.Info("extracted submission files", zap.Int("count", len(files)))
 
-	var totalEntities, totalFilings int64
-
 	entityCols := []string{"cik", "entity_name", "entity_type", "sic", "sic_description", "state_of_inc", "state_of_business", "ein", "tickers", "exchanges"}
 	entityConflict := []string{"cik"}
 
 	filingCols := []string{"accession_number", "cik", "form_type", "filing_date", "primary_doc", "primary_doc_desc", "items", "size", "is_xbrl", "is_inline_xbrl"}
 	filingConflict := []string{"accession_number"}
 
+	// Parallel decode: collect parsed rows from worker pool.
+	type parsedResult struct {
+		entityRow  []any
+		filingRows [][]any
+	}
+
+	var mu sync.Mutex
 	var entityBatch [][]any
 	var filingBatch [][]any
+	var totalEntities, totalFilings int64
 
-	for _, filePath := range files {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(5)
 
-		if !strings.HasSuffix(filePath, ".json") {
+	for _, fp := range files {
+		fp := fp
+		if !strings.HasSuffix(fp, ".json") {
 			continue
 		}
-
-		// Skip supplemental files (filings-*.json).
-		base := filepath.Base(filePath)
+		base := filepath.Base(fp)
 		if strings.HasPrefix(base, "filings-") {
 			continue
 		}
 
-		sub, err := d.parseSubmissionFile(filePath)
-		if err != nil {
-			log.Debug("skip submission file", zap.String("file", base), zap.Error(err))
-			continue
-		}
-
-		cik := strings.TrimLeft(sub.CIK.String(), "0")
-		if cik == "" || sub.Name == "" {
-			continue
-		}
-
-		// Pad CIK to 10 chars for consistency.
-		cik = fmt.Sprintf("%010s", cik)
-		if len(cik) > 10 {
-			cik = cik[:10]
-		}
-
-		// Parse business state from addresses if available.
-		stateOfBusiness := ""
-
-		entityRow := []any{
-			cik,
-			sub.Name,
-			sub.EntityType,
-			sub.SIC,
-			sub.SICDescription,
-			sub.StateOfInc,
-			stateOfBusiness,
-			sub.EIN,
-			sub.Tickers,
-			sub.Exchanges,
-		}
-		entityBatch = append(entityBatch, entityRow)
-
-		// Process recent filings.
-		recent := sub.RecentFilings.Recent
-		numFilings := len(recent.AccessionNumber)
-		for i := range numFilings {
-			accession := recent.AccessionNumber[i]
-			if accession == "" {
-				continue
+		g.Go(func() error {
+			select {
+			case <-gctx.Done():
+				return gctx.Err()
+			default:
 			}
 
-			formType := safeIndex(recent.Form, i)
-			fileDateStr := safeIndex(recent.FilingDate, i)
-			filingDate := parseDate(fileDateStr)
-			primaryDoc := safeIndex(recent.PrimaryDoc, i)
-			primaryDocDesc := safeIndex(recent.PrimaryDocDesc, i)
-			items := safeIndex(recent.Items, i)
-			size := safeIntIndex(recent.Size, i)
-			isXBRL := safeIntIndex(recent.IsXBRL, i) == 1
-			isInlineXBRL := safeIntIndex(recent.IsInlineXBRL, i) == 1
-
-			filingRow := []any{
-				accession,
-				cik,
-				formType,
-				filingDate,
-				primaryDoc,
-				primaryDocDesc,
-				items,
-				size,
-				isXBRL,
-				isInlineXBRL,
-			}
-			filingBatch = append(filingBatch, filingRow)
-		}
-
-		// Flush entity batch.
-		if len(entityBatch) >= submissionsBatchSize {
-			n, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{
-				Table: "fed_data.edgar_entities", Columns: entityCols, ConflictKeys: entityConflict,
-			}, entityBatch)
+			sub, err := d.parseSubmissionFile(fp)
 			if err != nil {
-				return nil, eris.Wrap(err, "edgar_submissions: upsert entities")
+				log.Debug("skip submission file", zap.String("file", base), zap.Error(err))
+				return nil
 			}
-			totalEntities += n
-			entityBatch = entityBatch[:0]
-		}
 
-		// Flush filing batch.
-		if len(filingBatch) >= submissionsBatchSize {
-			n, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{
-				Table: "fed_data.edgar_filings", Columns: filingCols, ConflictKeys: filingConflict,
-			}, filingBatch)
-			if err != nil {
-				return nil, eris.Wrap(err, "edgar_submissions: upsert filings")
+			cik := strings.TrimLeft(sub.CIK.String(), "0")
+			if cik == "" || sub.Name == "" {
+				return nil
 			}
-			totalFilings += n
-			filingBatch = filingBatch[:0]
-		}
+
+			cik = fmt.Sprintf("%010s", cik)
+			if len(cik) > 10 {
+				cik = cik[:10]
+			}
+
+			stateOfBusiness := ""
+
+			entityRow := []any{
+				cik, sub.Name, sub.EntityType, sub.SIC, sub.SICDescription,
+				sub.StateOfInc, stateOfBusiness, sub.EIN, sub.Tickers, sub.Exchanges,
+			}
+
+			var filingRows [][]any
+			recent := sub.RecentFilings.Recent
+			numFilings := len(recent.AccessionNumber)
+			for i := range numFilings {
+				accession := recent.AccessionNumber[i]
+				if accession == "" {
+					continue
+				}
+
+				filingRows = append(filingRows, []any{
+					accession, cik,
+					safeIndex(recent.Form, i),
+					parseDate(safeIndex(recent.FilingDate, i)),
+					safeIndex(recent.PrimaryDoc, i),
+					safeIndex(recent.PrimaryDocDesc, i),
+					safeIndex(recent.Items, i),
+					safeIntIndex(recent.Size, i),
+					safeIntIndex(recent.IsXBRL, i) == 1,
+					safeIntIndex(recent.IsInlineXBRL, i) == 1,
+				})
+			}
+
+			mu.Lock()
+			entityBatch = append(entityBatch, entityRow)
+			filingBatch = append(filingBatch, filingRows...)
+			mu.Unlock()
+
+			return nil
+		})
 	}
 
-	// Flush remaining entity batch.
-	if len(entityBatch) > 0 {
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	// Upsert all collected entities in batches.
+	for i := 0; i < len(entityBatch); i += submissionsBatchSize {
+		end := i + submissionsBatchSize
+		if end > len(entityBatch) {
+			end = len(entityBatch)
+		}
 		n, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{
 			Table: "fed_data.edgar_entities", Columns: entityCols, ConflictKeys: entityConflict,
-		}, entityBatch)
+		}, entityBatch[i:end])
 		if err != nil {
-			return nil, eris.Wrap(err, "edgar_submissions: upsert entities final")
+			return nil, eris.Wrap(err, "edgar_submissions: upsert entities")
 		}
 		totalEntities += n
 	}
 
-	// Flush remaining filing batch.
-	if len(filingBatch) > 0 {
+	// Upsert all collected filings in batches.
+	for i := 0; i < len(filingBatch); i += submissionsBatchSize {
+		end := i + submissionsBatchSize
+		if end > len(filingBatch) {
+			end = len(filingBatch)
+		}
 		n, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{
 			Table: "fed_data.edgar_filings", Columns: filingCols, ConflictKeys: filingConflict,
-		}, filingBatch)
+		}, filingBatch[i:end])
 		if err != nil {
-			return nil, eris.Wrap(err, "edgar_submissions: upsert filings final")
+			return nil, eris.Wrap(err, "edgar_submissions: upsert filings")
 		}
 		totalFilings += n
 	}

@@ -1,10 +1,16 @@
 package dataset
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/pashagolub/pgxmock/v4"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	fetchermocks "github.com/sells-group/research-cli/internal/fetcher/mocks"
 )
 
 func TestQCEW_Metadata(t *testing.T) {
@@ -53,4 +59,48 @@ func TestQCEW_IsRelevantFile(t *testing.T) {
 	assert.True(t, ds.isRelevantFile("path/to/10 total all.csv"))
 	assert.False(t, ds.isRelevantFile("2023.q1-q4 31 NAICS 31.csv"))
 	assert.False(t, ds.isRelevantFile("readme.txt"))
+}
+
+func TestQCEW_Sync_NoRelevantFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	// ZIP contains only irrelevant files: a non-CSV and an irrelevant NAICS CSV.
+	files := map[string]string{
+		"readme.txt":                    "QCEW data readme",
+		"2023.q1-q4 31 NAICS 31.csv":   qcewCSVHeader + "36000,5,311110,70,0,2023,1,3000,3100,3200,100000000,2000,500\n",
+	}
+
+	zipPath := createTestZipMulti(t, dir, "qcew_no_relevant.zip", files)
+
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+	pool.MatchExpectationsInOrder(false)
+
+	f := fetchermocks.NewMockFetcher(t)
+
+	numYears := currentDataYear() - qcewStartYear + 1
+	mockDownloadToFile(f, zipPath).Times(numYears)
+
+	// No BulkUpsert expected since no relevant files pass isRelevantFile.
+
+	ds := &QCEW{}
+	result, err := ds.Sync(context.Background(), pool, f, dir)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.RowsSynced)
+	assert.NoError(t, pool.ExpectationsWereMet())
+}
+
+func TestQCEW_Sync_DownloadFailure(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	f := fetchermocks.NewMockFetcher(t)
+	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
+		Return(int64(0), assert.AnError)
+
+	ds := &QCEW{}
+	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
+	assert.Error(t, err)
 }

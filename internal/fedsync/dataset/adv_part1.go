@@ -18,7 +18,7 @@ import (
 
 const (
 	advDataURL   = "https://www.sec.gov/files/data/investment-adviser-data/adv-data-current.csv"
-	advBatchSize = 5000
+	advBatchSize = 10000
 )
 
 // ADVPart1 implements the SEC ADV Part 1A bulk CSV dataset.

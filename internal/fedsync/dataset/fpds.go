@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	fpdsBatchSize = 1000
+	fpdsBatchSize = 5000
 	fpdsPageSize  = 100
 	fpdsBaseURL   = "https://api.sam.gov/opportunities/v2/search"
 )

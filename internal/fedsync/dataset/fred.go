@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/rotisserie/eris"
 	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/fetcher"
@@ -59,45 +61,62 @@ func (d *FRED) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDi
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing FRED data")
 
+	var mu sync.Mutex
 	var allRows [][]any
 
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(5)
+
 	for _, seriesID := range fredTargetSeries {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		url := fmt.Sprintf("https://api.stlouisfed.org/fred/series/observations?series_id=%s&api_key=%s&file_type=json&sort_order=desc&limit=120",
-			seriesID, d.cfg.Fedsync.FREDKey)
-
-		body, err := f.Download(ctx, url)
-		if err != nil {
-			log.Warn("skip series", zap.String("series", seriesID), zap.Error(err))
-			continue
-		}
-
-		data, err := io.ReadAll(body)
-		body.Close()
-		if err != nil {
-			continue
-		}
-
-		var resp fredResponse
-		if err := json.Unmarshal(data, &resp); err != nil {
-			continue
-		}
-
-		for _, obs := range resp.Observations {
-			if obs.Value == "." {
-				continue
+		seriesID := seriesID
+		g.Go(func() error {
+			select {
+			case <-gctx.Done():
+				return gctx.Err()
+			default:
 			}
-			allRows = append(allRows, []any{
-				seriesID,
-				obs.Date,
-				parseFloat64Or(obs.Value, 0),
-			})
-		}
+
+			url := fmt.Sprintf("https://api.stlouisfed.org/fred/series/observations?series_id=%s&api_key=%s&file_type=json&sort_order=desc&limit=120",
+				seriesID, d.cfg.Fedsync.FREDKey)
+
+			body, err := f.Download(gctx, url)
+			if err != nil {
+				log.Warn("skip series", zap.String("series", seriesID), zap.Error(err))
+				return nil
+			}
+
+			data, err := io.ReadAll(body)
+			body.Close()
+			if err != nil {
+				return nil
+			}
+
+			var resp fredResponse
+			if err := json.Unmarshal(data, &resp); err != nil {
+				return nil
+			}
+
+			var rows [][]any
+			for _, obs := range resp.Observations {
+				if obs.Value == "." {
+					continue
+				}
+				rows = append(rows, []any{
+					seriesID,
+					obs.Date,
+					parseFloat64Or(obs.Value, 0),
+				})
+			}
+
+			mu.Lock()
+			allRows = append(allRows, rows...)
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, eris.Wrap(err, "fred: fetch series")
 	}
 
 	n, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{

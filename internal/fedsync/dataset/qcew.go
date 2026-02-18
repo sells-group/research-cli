@@ -9,11 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/rotisserie/eris"
 	"github.com/sells-group/research-cli/internal/db"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/fedsync/transform"
 	"github.com/sells-group/research-cli/internal/fetcher"
@@ -21,7 +23,7 @@ import (
 
 const (
 	qcewStartYear = 2019
-	qcewBatchSize = 10000
+	qcewBatchSize = 20000
 	qcewLagMonths = 5
 )
 
@@ -39,38 +41,43 @@ func (d *QCEW) ShouldRun(now time.Time, lastSync *time.Time) bool {
 
 func (d *QCEW) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "qcew"))
-	var totalRows int64
+	var totalRows atomic.Int64
 
 	currentYear := time.Now().Year() - 1
 
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(3)
+
 	for year := qcewStartYear; year <= currentYear; year++ {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
+		year := year
+		g.Go(func() error {
+			url := fmt.Sprintf("https://data.bls.gov/cew/data/files/%d/csv/%d_qtrly_by_industry.zip", year, year)
+			log.Info("downloading QCEW data", zap.Int("year", year), zap.String("url", url))
 
-		url := fmt.Sprintf("https://data.bls.gov/cew/data/files/%d/csv/%d_qtrly_by_industry.zip", year, year)
-		log.Info("downloading QCEW data", zap.Int("year", year), zap.String("url", url))
+			zipPath := filepath.Join(tempDir, fmt.Sprintf("qcew_%d.zip", year))
+			if _, err := f.DownloadToFile(gctx, url, zipPath); err != nil {
+				return eris.Wrapf(err, "qcew: download year %d", year)
+			}
 
-		zipPath := filepath.Join(tempDir, fmt.Sprintf("qcew_%d.zip", year))
-		if _, err := f.DownloadToFile(ctx, url, zipPath); err != nil {
-			return nil, eris.Wrapf(err, "qcew: download year %d", year)
-		}
+			rows, err := d.processZip(gctx, pool, zipPath, year)
+			if err != nil {
+				return eris.Wrapf(err, "qcew: process year %d", year)
+			}
 
-		rows, err := d.processZip(ctx, pool, zipPath, year)
-		if err != nil {
-			return nil, eris.Wrapf(err, "qcew: process year %d", year)
-		}
+			totalRows.Add(rows)
+			log.Info("processed QCEW year", zap.Int("year", year), zap.Int64("rows", rows))
 
-		totalRows += rows
-		log.Info("processed QCEW year", zap.Int("year", year), zap.Int64("rows", rows))
+			_ = os.Remove(zipPath)
+			return nil
+		})
+	}
 
-		_ = os.Remove(zipPath)
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 
 	return &SyncResult{
-		RowsSynced: totalRows,
+		RowsSynced: totalRows.Load(),
 		Metadata:   map[string]any{"start_year": qcewStartYear, "end_year": currentYear},
 	}, nil
 }

@@ -52,7 +52,7 @@ func (d *XBRLFacts) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, t
 	log.Info("fetching company facts", zap.Int("cik_count", len(ciks)))
 
 	var totalRows int64
-	const batchSize = 500
+	const batchSize = 5000
 
 	var rows [][]any
 

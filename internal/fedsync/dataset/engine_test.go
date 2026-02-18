@@ -163,6 +163,7 @@ func newMockSyncLog(t *testing.T) (pgxmock.PgxPoolIface, *fedsync.SyncLog) {
 
 func TestEngine_Run_Success(t *testing.T) {
 	mock, syncLog := newMockSyncLog(t)
+	mock.MatchExpectationsInOrder(false)
 
 	ds := &mockDataset{name: "test_ds", phase: Phase1, shouldRun: true, syncRows: 100}
 	reg := &Registry{datasets: map[string]Dataset{"test_ds": ds}, order: []string{"test_ds"}}
@@ -191,6 +192,7 @@ func TestEngine_Run_Success(t *testing.T) {
 
 func TestEngine_Run_Skip(t *testing.T) {
 	mock, syncLog := newMockSyncLog(t)
+	mock.MatchExpectationsInOrder(false)
 
 	ds := &mockDataset{name: "test_ds", phase: Phase1, shouldRun: false, syncRows: 0}
 	reg := &Registry{datasets: map[string]Dataset{"test_ds": ds}, order: []string{"test_ds"}}
@@ -210,6 +212,7 @@ func TestEngine_Run_Skip(t *testing.T) {
 
 func TestEngine_Run_Force(t *testing.T) {
 	mock, syncLog := newMockSyncLog(t)
+	mock.MatchExpectationsInOrder(false)
 
 	ds := &mockDataset{name: "test_ds", phase: Phase1, shouldRun: false, syncRows: 50}
 	reg := &Registry{datasets: map[string]Dataset{"test_ds": ds}, order: []string{"test_ds"}}
@@ -232,6 +235,7 @@ func TestEngine_Run_Force(t *testing.T) {
 
 func TestEngine_Run_SyncFailure(t *testing.T) {
 	mock, syncLog := newMockSyncLog(t)
+	mock.MatchExpectationsInOrder(false)
 
 	syncErr := errors.New("download failed")
 	ds := &mockDataset{name: "test_ds", phase: Phase1, shouldRun: true, syncErr: syncErr}
@@ -261,6 +265,7 @@ func TestEngine_Run_SyncFailure(t *testing.T) {
 
 func TestEngine_Run_ContextCancellation(t *testing.T) {
 	mock, syncLog := newMockSyncLog(t)
+	mock.MatchExpectationsInOrder(false)
 
 	ds := &mockDataset{name: "test_ds", phase: Phase1, shouldRun: true}
 	reg := &Registry{datasets: map[string]Dataset{"test_ds": ds}, order: []string{"test_ds"}}
@@ -271,7 +276,7 @@ func TestEngine_Run_ContextCancellation(t *testing.T) {
 	engine := NewEngine(mock, nil, syncLog, reg, t.TempDir())
 	err := engine.Run(ctx, RunOpts{Force: true})
 	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
+	assert.ErrorIs(t, err, context.Canceled)
 	assert.False(t, ds.synced)
 }
 
@@ -297,6 +302,7 @@ func TestEngine_Run_InvalidDatasetSelection(t *testing.T) {
 
 func TestEngine_Run_MultipleDatasets(t *testing.T) {
 	mock, syncLog := newMockSyncLog(t)
+	mock.MatchExpectationsInOrder(false)
 
 	ds1 := &mockDataset{name: "ds1", phase: Phase1, shouldRun: true, syncRows: 10}
 	ds2 := &mockDataset{name: "ds2", phase: Phase1, shouldRun: false}
