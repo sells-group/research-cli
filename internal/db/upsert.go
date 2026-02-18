@@ -102,6 +102,104 @@ func BulkUpsert(ctx context.Context, pool Pool, cfg UpsertConfig, rows [][]any) 
 	return tag.RowsAffected(), nil
 }
 
+// MultiUpsertEntry represents a single table's upsert within a multi-table transaction.
+type MultiUpsertEntry struct {
+	Config UpsertConfig
+	Rows   [][]any
+}
+
+// BulkUpsertMulti performs bulk upserts for multiple tables within a single transaction.
+// This avoids the overhead of separate transactions when flushing to multiple tables.
+func BulkUpsertMulti(ctx context.Context, pool Pool, entries []MultiUpsertEntry) (map[string]int64, error) {
+	results := make(map[string]int64, len(entries))
+
+	// Filter out entries with no rows
+	var active []MultiUpsertEntry
+	for _, e := range entries {
+		if len(e.Rows) > 0 {
+			active = append(active, e)
+		}
+	}
+	if len(active) == 0 {
+		return results, nil
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return nil, eris.Wrap(err, "db: upsert multi: begin tx")
+	}
+	defer tx.Rollback(ctx)
+
+	for _, e := range active {
+		cfg := e.Config
+		if len(cfg.Columns) == 0 {
+			return nil, eris.Errorf("db: upsert multi: no columns specified for %s", cfg.Table)
+		}
+		if len(cfg.ConflictKeys) == 0 {
+			return nil, eris.Errorf("db: upsert multi: no conflict keys specified for %s", cfg.Table)
+		}
+
+		updateCols := cfg.UpdateCols
+		if updateCols == nil {
+			conflictSet := make(map[string]bool, len(cfg.ConflictKeys))
+			for _, k := range cfg.ConflictKeys {
+				conflictSet[k] = true
+			}
+			for _, c := range cfg.Columns {
+				if !conflictSet[c] {
+					updateCols = append(updateCols, c)
+				}
+			}
+		}
+
+		tempTable := fmt.Sprintf("_tmp_upsert_%s", strings.ReplaceAll(cfg.Table, ".", "_"))
+
+		createSQL := fmt.Sprintf(
+			"CREATE TEMP TABLE %s (LIKE %s INCLUDING DEFAULTS) ON COMMIT DROP",
+			pgx.Identifier{tempTable}.Sanitize(),
+			sanitizeTable(cfg.Table),
+		)
+		if _, err := tx.Exec(ctx, createSQL); err != nil {
+			return nil, eris.Wrapf(err, "db: upsert multi: create temp table for %s", cfg.Table)
+		}
+
+		copySource := pgx.CopyFromRows(e.Rows)
+		if _, err := tx.CopyFrom(ctx, pgx.Identifier{tempTable}, cfg.Columns, copySource); err != nil {
+			return nil, eris.Wrapf(err, "db: upsert multi: COPY into temp table for %s", cfg.Table)
+		}
+
+		colList := quoteAndJoin(cfg.Columns)
+		conflictList := quoteAndJoin(cfg.ConflictKeys)
+
+		var setClauses []string
+		for _, col := range updateCols {
+			setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", pgx.Identifier{col}.Sanitize(), pgx.Identifier{col}.Sanitize()))
+		}
+
+		upsertSQL := fmt.Sprintf(
+			"INSERT INTO %s (%s) SELECT %s FROM %s ON CONFLICT (%s) DO UPDATE SET %s",
+			sanitizeTable(cfg.Table),
+			colList,
+			colList,
+			pgx.Identifier{tempTable}.Sanitize(),
+			conflictList,
+			strings.Join(setClauses, ", "),
+		)
+
+		tag, err := tx.Exec(ctx, upsertSQL)
+		if err != nil {
+			return nil, eris.Wrapf(err, "db: upsert multi: INSERT ON CONFLICT for %s", cfg.Table)
+		}
+		results[cfg.Table] = tag.RowsAffected()
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, eris.Wrap(err, "db: upsert multi: commit tx")
+	}
+
+	return results, nil
+}
+
 // sanitizeTable handles schema-qualified table names like "fed_data.cbp_data".
 func sanitizeTable(table string) string {
 	parts := strings.SplitN(table, ".", 2)

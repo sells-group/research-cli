@@ -243,3 +243,146 @@ func TestQuoteAndJoin_Single(t *testing.T) {
 	result := quoteAndJoin([]string{"id"})
 	assert.Equal(t, `"id"`, result)
 }
+
+// --- BulkUpsertMulti Tests ---
+
+func TestBulkUpsertMulti_Success(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	// Single transaction for both tables
+	mock.ExpectBegin()
+
+	// Table 1
+	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
+	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_fed_data_table1"}, []string{"id", "name"}).WillReturnResult(2)
+	mock.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", 2))
+
+	// Table 2
+	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
+	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_fed_data_table2"}, []string{"key", "value"}).WillReturnResult(3)
+	mock.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", 3))
+
+	mock.ExpectCommit()
+
+	entries := []MultiUpsertEntry{
+		{
+			Config: UpsertConfig{Table: "fed_data.table1", Columns: []string{"id", "name"}, ConflictKeys: []string{"id"}},
+			Rows:   [][]any{{1, "a"}, {2, "b"}},
+		},
+		{
+			Config: UpsertConfig{Table: "fed_data.table2", Columns: []string{"key", "value"}, ConflictKeys: []string{"key"}},
+			Rows:   [][]any{{"k1", "v1"}, {"k2", "v2"}, {"k3", "v3"}},
+		},
+	}
+
+	results, err := BulkUpsertMulti(context.Background(), mock, entries)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), results["fed_data.table1"])
+	assert.Equal(t, int64(3), results["fed_data.table2"])
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestBulkUpsertMulti_EmptyEntries(t *testing.T) {
+	// All entries have 0 rows — no transaction should start
+	entries := []MultiUpsertEntry{
+		{Config: UpsertConfig{Table: "t1", Columns: []string{"id"}, ConflictKeys: []string{"id"}}},
+		{Config: UpsertConfig{Table: "t2", Columns: []string{"id"}, ConflictKeys: []string{"id"}}},
+	}
+
+	results, err := BulkUpsertMulti(context.Background(), nil, entries) // nil pool is fine since no tx
+	assert.NoError(t, err)
+	assert.Empty(t, results)
+}
+
+func TestBulkUpsertMulti_MixedEmptyAndFull(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
+	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_fed_data_active"}, []string{"id", "val"}).WillReturnResult(1)
+	mock.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	mock.ExpectCommit()
+
+	entries := []MultiUpsertEntry{
+		{Config: UpsertConfig{Table: "fed_data.empty", Columns: []string{"id"}, ConflictKeys: []string{"id"}}}, // no rows
+		{
+			Config: UpsertConfig{Table: "fed_data.active", Columns: []string{"id", "val"}, ConflictKeys: []string{"id"}},
+			Rows:   [][]any{{1, "x"}},
+		},
+	}
+
+	results, err := BulkUpsertMulti(context.Background(), mock, entries)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), results["fed_data.active"])
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestBulkUpsertMulti_NoColumns(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	entries := []MultiUpsertEntry{
+		{
+			Config: UpsertConfig{Table: "t1", ConflictKeys: []string{"id"}}, // no columns!
+			Rows:   [][]any{{1}},
+		},
+	}
+
+	_, err = BulkUpsertMulti(context.Background(), mock, entries)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no columns specified")
+}
+
+func TestBulkUpsertMulti_NoConflictKeys(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	entries := []MultiUpsertEntry{
+		{
+			Config: UpsertConfig{Table: "t1", Columns: []string{"id", "name"}}, // no conflict keys!
+			Rows:   [][]any{{1, "a"}},
+		},
+	}
+
+	_, err = BulkUpsertMulti(context.Background(), mock, entries)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no conflict keys specified")
+}
+
+func TestBulkUpsertMulti_TransactionRollbackOnError(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectBegin()
+	// Table 1 succeeds
+	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
+	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_fed_data_t1"}, []string{"id"}).WillReturnResult(1)
+	mock.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	// Table 2 fails on COPY
+	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
+	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_fed_data_t2"}, []string{"id"}).WillReturnError(fmt.Errorf("copy failed"))
+	mock.ExpectRollback()
+
+	entries := []MultiUpsertEntry{
+		{Config: UpsertConfig{Table: "fed_data.t1", Columns: []string{"id"}, ConflictKeys: []string{"id"}}, Rows: [][]any{{1}}},
+		{Config: UpsertConfig{Table: "fed_data.t2", Columns: []string{"id"}, ConflictKeys: []string{"id"}}, Rows: [][]any{{2}}},
+	}
+
+	_, err = BulkUpsertMulti(context.Background(), mock, entries)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "COPY into temp table")
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
