@@ -267,20 +267,24 @@ func TestPrepareTier3Context_LongPages(t *testing.T) {
 	}
 
 	aiClient := anthropicmocks.NewMockClient(t)
+	// With 20 pages x 3000 chars (truncated), the chunker produces multiple chunks
+	// that are summarized in parallel, then merged. Allow multiple calls.
 	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{Text: "Compact summary of all the data."}},
 			Usage:   anthropic.TokenUsage{InputTokens: 1000, OutputTokens: 200},
-		}, nil).Once()
+		}, nil)
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
 	summary, usage, err := prepareTier3Context(ctx, pages, answers, aiClient, aiCfg)
 
 	require.NoError(t, err)
+	// Final output comes from the merge call.
 	assert.Equal(t, "Compact summary of all the data.", summary)
-	assert.Equal(t, 1000, usage.InputTokens)
-	assert.Equal(t, 200, usage.OutputTokens)
+	// Multiple chunk summarizations + merge call; just verify tokens are tracked.
+	assert.Greater(t, usage.InputTokens, 0)
+	assert.Greater(t, usage.OutputTokens, 0)
 }
 
 func TestBuildPagesContext(t *testing.T) {

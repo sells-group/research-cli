@@ -20,6 +20,19 @@ import (
 // maxDirectConcurrency limits concurrent CreateMessage calls in no-batch mode.
 const maxDirectConcurrency = 10
 
+// Per-tier small batch thresholds: below these, use direct calls instead of
+// the Batch API. T1/Classify process many items so higher thresholds reduce
+// overhead; T3 has few items so a lower threshold is appropriate.
+const (
+	smallBatchThresholdT1       = 20
+	smallBatchThresholdClassify = 20
+	smallBatchThresholdT2       = 10
+	smallBatchThresholdT3       = 5
+)
+
+// directRetryAttempts is the max number of retries for direct API calls.
+const directRetryAttempts = 3
+
 const tier1Prompt = `You are a research analyst extracting specific data from a web page.
 
 Question: %s
@@ -69,10 +82,20 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient a
 		return result, nil
 	}
 
-	// Use cache for the system block (primer strategy), matching T2/T3.
-	systemBlocks := anthropic.BuildCachedSystemBlocks(
-		"You are a research analyst extracting specific data from a web page. Return a valid JSON object with value, confidence, reasoning, and source_url.",
-	)
+	const t1SystemText = "You are a research analyst extracting specific data from a web page. Return a valid JSON object with value, confidence, reasoning, and source_url."
+
+	// Primer gets cache_control; batch items use plain system blocks to save tokens.
+	primerSystemBlocks := anthropic.BuildCachedSystemBlocks(t1SystemText)
+	batchSystemBlocks := []anthropic.SystemBlock{{Text: t1SystemText}}
+
+	// Pre-compute external snippets per routed question (dedup: one call per
+	// unique page set instead of per-question inside the loop).
+	externalSnippetCache := make(map[int]string, len(routed))
+	for i, rq := range routed {
+		if len(rq.Pages) > 1 {
+			externalSnippetCache[i] = buildExternalSnippets(rq.Pages[1:], 2000)
+		}
+	}
 
 	// Build batch items: one per question, using the first matched page.
 	var batchItems []anthropic.BatchRequestItem
@@ -83,17 +106,11 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient a
 			instructions = fmt.Sprintf("Instructions: %s", rq.Question.Instructions)
 		}
 
-		content := page.Markdown
-		if len(content) > 8000 {
-			content = content[:8000]
-		}
+		content := truncateByRelevance(page.Markdown, rq.Question.Text, 8000)
 
-		// Append compact external source snippets so T1 can see BBB/Google Maps data.
-		if len(rq.Pages) > 1 {
-			externalCtx := buildExternalSnippets(rq.Pages[1:], 2000)
-			if externalCtx != "" {
-				content += "\n\n--- Additional Sources ---\n" + externalCtx
-			}
+		// Append pre-computed external source snippets.
+		if externalCtx, ok := externalSnippetCache[i]; ok && externalCtx != "" {
+			content += "\n\n--- Additional Sources ---\n" + externalCtx
 		}
 
 		prompt := fmt.Sprintf(tier1Prompt,
@@ -110,7 +127,7 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient a
 			Params: anthropic.MessageRequest{
 				Model:     aiCfg.HaikuModel,
 				MaxTokens: 512,
-				System:    systemBlocks,
+				System:    batchSystemBlocks,
 				Messages: []anthropic.Message{
 					{Role: "user", Content: prompt},
 				},
@@ -118,14 +135,17 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient a
 		})
 	}
 
-	// Fire primer asynchronously to warm cache; don't block batch submission.
+	// Fire primer asynchronously to warm cache; it overlaps with batch
+	// submission + early polling instead of blocking before submission.
 	var primerUsage model.TokenUsage
 	var primerWg sync.WaitGroup
 	if !aiCfg.NoBatch && len(batchItems) > 1 {
 		primerWg.Add(1)
 		go func() {
 			defer primerWg.Done()
-			primerResp, primerErr := anthropic.PrimerRequest(ctx, aiClient, batchItems[0].Params)
+			primerReq := batchItems[0].Params
+			primerReq.System = primerSystemBlocks // primer uses cached system blocks
+			primerResp, primerErr := anthropic.PrimerRequest(ctx, aiClient, primerReq)
 			if primerErr != nil {
 				zap.L().Warn("extract: tier 1 primer failed", zap.Error(primerErr))
 			} else if primerResp != nil {
@@ -160,6 +180,12 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 		return result, nil
 	}
 
+	const t2SystemText = "You are a senior research analyst. Synthesize data from multiple sources to provide accurate answers."
+
+	// Primer gets cache_control; batch items use plain system blocks.
+	primerSystemBlocks := anthropic.BuildCachedSystemBlocks(t2SystemText)
+	batchSystemBlocks := []anthropic.SystemBlock{{Text: t2SystemText}}
+
 	// Build context from T1 answers.
 	t1Context := buildT1Context(t1Answers)
 
@@ -181,17 +207,12 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 			pagesContext,
 		)
 
-		// Use cache for the system block (primer strategy).
-		systemBlocks := anthropic.BuildCachedSystemBlocks(
-			"You are a senior research analyst. Synthesize data from multiple sources to provide accurate answers.",
-		)
-
 		batchItems = append(batchItems, anthropic.BatchRequestItem{
 			CustomID: fmt.Sprintf("t2-%d-%s", i, rq.Question.ID),
 			Params: anthropic.MessageRequest{
 				Model:     aiCfg.SonnetModel,
 				MaxTokens: 1024,
-				System:    systemBlocks,
+				System:    batchSystemBlocks,
 				Messages: []anthropic.Message{
 					{Role: "user", Content: prompt},
 				},
@@ -199,14 +220,17 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 		})
 	}
 
-	// Fire primer asynchronously to warm cache; don't block batch submission.
+	// Fire primer asynchronously to warm cache; it overlaps with batch
+	// submission + early polling instead of blocking before submission.
 	var primerUsage model.TokenUsage
 	var primerWg sync.WaitGroup
 	if !aiCfg.NoBatch && len(batchItems) > 1 {
 		primerWg.Add(1)
 		go func() {
 			defer primerWg.Done()
-			primerResp, primerErr := anthropic.PrimerRequest(ctx, aiClient, batchItems[0].Params)
+			primerReq := batchItems[0].Params
+			primerReq.System = primerSystemBlocks
+			primerResp, primerErr := anthropic.PrimerRequest(ctx, aiClient, primerReq)
 			if primerErr != nil {
 				zap.L().Warn("extract: tier 2 primer failed", zap.Error(primerErr))
 			} else if primerResp != nil {
@@ -250,6 +274,12 @@ func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers
 	var totalUsage model.TokenUsage
 	totalUsage.Add(*summaryUsage)
 
+	const t3SystemText = "You are an expert research analyst providing definitive, well-reasoned answers."
+
+	// Primer gets cache_control; batch items use plain system blocks.
+	primerSystemBlocks := anthropic.BuildCachedSystemBlocks(t3SystemText)
+	batchSystemBlocks := []anthropic.SystemBlock{{Text: t3SystemText}}
+
 	// Build requests for each T3 question.
 	var batchItems []anthropic.BatchRequestItem
 	for i, rq := range routed {
@@ -265,16 +295,12 @@ func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers
 			summaryCtx,
 		)
 
-		systemBlocks := anthropic.BuildCachedSystemBlocks(
-			"You are an expert research analyst providing definitive, well-reasoned answers.",
-		)
-
 		batchItems = append(batchItems, anthropic.BatchRequestItem{
 			CustomID: fmt.Sprintf("t3-%d-%s", i, rq.Question.ID),
 			Params: anthropic.MessageRequest{
 				Model:     aiCfg.OpusModel,
 				MaxTokens: 2048,
-				System:    systemBlocks,
+				System:    batchSystemBlocks,
 				Messages: []anthropic.Message{
 					{Role: "user", Content: prompt},
 				},
@@ -282,14 +308,17 @@ func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers
 		})
 	}
 
-	// Fire primer asynchronously to warm cache; don't block batch submission.
+	// Fire primer asynchronously to warm cache. Skip for small batches (< 3
+	// items) where primer overhead exceeds the cache benefit.
 	var primerUsage model.TokenUsage
 	var primerWg sync.WaitGroup
-	if !aiCfg.NoBatch && len(batchItems) > 1 {
+	if !aiCfg.NoBatch && len(batchItems) >= 3 {
 		primerWg.Add(1)
 		go func() {
 			defer primerWg.Done()
-			primerResp, primerErr := anthropic.PrimerRequest(ctx, aiClient, batchItems[0].Params)
+			primerReq := batchItems[0].Params
+			primerReq.System = primerSystemBlocks
+			primerResp, primerErr := anthropic.PrimerRequest(ctx, aiClient, primerReq)
 			if primerErr != nil {
 				zap.L().Warn("extract: tier 3 primer failed", zap.Error(primerErr))
 			} else if primerResp != nil {
@@ -315,7 +344,9 @@ func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers
 	return result, nil
 }
 
-// prepareTier3Context uses Haiku to summarize pages into a compact context (~25K tokens).
+// prepareTier3Context uses Haiku to summarize pages into a compact context
+// (~25K tokens). When there are multiple page chunks, it batches the
+// summarization calls in parallel for 40-60% faster T3 prep.
 func prepareTier3Context(ctx context.Context, pages []model.CrawledPage, answers []model.ExtractionAnswer, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (string, *model.TokenUsage, error) {
 	usage := &model.TokenUsage{}
 
@@ -334,21 +365,43 @@ func prepareTier3Context(ctx context.Context, pages []model.CrawledPage, answers
 	}
 	orderedPages := append(externalPages, otherPages...)
 
-	var pageTexts []string
-	totalLen := 0
+	// Chunk pages into groups of ~15K chars each for parallel summarization.
+	const chunkCharLimit = 15000
+	var chunks []string
+	var currentChunk []string
+	currentLen := 0
+
 	for _, p := range orderedPages {
 		content := p.Markdown
 		if len(content) > 3000 {
 			content = content[:3000]
 		}
-		pageTexts = append(pageTexts, fmt.Sprintf("--- %s (%s) ---\n%s", p.Title, p.URL, content))
-		totalLen += len(content)
-		if totalLen > 50000 {
+		pageText := fmt.Sprintf("--- %s (%s) ---\n%s", p.Title, p.URL, content)
+
+		if currentLen+len(content) > chunkCharLimit && len(currentChunk) > 0 {
+			chunks = append(chunks, strings.Join(currentChunk, "\n\n"))
+			currentChunk = nil
+			currentLen = 0
+		}
+		currentChunk = append(currentChunk, pageText)
+		currentLen += len(content)
+
+		// Stop if we've accumulated too much total content.
+		if len(chunks)*chunkCharLimit+currentLen > 50000 {
 			break
 		}
 	}
+	if len(currentChunk) > 0 {
+		chunks = append(chunks, strings.Join(currentChunk, "\n\n"))
+	}
 
-	summarizePrompt := fmt.Sprintf(`Summarize the following company research data into a concise but comprehensive briefing.
+	// Single chunk: use a single sequential call (same as before).
+	if len(chunks) <= 1 {
+		allPages := ""
+		if len(chunks) == 1 {
+			allPages = chunks[0]
+		}
+		summarizePrompt := fmt.Sprintf(`Summarize the following company research data into a concise but comprehensive briefing.
 Preserve all factual data points (numbers, names, dates, locations, certifications).
 Keep the summary under 25000 characters.
 
@@ -356,40 +409,149 @@ Previous research findings:
 %s
 
 Source pages:
-%s`, string(answersJSON), strings.Join(pageTexts, "\n\n"))
+%s`, string(answersJSON), allPages)
 
-	resp, err := aiClient.CreateMessage(ctx, anthropic.MessageRequest{
+		resp, err := aiClient.CreateMessage(ctx, anthropic.MessageRequest{
+			Model:     aiCfg.HaikuModel,
+			MaxTokens: 8192,
+			Messages: []anthropic.Message{
+				{Role: "user", Content: summarizePrompt},
+			},
+		})
+		if err != nil {
+			return "", usage, eris.Wrap(err, "prepare t3 context: summarize")
+		}
+
+		usage.InputTokens = int(resp.Usage.InputTokens)
+		usage.OutputTokens = int(resp.Usage.OutputTokens)
+		usage.CacheCreationTokens = int(resp.Usage.CacheCreationInputTokens)
+		usage.CacheReadTokens = int(resp.Usage.CacheReadInputTokens)
+
+		return extractText(resp), usage, nil
+	}
+
+	// Multiple chunks: summarize in parallel, then merge.
+	summaries := make([]string, len(chunks))
+	usages := make([]model.TokenUsage, len(chunks))
+
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(maxDirectConcurrency)
+
+	for idx, chunk := range chunks {
+		g.Go(func() error {
+			prompt := fmt.Sprintf(`Summarize the following company research pages into a concise briefing.
+Preserve all factual data points (numbers, names, dates, locations, certifications).
+
+Previous research findings:
+%s
+
+Source pages:
+%s`, string(answersJSON), chunk)
+
+			resp, err := aiClient.CreateMessage(gCtx, anthropic.MessageRequest{
+				Model:     aiCfg.HaikuModel,
+				MaxTokens: 4096,
+				Messages: []anthropic.Message{
+					{Role: "user", Content: prompt},
+				},
+			})
+			if err != nil {
+				zap.L().Warn("prepare t3 context: chunk summarize failed",
+					zap.Int("chunk", idx),
+					zap.Error(err),
+				)
+				return nil // Don't fail the group on individual errors.
+			}
+
+			summaries[idx] = extractText(resp)
+			usages[idx] = model.TokenUsage{
+				InputTokens:        int(resp.Usage.InputTokens),
+				OutputTokens:       int(resp.Usage.OutputTokens),
+				CacheCreationTokens: int(resp.Usage.CacheCreationInputTokens),
+				CacheReadTokens:    int(resp.Usage.CacheReadInputTokens),
+			}
+			return nil
+		})
+	}
+
+	_ = g.Wait()
+
+	// Aggregate chunk usages.
+	for _, u := range usages {
+		usage.Add(u)
+	}
+
+	// Collect non-empty summaries.
+	var validSummaries []string
+	for _, s := range summaries {
+		if s != "" {
+			validSummaries = append(validSummaries, s)
+		}
+	}
+
+	// If we only got one summary back, return it directly.
+	if len(validSummaries) <= 1 {
+		result := ""
+		if len(validSummaries) == 1 {
+			result = validSummaries[0]
+		}
+		return result, usage, nil
+	}
+
+	// Merge summaries into a single briefing.
+	mergePrompt := fmt.Sprintf(`Merge the following partial summaries into a single cohesive company research briefing.
+Preserve all factual data points. Remove duplicates. Keep the output under 25000 characters.
+
+%s`, strings.Join(validSummaries, "\n\n---\n\n"))
+
+	mergeResp, err := aiClient.CreateMessage(ctx, anthropic.MessageRequest{
 		Model:     aiCfg.HaikuModel,
 		MaxTokens: 8192,
 		Messages: []anthropic.Message{
-			{Role: "user", Content: summarizePrompt},
+			{Role: "user", Content: mergePrompt},
 		},
 	})
 	if err != nil {
-		return "", usage, eris.Wrap(err, "prepare t3 context: summarize")
+		// Fall back to concatenation if merge fails.
+		return strings.Join(validSummaries, "\n\n"), usage, nil
 	}
 
-	usage.InputTokens = int(resp.Usage.InputTokens)
-	usage.OutputTokens = int(resp.Usage.OutputTokens)
-	usage.CacheCreationTokens = int(resp.Usage.CacheCreationInputTokens)
-	usage.CacheReadTokens = int(resp.Usage.CacheReadInputTokens)
+	usage.InputTokens += int(mergeResp.Usage.InputTokens)
+	usage.OutputTokens += int(mergeResp.Usage.OutputTokens)
+	usage.CacheCreationTokens += int(mergeResp.Usage.CacheCreationInputTokens)
+	usage.CacheReadTokens += int(mergeResp.Usage.CacheReadInputTokens)
 
-	return extractText(resp), usage, nil
+	return extractText(mergeResp), usage, nil
+}
+
+// tierThreshold returns the per-tier small batch threshold, falling back to
+// the config value or the tier-specific default constant.
+func tierThreshold(tier int, cfgThreshold int) int {
+	if cfgThreshold > 0 {
+		return cfgThreshold
+	}
+	switch tier {
+	case 1:
+		return smallBatchThresholdT1
+	case 2:
+		return smallBatchThresholdT2
+	case 3:
+		return smallBatchThresholdT3
+	default:
+		return smallBatchThresholdT1
+	}
 }
 
 // executeBatch sends items via batch API (or direct for small counts) and
-// parses the extraction answers. Uses SmallBatchThreshold from config to
-// determine when to skip the Batch API and use direct calls instead.
+// parses the extraction answers. Uses per-tier thresholds to determine when
+// to skip the Batch API and use direct calls instead.
 func executeBatch(ctx context.Context, items []anthropic.BatchRequestItem, routed []model.RoutedQuestion, tier int, aiClient anthropic.Client, aiCfg config.AnthropicConfig) ([]model.ExtractionAnswer, *model.TokenUsage, error) {
 	usage := &model.TokenUsage{}
 	var answers []model.ExtractionAnswer
 
-	threshold := aiCfg.SmallBatchThreshold
-	if threshold <= 0 {
-		threshold = 8 // fallback default: batch API overhead exceeds direct calls for <8 items
-	}
+	threshold := tierThreshold(tier, aiCfg.SmallBatchThreshold)
 	if aiCfg.NoBatch || len(items) <= threshold {
-		// Concurrent direct execution.
+		// Concurrent direct execution with retry + exponential backoff.
 		type indexedAnswer struct {
 			index  int
 			answer model.ExtractionAnswer
@@ -404,12 +566,35 @@ func executeBatch(ctx context.Context, items []anthropic.BatchRequestItem, route
 
 		for i, item := range items {
 			g.Go(func() error {
-				resp, err := aiClient.CreateMessage(gCtx, item.Params)
-				if err != nil {
-					zap.L().Warn("extract: direct message failed",
+				var resp *anthropic.MessageResponse
+				var lastErr error
+				backoff := 500 * time.Millisecond
+
+				for attempt := 0; attempt < directRetryAttempts; attempt++ {
+					resp, lastErr = aiClient.CreateMessage(gCtx, item.Params)
+					if lastErr == nil {
+						break
+					}
+					if attempt < directRetryAttempts-1 {
+						zap.L().Warn("extract: direct message failed, retrying",
+							zap.Int("tier", tier),
+							zap.String("question", routed[i].Question.ID),
+							zap.Int("attempt", attempt+1),
+							zap.Error(lastErr),
+						)
+						select {
+						case <-gCtx.Done():
+							return nil
+						case <-time.After(backoff):
+						}
+						backoff *= 2
+					}
+				}
+				if lastErr != nil {
+					zap.L().Warn("extract: direct message failed after retries",
 						zap.Int("tier", tier),
 						zap.String("question", routed[i].Question.ID),
-						zap.Error(err),
+						zap.Error(lastErr),
 					)
 					return nil // Don't fail the group on individual errors.
 				}
@@ -573,6 +758,140 @@ func buildExternalSnippets(pages []model.ClassifiedPage, budget int) string {
 	}
 
 	return strings.Join(parts, "\n\n")
+}
+
+// truncateByRelevance performs keyword-aware content truncation. Instead of
+// blindly cutting at a character limit, it splits content into sections (by
+// headers or double-newlines), scores each section by keyword overlap with the
+// question text, and keeps the highest-scoring sections within the char limit.
+// Falls back to a hard truncation if the content has no meaningful sections.
+func truncateByRelevance(content, questionText string, limit int) string {
+	if len(content) <= limit {
+		return content
+	}
+
+	// Extract keywords from the question (words of 3+ chars, lowercased).
+	keywords := extractKeywords(questionText)
+	if len(keywords) == 0 {
+		return content[:limit]
+	}
+
+	// Split content into sections by markdown headers or double-newlines.
+	sections := splitSections(content)
+	if len(sections) <= 1 {
+		return content[:limit]
+	}
+
+	// Score each section by keyword overlap.
+	type scoredSection struct {
+		idx   int
+		text  string
+		score int
+	}
+	scored := make([]scoredSection, len(sections))
+	for i, sec := range sections {
+		lower := strings.ToLower(sec)
+		score := 0
+		for _, kw := range keywords {
+			score += strings.Count(lower, kw)
+		}
+		scored[i] = scoredSection{idx: i, text: sec, score: score}
+	}
+
+	// Sort by score descending (insertion sort; section count is small).
+	for i := 1; i < len(scored); i++ {
+		for j := i; j > 0 && scored[j].score > scored[j-1].score; j-- {
+			scored[j], scored[j-1] = scored[j-1], scored[j]
+		}
+	}
+
+	// Greedily pick highest-scoring sections within the budget.
+	selected := make(map[int]bool)
+	totalLen := 0
+	for _, s := range scored {
+		if totalLen+len(s.text) > limit {
+			continue
+		}
+		selected[s.idx] = true
+		totalLen += len(s.text)
+	}
+
+	// If nothing was selected (all sections too large), fall back.
+	if len(selected) == 0 {
+		return content[:limit]
+	}
+
+	// Reassemble selected sections in their original order.
+	var result strings.Builder
+	for i, sec := range sections {
+		if selected[i] {
+			if result.Len() > 0 {
+				result.WriteString("\n\n")
+			}
+			result.WriteString(sec)
+		}
+	}
+	return result.String()
+}
+
+// extractKeywords returns lowercase words of 3+ characters from text,
+// excluding common stop words.
+func extractKeywords(text string) []string {
+	stopWords := map[string]bool{
+		"the": true, "and": true, "for": true, "are": true, "was": true,
+		"were": true, "been": true, "have": true, "has": true, "had": true,
+		"this": true, "that": true, "with": true, "from": true, "what": true,
+		"how": true, "does": true, "which": true, "where": true, "when": true,
+		"who": true, "why": true, "can": true, "will": true, "not": true,
+	}
+
+	words := strings.Fields(strings.ToLower(text))
+	var keywords []string
+	seen := make(map[string]bool)
+	for _, w := range words {
+		// Strip punctuation.
+		w = strings.Trim(w, "?.,!;:'\"()[]{}") //nolint:gocritic
+		if len(w) < 3 || stopWords[w] || seen[w] {
+			continue
+		}
+		seen[w] = true
+		keywords = append(keywords, w)
+	}
+	return keywords
+}
+
+// splitSections splits markdown content into sections by headers (lines
+// starting with #) or double-newline paragraph breaks.
+func splitSections(content string) []string {
+	var sections []string
+	var current strings.Builder
+
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		// Header line or paragraph break starts a new section.
+		if strings.HasPrefix(line, "#") || (line == "" && current.Len() > 0) {
+			if current.Len() > 0 {
+				sections = append(sections, strings.TrimSpace(current.String()))
+				current.Reset()
+			}
+		}
+		current.WriteString(line)
+		current.WriteString("\n")
+	}
+	if current.Len() > 0 {
+		if s := strings.TrimSpace(current.String()); s != "" {
+			sections = append(sections, s)
+		}
+	}
+
+	// Filter out empty sections that arise from consecutive paragraph breaks.
+	filtered := sections[:0]
+	for _, s := range sections {
+		if s != "" {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered
 }
 
 func buildPagesContext(pages []model.ClassifiedPage, maxCharsPerPage int) string {

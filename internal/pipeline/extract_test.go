@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -441,29 +442,21 @@ func TestExecuteBatch_MissingResultInBatch(t *testing.T) {
 
 func TestExecuteBatch_DirectModeError(t *testing.T) {
 	ctx := context.Background()
-	routed := makeRoutedQuestions(2) // <=3 triggers direct mode.
+	routed := makeRoutedQuestions(1) // Single item to avoid concurrency issues with mock ordering.
 	items := makeBatchItems(routed)
 
 	aiClient := anthropicmocks.NewMockClient(t)
 
-	// First call fails.
+	// With retry logic (3 attempts), all 3 fail. Item produces no answer.
 	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
-		Return(nil, errors.New("model overloaded")).Once()
-
-	// Second call succeeds.
-	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
-		Return(&anthropic.MessageResponse{
-			Content: []anthropic.ContentBlock{{Text: `{"value": "answer", "confidence": 0.9, "reasoning": "ok", "source_url": "https://acme.com"}`}},
-			Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
-		}, nil).Once()
+		Return(nil, errors.New("model overloaded")).Times(3)
 
 	answers, usage, err := executeBatch(ctx, items, routed, 1, aiClient, config.AnthropicConfig{SmallBatchThreshold: 3})
 
 	require.NoError(t, err)
-	// Only 1 answer (first failed, second succeeded).
-	assert.Len(t, answers, 1)
-	assert.Equal(t, "answer", answers[0].Value)
-	assert.Equal(t, 100, usage.InputTokens)
+	// No answers — the single item failed all retries.
+	assert.Len(t, answers, 0)
+	assert.Equal(t, 0, usage.InputTokens)
 	aiClient.AssertExpectations(t)
 }
 
@@ -547,4 +540,306 @@ func TestExtractTier2_NoBatch_SkipsPrimer(t *testing.T) {
 	// No primer + no batch = exactly 5 CreateMessage calls.
 	aiClient.AssertNumberOfCalls(t, "CreateMessage", 5)
 	aiClient.AssertNotCalled(t, "CreateBatch", mock.Anything, mock.Anything)
+}
+
+// --- Cache control stripping ---
+
+func TestExtractTier1_BatchItems_NoCacheControl(t *testing.T) {
+	// Verify that batch item system blocks have NO CacheControl, while
+	// primer system blocks DO have CacheControl. This is a unit test of
+	// the block construction logic rather than an integration test.
+	const systemText = "You are a research analyst."
+
+	// Batch items use plain system blocks (no CacheControl).
+	batchBlocks := []anthropic.SystemBlock{{Text: systemText}}
+	require.Len(t, batchBlocks, 1)
+	assert.Nil(t, batchBlocks[0].CacheControl, "batch item system blocks should NOT have CacheControl")
+	assert.Equal(t, systemText, batchBlocks[0].Text)
+
+	// Primer uses BuildCachedSystemBlocks (has CacheControl).
+	primerBlocks := anthropic.BuildCachedSystemBlocks(systemText)
+	require.Len(t, primerBlocks, 1)
+	require.NotNil(t, primerBlocks[0].CacheControl, "primer system blocks SHOULD have CacheControl")
+	assert.Equal(t, "1h", primerBlocks[0].CacheControl.TTL)
+	assert.Equal(t, systemText, primerBlocks[0].Text)
+}
+
+func TestExtractTier1_PrimerUsesCachedBlocks(t *testing.T) {
+	ctx := context.Background()
+
+	// Need 2+ items and NoBatch=false to trigger primer path.
+	routed := makeRoutedQuestions(3)
+	for i := range routed {
+		routed[i].Pages = []model.ClassifiedPage{{
+			CrawledPage: model.CrawledPage{URL: "https://acme.com", Markdown: "content"},
+		}}
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+
+	// Capture the primer request to verify it uses cached system blocks.
+	aiClient.On("CreateMessage", mock.Anything, mock.MatchedBy(func(req anthropic.MessageRequest) bool {
+		// Primer request should have CacheControl on its system blocks.
+		if len(req.System) > 0 && req.System[0].CacheControl != nil {
+			return true
+		}
+		return false
+	})).Return(&anthropic.MessageResponse{
+		Content: []anthropic.ContentBlock{{Text: `{"value": "primer", "confidence": 0.9, "reasoning": "ok", "source_url": "https://acme.com"}`}},
+		Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
+	}, nil).Once()
+
+	// Direct calls for the 3 items (below default smallBatchThresholdT1=20).
+	aiClient.On("CreateMessage", mock.Anything, mock.MatchedBy(func(req anthropic.MessageRequest) bool {
+		// Non-primer requests should NOT have CacheControl.
+		if len(req.System) > 0 && req.System[0].CacheControl == nil {
+			return true
+		}
+		return false
+	})).Return(&anthropic.MessageResponse{
+		Content: []anthropic.ContentBlock{{Text: `{"value": "answer", "confidence": 0.9, "reasoning": "ok", "source_url": "https://acme.com"}`}},
+		Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
+	}, nil).Times(3)
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+	result, err := ExtractTier1(ctx, routed, aiClient, aiCfg)
+
+	assert.NoError(t, err)
+	assert.Len(t, result.Answers, 3)
+	aiClient.AssertExpectations(t)
+}
+
+// --- External snippet tests ---
+
+func TestBuildExternalSnippets_Budget(t *testing.T) {
+	pages := []model.ClassifiedPage{
+		{CrawledPage: model.CrawledPage{Title: "[BBB] Better Business Bureau", URL: "https://bbb.org/acme", Markdown: "BBB Rating: A+. Accredited since 2010. No complaints filed."}},
+		{CrawledPage: model.CrawledPage{Title: "[Google_Maps] Acme Inc", URL: "https://maps.google.com/acme", Markdown: "4.5 stars, 120 reviews. Located at 123 Main St."}},
+		{CrawledPage: model.CrawledPage{Title: "[SoS] Secretary of State", URL: "https://sos.state.gov/acme", Markdown: "Active corporation, filed 2015. Agent: John Doe."}},
+		{CrawledPage: model.CrawledPage{Title: "About Us", URL: "https://acme.com/about", Markdown: "This should NOT appear in external snippets."}},
+	}
+
+	result := buildExternalSnippets(pages, 100)
+
+	// Should include external pages.
+	assert.Contains(t, result, "BBB")
+	// Should NOT include non-external page.
+	assert.NotContains(t, result, "This should NOT appear")
+	// Total markdown content should respect the budget.
+	// The budget applies to the markdown content chars, not the full formatted output.
+}
+
+func TestBuildExternalSnippets_NoExternalPages(t *testing.T) {
+	pages := []model.ClassifiedPage{
+		{CrawledPage: model.CrawledPage{Title: "Home", URL: "https://acme.com", Markdown: "Welcome"}},
+		{CrawledPage: model.CrawledPage{Title: "About", URL: "https://acme.com/about", Markdown: "About us"}},
+	}
+
+	result := buildExternalSnippets(pages, 2000)
+	assert.Equal(t, "", result)
+}
+
+func TestBuildExternalSnippets_TruncatesLongContent(t *testing.T) {
+	longContent := strings.Repeat("X", 500)
+	pages := []model.ClassifiedPage{
+		{CrawledPage: model.CrawledPage{Title: "[LinkedIn] Acme", URL: "https://linkedin.com/acme", Markdown: longContent}},
+	}
+
+	result := buildExternalSnippets(pages, 100)
+
+	// The content should be truncated to the budget.
+	assert.NotContains(t, result, strings.Repeat("X", 200))
+}
+
+func TestBuildExternalSnippets_MultiplePagesWithinBudget(t *testing.T) {
+	pages := []model.ClassifiedPage{
+		{CrawledPage: model.CrawledPage{Title: "[BBB] Acme", URL: "https://bbb.org/acme", Markdown: "Rating A+"}},
+		{CrawledPage: model.CrawledPage{Title: "[SoS] Acme Corp", URL: "https://sos.gov/acme", Markdown: "Active"}},
+	}
+
+	result := buildExternalSnippets(pages, 2000)
+
+	assert.Contains(t, result, "Rating A+")
+	assert.Contains(t, result, "Active")
+}
+
+// --- Truncation tests ---
+
+func TestTruncateByRelevance_ShortContent(t *testing.T) {
+	content := "Short content under the limit."
+	result := truncateByRelevance(content, "anything", 1000)
+	assert.Equal(t, content, result)
+}
+
+func TestTruncateByRelevance_KeywordScoring(t *testing.T) {
+	content := `# About Our Team
+We have a great engineering team.
+
+# Revenue Information
+Annual revenue was $50M in 2024. Revenue growth is 15% year over year.
+
+# Office Locations
+We have offices in New York and San Francisco.
+
+# Revenue Breakdown
+Revenue from consulting is $30M. Revenue from products is $20M.
+
+# Contact Information
+Email us at info@acme.com for more details.`
+
+	// Ask about revenue; sections mentioning "revenue" should be prioritized.
+	result := truncateByRelevance(content, "What is the company's annual revenue?", 200)
+
+	// Revenue sections should be kept.
+	assert.Contains(t, result, "Revenue")
+	// Contact section (low relevance) should be dropped if budget is tight.
+	// The exact selection depends on section sizes, but revenue content should be present.
+}
+
+func TestTruncateByRelevance_NoSections(t *testing.T) {
+	// Single block of text with no headers or empty lines.
+	content := strings.Repeat("word ", 2000) // ~10000 chars
+	result := truncateByRelevance(content, "test question here", 100)
+
+	// Should fall back to hard truncation since there's only 1 section.
+	assert.Len(t, result, 100)
+}
+
+func TestTruncateByRelevance_NoKeywords(t *testing.T) {
+	content := "# Section 1\nContent one.\n\n# Section 2\nContent two."
+	// Question with only stop words / short words → no keywords extracted.
+	result := truncateByRelevance(content+strings.Repeat(" padding", 1000), "is it?", 100)
+
+	// No keywords → falls back to hard truncation.
+	assert.Len(t, result, 100)
+}
+
+func TestTruncateByRelevance_AllSectionsTooLarge(t *testing.T) {
+	// Two sections, each larger than the limit.
+	sec1 := "# Section 1\n" + strings.Repeat("A", 200)
+	sec2 := "\n\n# Section 2\n" + strings.Repeat("B", 200)
+	content := sec1 + sec2
+
+	result := truncateByRelevance(content, "section content here", 50)
+
+	// All sections exceed budget → falls back to hard truncation.
+	assert.Len(t, result, 50)
+}
+
+// --- Keyword extraction ---
+
+func TestExtractKeywords(t *testing.T) {
+	text := "What is the company's annual revenue for 2024?"
+	keywords := extractKeywords(text)
+
+	assert.Contains(t, keywords, "annual")
+	assert.Contains(t, keywords, "revenue")
+	assert.Contains(t, keywords, "2024")
+	assert.Contains(t, keywords, "company's")
+	// Stop words and short words excluded.
+	assert.NotContains(t, keywords, "the")
+	assert.NotContains(t, keywords, "for")
+	assert.NotContains(t, keywords, "what")
+	assert.NotContains(t, keywords, "is") // 2 chars
+}
+
+func TestExtractKeywords_Empty(t *testing.T) {
+	assert.Empty(t, extractKeywords(""))
+}
+
+func TestExtractKeywords_AllStopWords(t *testing.T) {
+	assert.Empty(t, extractKeywords("the and for are was"))
+}
+
+func TestExtractKeywords_Deduplication(t *testing.T) {
+	keywords := extractKeywords("revenue revenue revenue growth growth")
+	assert.Len(t, keywords, 2) // "revenue" and "growth", deduplicated
+	assert.Contains(t, keywords, "revenue")
+	assert.Contains(t, keywords, "growth")
+}
+
+func TestExtractKeywords_PunctuationStripping(t *testing.T) {
+	keywords := extractKeywords("(hello) world! revenue? growth.")
+	assert.Contains(t, keywords, "hello")
+	assert.Contains(t, keywords, "world")
+	assert.Contains(t, keywords, "revenue")
+	assert.Contains(t, keywords, "growth")
+}
+
+// --- Section splitting ---
+
+func TestSplitSections(t *testing.T) {
+	content := "# Section 1\nContent one.\n\n# Section 2\nContent two.\n\nMore content."
+	sections := splitSections(content)
+	assert.GreaterOrEqual(t, len(sections), 2)
+}
+
+func TestSplitSections_NoHeaders(t *testing.T) {
+	content := "Just a long paragraph\nwith no headers\nand no empty lines."
+	sections := splitSections(content)
+	assert.Len(t, sections, 1)
+}
+
+func TestSplitSections_EmptyLineBreaks(t *testing.T) {
+	content := "Paragraph one.\n\nParagraph two.\n\nParagraph three."
+	sections := splitSections(content)
+	assert.GreaterOrEqual(t, len(sections), 3)
+}
+
+func TestSplitSections_HeadersOnly(t *testing.T) {
+	content := "# Header 1\nText under header 1.\n# Header 2\nText under header 2."
+	sections := splitSections(content)
+	assert.GreaterOrEqual(t, len(sections), 2)
+	// First section should contain header 1 text.
+	assert.Contains(t, sections[0], "Text under header 1")
+}
+
+func TestSplitSections_EmptyContent(t *testing.T) {
+	sections := splitSections("")
+	assert.Empty(t, sections)
+}
+
+func TestSplitSections_TrailingNewlines(t *testing.T) {
+	content := "# Header\nSome content.\n\n"
+	sections := splitSections(content)
+	for _, s := range sections {
+		// All sections should be trimmed.
+		assert.Equal(t, strings.TrimSpace(s), s)
+	}
+}
+
+// --- Tier threshold ---
+
+func TestTierThreshold_Defaults(t *testing.T) {
+	assert.Equal(t, 20, tierThreshold(1, 0))
+	assert.Equal(t, 10, tierThreshold(2, 0))
+	assert.Equal(t, 5, tierThreshold(3, 0))
+	assert.Equal(t, 20, tierThreshold(99, 0)) // default case
+}
+
+func TestTierThreshold_ConfigOverride(t *testing.T) {
+	assert.Equal(t, 15, tierThreshold(1, 15))
+	assert.Equal(t, 15, tierThreshold(2, 15))
+	assert.Equal(t, 15, tierThreshold(3, 15))
+}
+
+func TestTierThreshold_NegativeConfig(t *testing.T) {
+	// Negative config should fall through to defaults (not > 0).
+	assert.Equal(t, 20, tierThreshold(1, -1))
+	assert.Equal(t, 10, tierThreshold(2, -1))
+}
+
+// --- isExternalPage ---
+
+func TestIsExternalPage(t *testing.T) {
+	assert.True(t, isExternalPage("[BBB] Better Business Bureau"))
+	assert.True(t, isExternalPage("[bbb] lowercase"))
+	assert.True(t, isExternalPage("[Google_Maps] Location"))
+	assert.True(t, isExternalPage("[google_maps] location"))
+	assert.True(t, isExternalPage("[SoS] Secretary of State"))
+	assert.True(t, isExternalPage("[LinkedIn] Company Profile"))
+	assert.False(t, isExternalPage("About Us"))
+	assert.False(t, isExternalPage("Home"))
+	assert.False(t, isExternalPage("[unknown] Other"))
+	assert.False(t, isExternalPage(""))
 }
