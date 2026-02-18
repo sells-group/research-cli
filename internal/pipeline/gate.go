@@ -19,6 +19,8 @@ import (
 	"github.com/sells-group/research-cli/pkg/salesforce"
 )
 
+var webhookClient = &http.Client{Timeout: 10 * time.Second}
+
 // GateResult holds the outcome of the quality gate phase.
 type GateResult struct {
 	Score      float64 `json:"score"`
@@ -42,6 +44,8 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 	// Run SF/ToolJet and Notion updates concurrently — they are independent.
 	g, gCtx := errgroup.WithContext(ctx)
 
+	var sfErr, notionErr error
+
 	// SF or ToolJet update.
 	g.Go(func() error {
 		if gate.Passed {
@@ -52,6 +56,7 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 				}
 				if len(sfFields) > 0 {
 					if err := salesforce.UpdateAccount(gCtx, sfClient, result.Company.SalesforceID, sfFields); err != nil {
+						sfErr = err
 						zap.L().Error("gate: salesforce update failed",
 							zap.String("company", result.Company.Name),
 							zap.Error(err),
@@ -84,6 +89,7 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 				status = "Manual Review"
 			}
 			if err := updateNotionStatus(gCtx, notionClient, result.Company.NotionPageID, status, result); err != nil {
+				notionErr = err
 				zap.L().Warn("gate: notion update failed",
 					zap.String("company", result.Company.Name),
 					zap.Error(err),
@@ -94,7 +100,50 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 	})
 
 	if err := g.Wait(); err != nil {
+		// If SF succeeded but Notion failed, log inconsistency and retry Notion once.
+		if sfErr == nil && gate.SFUpdated && notionErr != nil {
+			zap.L().Error("gate: inconsistent state — SF updated but Notion failed, retrying Notion",
+				zap.String("company", result.Company.Name),
+				zap.Error(notionErr),
+			)
+			status := "Enriched"
+			if !gate.Passed {
+				status = "Manual Review"
+			}
+			if retryErr := updateNotionStatus(ctx, notionClient, result.Company.NotionPageID, status, result); retryErr != nil {
+				zap.L().Error("gate: notion retry also failed",
+					zap.String("company", result.Company.Name),
+					zap.Error(retryErr),
+				)
+			} else {
+				notionErr = nil
+			}
+		}
+		if sfErr != nil && notionErr == nil {
+			zap.L().Error("gate: inconsistent state — Notion updated but SF failed",
+				zap.String("company", result.Company.Name),
+				zap.Error(sfErr),
+			)
+		}
 		return gate, err
+	}
+
+	// Handle case where SF didn't return an error to errgroup but Notion failed.
+	if gate.SFUpdated && notionErr != nil {
+		zap.L().Error("gate: inconsistent state — SF updated but Notion failed, retrying Notion",
+			zap.String("company", result.Company.Name),
+			zap.Error(notionErr),
+		)
+		status := "Enriched"
+		if !gate.Passed {
+			status = "Manual Review"
+		}
+		if retryErr := updateNotionStatus(ctx, notionClient, result.Company.NotionPageID, status, result); retryErr != nil {
+			zap.L().Error("gate: notion retry also failed",
+				zap.String("company", result.Company.Name),
+				zap.Error(retryErr),
+			)
+		}
 	}
 
 	return gate, nil
@@ -122,7 +171,7 @@ func sendToToolJet(ctx context.Context, result *model.EnrichmentResult, webhookU
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := webhookClient.Do(req)
 	if err != nil {
 		return eris.Wrap(err, "gate: tooljet request failed")
 	}

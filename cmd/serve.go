@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/rotisserie/eris"
 	"github.com/spf13/cobra"
@@ -18,10 +19,14 @@ import (
 
 var servePort int
 
+// webhookSemSize limits concurrent webhook pipeline executions.
+const webhookSemSize = 20
+
 // buildMux constructs the HTTP handler for the webhook server.
 // It is extracted as a named function so it can be tested independently.
 func buildMux(ctx context.Context, p *pipeline.Pipeline) *http.ServeMux {
 	mux := http.NewServeMux()
+	sem := make(chan struct{}, webhookSemSize)
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -45,6 +50,15 @@ func buildMux(ctx context.Context, p *pipeline.Pipeline) *http.ServeMux {
 			return
 		}
 
+		// Check semaphore capacity before accepting.
+		select {
+		case sem <- struct{}{}:
+			// Acquired slot
+		default:
+			http.Error(w, `{"error":"too many concurrent requests"}`, http.StatusServiceUnavailable)
+			return
+		}
+
 		company := model.Company{
 			URL:          req.URL,
 			SalesforceID: req.SalesforceID,
@@ -53,6 +67,7 @@ func buildMux(ctx context.Context, p *pipeline.Pipeline) *http.ServeMux {
 
 		// Run enrichment asynchronously
 		go func() {
+			defer func() { <-sem }()
 			if p == nil {
 				zap.L().Error("webhook enrichment skipped: pipeline not initialized",
 					zap.String("company", company.URL))
@@ -114,11 +129,13 @@ func startServer(ctx context.Context, handler http.Handler, port int) error {
 		Handler: handler,
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown — use a fresh context since ctx is already cancelled.
 	go func() {
 		<-ctx.Done()
 		zap.L().Info("shutting down server")
-		srv.Shutdown(ctx)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer shutdownCancel()
+		srv.Shutdown(shutdownCtx)
 	}()
 
 	zap.L().Info("starting server", zap.Int("port", port))

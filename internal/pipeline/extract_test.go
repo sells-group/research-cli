@@ -829,6 +829,227 @@ func TestTierThreshold_NegativeConfig(t *testing.T) {
 	assert.Equal(t, 10, tierThreshold(2, -1))
 }
 
+// --- T2 confidence filtering ---
+
+func TestExtractTier2_FiltersHighConfidenceT1(t *testing.T) {
+	ctx := context.Background()
+
+	routed := []model.RoutedQuestion{
+		{
+			Question: model.Question{ID: "q1", Text: "Synthesize revenue", FieldKey: "revenue", OutputFormat: "string"},
+			Pages: []model.ClassifiedPage{
+				{CrawledPage: model.CrawledPage{URL: "https://acme.com", Markdown: "Revenue $10M"}},
+			},
+		},
+	}
+
+	// 2 high-confidence (0.9), 2 low-confidence (0.3).
+	// Only the low-confidence answers should appear in the T2 prompt context.
+	t1Answers := []model.ExtractionAnswer{
+		{QuestionID: "q10", FieldKey: "industry", Value: "Tech", Confidence: 0.9, Tier: 1},
+		{QuestionID: "q11", FieldKey: "founded", Value: "2010", Confidence: 0.9, Tier: 1},
+		{QuestionID: "q12", FieldKey: "revenue", Value: "unknown", Confidence: 0.3, Tier: 1},
+		{QuestionID: "q13", FieldKey: "employees", Value: "~50", Confidence: 0.3, Tier: 1},
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+
+	// Capture the prompt to verify which T1 answers are included.
+	var capturedPrompt string
+	aiClient.On("CreateMessage", mock.Anything, mock.MatchedBy(func(req anthropic.MessageRequest) bool {
+		// Any MessageRequest qualifies; we just capture the prompt.
+		if len(req.Messages) > 0 {
+			capturedPrompt = req.Messages[0].Content
+		}
+		return true
+	})).Return(&anthropic.MessageResponse{
+		Content: []anthropic.ContentBlock{{Text: `{"value": "$10M", "confidence": 0.9, "reasoning": "found", "source_url": "https://acme.com"}`}},
+		Usage:   anthropic.TokenUsage{InputTokens: 300, OutputTokens: 60},
+	}, nil).Once()
+
+	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
+
+	result, err := ExtractTier2(ctx, routed, t1Answers, aiClient, aiCfg)
+
+	require.NoError(t, err)
+	assert.Len(t, result.Answers, 1)
+
+	// Low-confidence answers (revenue, employees) should be present in the prompt.
+	assert.Contains(t, capturedPrompt, "revenue")
+	assert.Contains(t, capturedPrompt, "unknown")
+	assert.Contains(t, capturedPrompt, "0.30")
+	assert.Contains(t, capturedPrompt, "employees")
+	assert.Contains(t, capturedPrompt, "~50")
+
+	// High-confidence answers (industry, founded) should NOT be in the prompt.
+	assert.NotContains(t, capturedPrompt, "industry: Tech")
+	assert.NotContains(t, capturedPrompt, "founded: 2010")
+}
+
+func TestExtractTier2_AllHighConfidence_EmptyContext(t *testing.T) {
+	ctx := context.Background()
+
+	routed := []model.RoutedQuestion{
+		{
+			Question: model.Question{ID: "q1", Text: "Revenue?", FieldKey: "revenue", OutputFormat: "string"},
+			Pages: []model.ClassifiedPage{
+				{CrawledPage: model.CrawledPage{URL: "https://acme.com", Markdown: "Revenue $10M"}},
+			},
+		},
+	}
+
+	// All T1 answers above 0.4 threshold — none should pass the filter.
+	t1Answers := []model.ExtractionAnswer{
+		{QuestionID: "q10", FieldKey: "industry", Value: "Tech", Confidence: 0.9, Tier: 1},
+		{QuestionID: "q11", FieldKey: "founded", Value: "2010", Confidence: 0.85, Tier: 1},
+		{QuestionID: "q12", FieldKey: "size", Value: "200", Confidence: 0.5, Tier: 1},
+		{QuestionID: "q13", FieldKey: "location", Value: "NYC", Confidence: 0.4, Tier: 1},
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+
+	var capturedPrompt string
+	aiClient.On("CreateMessage", mock.Anything, mock.MatchedBy(func(req anthropic.MessageRequest) bool {
+		if len(req.Messages) > 0 {
+			capturedPrompt = req.Messages[0].Content
+		}
+		return true
+	})).Return(&anthropic.MessageResponse{
+		Content: []anthropic.ContentBlock{{Text: `{"value": "$10M", "confidence": 0.92, "reasoning": "found", "source_url": "https://acme.com"}`}},
+		Usage:   anthropic.TokenUsage{InputTokens: 300, OutputTokens: 60},
+	}, nil).Once()
+
+	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
+
+	result, err := ExtractTier2(ctx, routed, t1Answers, aiClient, aiCfg)
+
+	require.NoError(t, err)
+	assert.Len(t, result.Answers, 1)
+
+	// With all high-confidence answers filtered out, buildT1Context receives
+	// an empty slice and returns "No previous findings."
+	assert.Contains(t, capturedPrompt, "No previous findings.")
+}
+
+func TestExtractTier2_AllLowConfidence_FullContext(t *testing.T) {
+	ctx := context.Background()
+
+	routed := []model.RoutedQuestion{
+		{
+			Question: model.Question{ID: "q1", Text: "Revenue?", FieldKey: "revenue", OutputFormat: "string"},
+			Pages: []model.ClassifiedPage{
+				{CrawledPage: model.CrawledPage{URL: "https://acme.com", Markdown: "Revenue $10M"}},
+			},
+		},
+	}
+
+	// All T1 answers below 0.4 threshold — all should be included in context.
+	t1Answers := []model.ExtractionAnswer{
+		{QuestionID: "q10", FieldKey: "industry", Value: "Tech", Confidence: 0.2, Tier: 1},
+		{QuestionID: "q11", FieldKey: "founded", Value: "2010", Confidence: 0.1, Tier: 1},
+		{QuestionID: "q12", FieldKey: "size", Value: "maybe 200", Confidence: 0.35, Tier: 1},
+		{QuestionID: "q13", FieldKey: "location", Value: "possibly NYC", Confidence: 0.39, Tier: 1},
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+
+	var capturedPrompt string
+	aiClient.On("CreateMessage", mock.Anything, mock.MatchedBy(func(req anthropic.MessageRequest) bool {
+		if len(req.Messages) > 0 {
+			capturedPrompt = req.Messages[0].Content
+		}
+		return true
+	})).Return(&anthropic.MessageResponse{
+		Content: []anthropic.ContentBlock{{Text: `{"value": "$10M", "confidence": 0.88, "reasoning": "synthesized", "source_url": "https://acme.com"}`}},
+		Usage:   anthropic.TokenUsage{InputTokens: 300, OutputTokens: 60},
+	}, nil).Once()
+
+	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
+
+	result, err := ExtractTier2(ctx, routed, t1Answers, aiClient, aiCfg)
+
+	require.NoError(t, err)
+	assert.Len(t, result.Answers, 1)
+
+	// All four low-confidence answers should appear in the prompt.
+	assert.Contains(t, capturedPrompt, "industry: Tech")
+	assert.Contains(t, capturedPrompt, "0.20")
+	assert.Contains(t, capturedPrompt, "founded: 2010")
+	assert.Contains(t, capturedPrompt, "0.10")
+	assert.Contains(t, capturedPrompt, "size: maybe 200")
+	assert.Contains(t, capturedPrompt, "0.35")
+	assert.Contains(t, capturedPrompt, "location: possibly NYC")
+	assert.Contains(t, capturedPrompt, "0.39")
+
+	// Should NOT contain the "No previous findings." placeholder.
+	assert.NotContains(t, capturedPrompt, "No previous findings.")
+}
+
+func TestBuildT1Context_FilteredInput(t *testing.T) {
+	tests := []struct {
+		name     string
+		answers  []model.ExtractionAnswer
+		contains []string
+		excludes []string
+	}{
+		{
+			name:     "empty slice returns placeholder",
+			answers:  nil,
+			contains: []string{"No previous findings."},
+		},
+		{
+			name: "single answer formatted correctly",
+			answers: []model.ExtractionAnswer{
+				{FieldKey: "revenue", Value: "unknown", Confidence: 0.3},
+			},
+			contains: []string{"- revenue: unknown (confidence: 0.30)"},
+			excludes: []string{"No previous findings."},
+		},
+		{
+			name: "multiple answers all included with correct format",
+			answers: []model.ExtractionAnswer{
+				{FieldKey: "industry", Value: "Tech", Confidence: 0.2},
+				{FieldKey: "size", Value: "~50", Confidence: 0.35},
+				{FieldKey: "location", Value: "NYC", Confidence: 0.1},
+			},
+			contains: []string{
+				"- industry: Tech (confidence: 0.20)",
+				"- size: ~50 (confidence: 0.35)",
+				"- location: NYC (confidence: 0.10)",
+			},
+			excludes: []string{"No previous findings."},
+		},
+		{
+			name: "numeric value formatted correctly",
+			answers: []model.ExtractionAnswer{
+				{FieldKey: "employees", Value: float64(150), Confidence: 0.25},
+			},
+			contains: []string{"- employees: 150 (confidence: 0.25)"},
+		},
+		{
+			name: "answers joined by newlines",
+			answers: []model.ExtractionAnswer{
+				{FieldKey: "a", Value: "val1", Confidence: 0.1},
+				{FieldKey: "b", Value: "val2", Confidence: 0.2},
+			},
+			contains: []string{"\n"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := buildT1Context(tt.answers)
+
+			for _, s := range tt.contains {
+				assert.Contains(t, result, s)
+			}
+			for _, s := range tt.excludes {
+				assert.NotContains(t, result, s)
+			}
+		})
+	}
+}
+
 // --- isExternalPage ---
 
 func TestIsExternalPage(t *testing.T) {

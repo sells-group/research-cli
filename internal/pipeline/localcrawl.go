@@ -13,6 +13,7 @@ import (
 
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/scrape"
@@ -158,41 +159,71 @@ func (lc *LocalCrawler) DiscoverLinks(ctx context.Context, rawURL string, maxPag
 		)
 	}
 
-	for len(queue) > 0 && len(urls) < maxPages {
-		select {
-		case <-ctx.Done():
-			return urls, nil
-		default:
+	var mu sync.Mutex
+
+	for {
+		mu.Lock()
+		if len(queue) == 0 || len(urls) >= maxPages {
+			mu.Unlock()
+			break
 		}
 
-		item := queue[0]
-		queue = queue[1:]
+		// Drain up to 5 items from the queue for parallel fetching.
+		var batch []crawlItem
+		for len(batch) < 5 && len(queue) > 0 && len(urls) < maxPages {
+			item := queue[0]
+			queue = queue[1:]
+			urls = append(urls, item.url)
+			if item.depth < maxDepth {
+				batch = append(batch, item)
+			}
+		}
+		mu.Unlock()
 
-		urls = append(urls, item.url)
-
-		if item.depth >= maxDepth {
+		if len(batch) == 0 {
 			continue
 		}
 
-		links, err := lc.extractLinks(ctx, item.url, base)
-		if err != nil {
-			zap.L().Debug("localcrawl: error extracting links",
-				zap.String("url", item.url),
-				zap.Error(err),
-			)
-			continue
+		// Create a fresh errgroup per batch so the derived context is not
+		// cancelled between iterations.
+		g, gCtx := errgroup.WithContext(ctx)
+		g.SetLimit(5)
+
+		for _, item := range batch {
+			g.Go(func() error {
+				select {
+				case <-gCtx.Done():
+					return nil
+				default:
+				}
+
+				links, err := lc.extractLinks(gCtx, item.url, base)
+				if err != nil {
+					zap.L().Debug("localcrawl: error extracting links",
+						zap.String("url", item.url),
+						zap.Error(err),
+					)
+					return nil
+				}
+
+				mu.Lock()
+				for _, link := range links {
+					if seen[link] || len(urls)+len(queue) >= maxPages {
+						continue
+					}
+					if lc.matcher.IsExcluded(link) {
+						continue
+					}
+					seen[link] = true
+					queue = append(queue, crawlItem{url: link, depth: item.depth + 1})
+				}
+				mu.Unlock()
+				return nil
+			})
 		}
 
-		for _, link := range links {
-			if seen[link] || len(urls)+len(queue) >= maxPages {
-				continue
-			}
-			if lc.matcher.IsExcluded(link) {
-				continue
-			}
-			seen[link] = true
-			queue = append(queue, crawlItem{url: link, depth: item.depth + 1})
-		}
+		// Wait for this batch to finish before draining more from the queue.
+		_ = g.Wait()
 	}
 
 	return urls, nil

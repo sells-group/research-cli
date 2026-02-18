@@ -1,10 +1,9 @@
-//go:build integration
-
 package store
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,12 +12,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 
+	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/model"
 )
 
 // PostgresStore implements Store using pgxpool.
 type PostgresStore struct {
-	pool *pgxpool.Pool
+	pool    db.Pool
+	closeFn func()
 }
 
 // PoolConfig holds optional connection pool tuning parameters.
@@ -82,7 +83,7 @@ func NewPostgres(ctx context.Context, connString string, poolCfg *PoolConfig) (*
 		pool.Close()
 		return nil, eris.Wrap(err, "postgres: ping")
 	}
-	return &PostgresStore{pool: pool}, nil
+	return &PostgresStore{pool: pool, closeFn: pool.Close}, nil
 }
 
 const postgresMigration = `
@@ -106,7 +107,7 @@ CREATE TABLE IF NOT EXISTS run_phases (
 
 CREATE TABLE IF NOT EXISTS crawl_cache (
 	id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-	company_url TEXT NOT NULL,
+	company_url TEXT NOT NULL UNIQUE,
 	pages       JSONB NOT NULL,
 	crawled_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
 	expires_at  TIMESTAMPTZ NOT NULL
@@ -120,7 +121,7 @@ CREATE INDEX IF NOT EXISTS idx_crawl_cache_url_expires ON crawl_cache(company_ur
 
 CREATE TABLE IF NOT EXISTS linkedin_cache (
 	id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-	domain     TEXT NOT NULL,
+	domain     TEXT NOT NULL UNIQUE,
 	data       JSONB NOT NULL,
 	cached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
 	expires_at TIMESTAMPTZ NOT NULL
@@ -154,7 +155,9 @@ func (s *PostgresStore) Migrate(ctx context.Context) error {
 }
 
 func (s *PostgresStore) Close() error {
-	s.pool.Close()
+	if s.closeFn != nil {
+		s.closeFn()
+	}
 	return nil
 }
 
@@ -355,7 +358,7 @@ func (s *PostgresStore) GetCachedCrawl(ctx context.Context, companyURL string) (
 		companyURL,
 	).Scan(&cc.ID, &cc.CompanyURL, &pagesJSON, &cc.CrawledAt, &cc.ExpiresAt)
 	if err != nil {
-		if err.Error() == "no rows in result set" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, eris.Wrap(err, "postgres: get cached crawl")
@@ -377,7 +380,8 @@ func (s *PostgresStore) SetCachedCrawl(ctx context.Context, companyURL string, p
 	}
 
 	_, err = s.pool.Exec(ctx,
-		`INSERT INTO crawl_cache (id, company_url, pages, crawled_at, expires_at) VALUES ($1, $2, $3, $4, $5)`,
+		`INSERT INTO crawl_cache (id, company_url, pages, crawled_at, expires_at) VALUES ($1, $2, $3, $4, $5)
+		 ON CONFLICT (company_url) DO UPDATE SET pages = $3, crawled_at = $4, expires_at = $5`,
 		id, companyURL, pagesJSON, now, expiresAt,
 	)
 	return eris.Wrap(err, "postgres: set cached crawl")
@@ -392,7 +396,7 @@ func (s *PostgresStore) GetCachedLinkedIn(ctx context.Context, domain string) ([
 		domain,
 	).Scan(&data)
 	if err != nil {
-		if err.Error() == "no rows in result set" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, eris.Wrap(err, "postgres: get cached linkedin")
@@ -406,7 +410,8 @@ func (s *PostgresStore) SetCachedLinkedIn(ctx context.Context, domain string, da
 	expiresAt := now.Add(ttl)
 
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO linkedin_cache (id, domain, data, cached_at, expires_at) VALUES ($1, $2, $3, $4, $5)`,
+		`INSERT INTO linkedin_cache (id, domain, data, cached_at, expires_at) VALUES ($1, $2, $3, $4, $5)
+		 ON CONFLICT (domain) DO UPDATE SET data = $3, cached_at = $4, expires_at = $5`,
 		id, domain, data, now, expiresAt,
 	)
 	return eris.Wrap(err, "postgres: set cached linkedin")
@@ -430,7 +435,7 @@ func (s *PostgresStore) GetCachedScrape(ctx context.Context, urlHash string) ([]
 		urlHash,
 	).Scan(&content)
 	if err != nil {
-		if err.Error() == "no rows in result set" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, eris.Wrap(err, "postgres: get cached scrape")
@@ -461,7 +466,7 @@ func (s *PostgresStore) GetHighConfidenceAnswers(ctx context.Context, companyURL
 		companyURL,
 	).Scan(&resultJSON)
 	if err != nil {
-		if err.Error() == "no rows in result set" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, eris.Wrap(err, "postgres: get high confidence answers")
@@ -499,7 +504,7 @@ func (s *PostgresStore) LoadCheckpoint(ctx context.Context, companyID string) (*
 		companyID,
 	).Scan(&cp.CompanyID, &cp.Phase, &cp.Data, &cp.CreatedAt)
 	if err != nil {
-		if err.Error() == "no rows in result set" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, eris.Wrap(err, "postgres: load checkpoint")

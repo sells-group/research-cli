@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/rotisserie/eris"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -49,7 +47,7 @@ var fedsyncXrefCmd = &cobra.Command{
 			return eris.Wrap(err, "fedsync xref")
 		}
 
-		fmt.Println("Entity cross-reference build complete")
+		zap.L().Info("entity cross-reference build complete")
 		return nil
 	},
 }

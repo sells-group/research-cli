@@ -96,8 +96,14 @@ func (e *Engine) Run(ctx context.Context, opts RunOpts) error {
 			}
 
 			start := time.Now()
-			result, err := ds.Sync(gctx, e.pool, e.fetcher, e.tempDir)
+			syncCtx, syncCancel := context.WithTimeout(gctx, 30*time.Minute)
+			result, err := ds.Sync(syncCtx, e.pool, e.fetcher, e.tempDir)
+			syncCancel()
 			elapsed := time.Since(start)
+
+			if syncCtx.Err() == context.DeadlineExceeded {
+				dsLog.Warn("sync timed out after 30 minutes", zap.Duration("elapsed", elapsed))
+			}
 
 			if err != nil {
 				dsLog.Error("sync failed", zap.Error(err), zap.Duration("elapsed", elapsed))

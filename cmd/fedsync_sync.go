@@ -3,7 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/rotisserie/eris"
 	"github.com/spf13/cobra"
@@ -24,7 +28,9 @@ Use --phase to restrict to a specific phase, or --datasets for specific datasets
 Use --force to ignore ShouldRun() scheduling logic.
 Use --full to perform a full reload instead of incremental sync.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := cmd.Context()
+		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+
 		log := zap.L().With(zap.String("command", "fedsync.sync"))
 
 		pool, err := fedsyncPool(ctx)
@@ -44,11 +50,16 @@ Use --full to perform a full reload instead of incremental sync.`,
 			return err
 		}
 
-		// Create temp directory.
+		// Create temp directory with a unique run-specific subdirectory.
 		tempDir := cfg.Fedsync.TempDir
 		if err := os.MkdirAll(tempDir, 0o755); err != nil {
 			return eris.Wrapf(err, "fedsync sync: create temp dir %s", tempDir)
 		}
+		runDir := filepath.Join(tempDir, fmt.Sprintf("run-%d", time.Now().UnixNano()))
+		if err := os.MkdirAll(runDir, 0o755); err != nil {
+			return eris.Wrapf(err, "fedsync sync: create run dir %s", runDir)
+		}
+		defer os.RemoveAll(runDir)
 
 		// Build fetcher.
 		f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{
@@ -59,7 +70,7 @@ Use --full to perform a full reload instead of incremental sync.`,
 		// Build engine.
 		syncLog := fedsync.NewSyncLog(pool)
 		reg := dataset.NewRegistry(cfg)
-		engine := dataset.NewEngine(pool, f, syncLog, reg, tempDir)
+		engine := dataset.NewEngine(pool, f, syncLog, reg, runDir)
 
 		log.Info("starting fedsync",
 			zap.Any("phase", opts.Phase),
@@ -72,7 +83,7 @@ Use --full to perform a full reload instead of incremental sync.`,
 			return eris.Wrap(err, "fedsync sync")
 		}
 
-		fmt.Println("Sync complete")
+		zap.L().Info("sync complete")
 		return nil
 	},
 }

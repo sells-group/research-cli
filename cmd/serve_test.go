@@ -2,9 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -193,4 +197,110 @@ func TestBatchCmd_Metadata(t *testing.T) {
 	limitFlag := batchCmd.Flags().Lookup("limit")
 	require.NotNil(t, limitFlag)
 	assert.Equal(t, "100", limitFlag.DefValue)
+}
+
+func TestWebhookSemSize_Value(t *testing.T) {
+	// The semaphore constant must be 20 to match Fly.io concurrency expectations.
+	assert.Equal(t, 20, webhookSemSize)
+}
+
+func TestWebhookEnrich_SemaphoreFull(t *testing.T) {
+	// Build a mux using the same semaphore pattern as serve.go, but with a
+	// small capacity and a blocking channel so we can deterministically fill
+	// the semaphore and verify 503 responses.
+	const testSemSize = 3
+	sem := make(chan struct{}, testSemSize)
+	// block is held open to prevent goroutines from releasing semaphore slots
+	// until we are ready.
+	block := make(chan struct{})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /webhook/enrich", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			URL string `json:"url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+			return
+		}
+		if req.URL == "" {
+			http.Error(w, `{"error":"url is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		select {
+		case sem <- struct{}{}:
+			// acquired
+		default:
+			http.Error(w, `{"error":"too many concurrent requests"}`, http.StatusServiceUnavailable)
+			return
+		}
+
+		go func() {
+			defer func() { <-sem }()
+			<-block // hold the slot until the test releases
+		}()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]string{"status": "accepted", "company": req.URL})
+	})
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	payload := []byte(`{"url":"https://test.com"}`)
+
+	// Fill all semaphore slots.
+	for i := 0; i < testSemSize; i++ {
+		resp, err := http.Post(ts.URL+"/webhook/enrich", "application/json", bytes.NewReader(payload))
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusAccepted, resp.StatusCode, "request %d should be accepted", i)
+		resp.Body.Close()
+	}
+
+	// The next request must be rejected with 503.
+	resp, err := http.Post(ts.URL+"/webhook/enrich", "application/json", bytes.NewReader(payload))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	resp.Body.Close()
+
+	// Release blocking goroutines so they don't leak.
+	close(block)
+}
+
+func TestWebhookEnrich_AcceptsUnderCapacity(t *testing.T) {
+	// Use the real buildMux (with the production semaphore of size 20) to
+	// verify that a single request is accepted when far under capacity.
+	ctx := context.Background()
+	mux := buildMux(ctx, nil)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Send several requests sequentially. With nil pipeline the goroutine
+	// releases the semaphore immediately, so every request should be accepted.
+	var accepted atomic.Int32
+	var wg sync.WaitGroup
+	const numRequests = 5
+
+	for i := 0; i < numRequests; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			payload := []byte(fmt.Sprintf(`{"url":"https://company-%d.com"}`, n))
+			resp, err := http.Post(ts.URL+"/webhook/enrich", "application/json", bytes.NewReader(payload))
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusAccepted {
+				accepted.Add(1)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	assert.Equal(t, int32(numRequests), accepted.Load(),
+		"all %d requests should be accepted when under semaphore capacity", numRequests)
 }

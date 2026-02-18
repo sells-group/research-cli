@@ -232,10 +232,12 @@ func scrapeSource(ctx context.Context, src ExternalSource, company model.Company
 					zap.Int("max_attempts", maxAttempts),
 					zap.Error(searchErr),
 				)
+				timer := time.NewTimer(backoff)
 				select {
 				case <-ctx.Done():
+					timer.Stop()
 					return nil, ctx.Err()
-				case <-time.After(backoff):
+				case <-timer.C:
 				}
 				backoff *= 2
 			}

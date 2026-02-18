@@ -24,7 +24,7 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Equal(t, "info", cfg.Log.Level)
 	assert.Equal(t, "json", cfg.Log.Format)
 	assert.Equal(t, 8080, cfg.Server.Port)
-	assert.Equal(t, 5, cfg.Batch.MaxConcurrentCompanies)
+	assert.Equal(t, 15, cfg.Batch.MaxConcurrentCompanies)
 	assert.Equal(t, 50, cfg.Crawl.MaxPages)
 	assert.Equal(t, 2, cfg.Crawl.MaxDepth)
 	assert.Equal(t, 60, cfg.Crawl.TimeoutSecs)
@@ -125,4 +125,128 @@ func TestInitLoggerJSON(t *testing.T) {
 func TestInitLoggerInvalidLevel(t *testing.T) {
 	err := InitLogger(LogConfig{Level: "invalid", Format: "json"})
 	assert.Error(t, err)
+}
+
+// validDefaults returns a Config with all defaults populated for validation tests.
+func validDefaults() *Config {
+	cfg := &Config{}
+	cfg.Batch.MaxConcurrentCompanies = 15
+	cfg.Pipeline.ConfidenceEscalationThreshold = 0.4
+	cfg.Pipeline.QualityScoreThreshold = 0.6
+	cfg.Pipeline.SkipConfidenceThreshold = 0.8
+	cfg.Server.Port = 8080
+	return cfg
+}
+
+func TestValidateEnrichment_AllPresent(t *testing.T) {
+	cfg := validDefaults()
+	cfg.Store.DatabaseURL = "postgres://localhost/test"
+	cfg.Notion.Token = "ntn_token"
+	cfg.Notion.LeadDB = "lead-db-id"
+	cfg.Notion.QuestionDB = "question-db-id"
+	cfg.Notion.FieldDB = "field-db-id"
+	cfg.Anthropic.Key = "sk-ant-key"
+
+	assert.NoError(t, cfg.Validate("enrichment"))
+}
+
+func TestValidateEnrichment_MissingFields(t *testing.T) {
+	cfg := validDefaults()
+	// All enrichment-required fields are empty
+
+	err := cfg.Validate("enrichment")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "store.database_url is required")
+	assert.Contains(t, err.Error(), "notion.token is required")
+	assert.Contains(t, err.Error(), "anthropic.key is required")
+}
+
+func TestValidateFedsync_WithDedicatedURL(t *testing.T) {
+	cfg := validDefaults()
+	cfg.Fedsync.DatabaseURL = "postgres://localhost/fedsync"
+
+	assert.NoError(t, cfg.Validate("fedsync"))
+}
+
+func TestValidateFedsync_FallsBackToStoreURL(t *testing.T) {
+	cfg := validDefaults()
+	cfg.Store.DatabaseURL = "postgres://localhost/main"
+
+	assert.NoError(t, cfg.Validate("fedsync"))
+}
+
+func TestValidateFedsync_NoDB(t *testing.T) {
+	cfg := validDefaults()
+
+	err := cfg.Validate("fedsync")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "database_url")
+}
+
+func TestValidateServe_ValidPort(t *testing.T) {
+	cfg := validDefaults()
+	cfg.Server.Port = 9090
+
+	assert.NoError(t, cfg.Validate("serve"))
+}
+
+func TestValidateServe_InvalidPort(t *testing.T) {
+	cfg := validDefaults()
+	cfg.Server.Port = 0
+
+	err := cfg.Validate("serve")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "server.port must be > 0")
+}
+
+func TestValidateUnknownMode(t *testing.T) {
+	cfg := validDefaults()
+	err := cfg.Validate("unknown")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown mode")
+}
+
+func TestValidateConcurrencyBounds(t *testing.T) {
+	cfg := validDefaults()
+	cfg.Server.Port = 8080
+
+	cfg.Batch.MaxConcurrentCompanies = 0
+	err := cfg.Validate("serve")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "max_concurrent_companies must be between 1 and 50")
+
+	cfg.Batch.MaxConcurrentCompanies = 51
+	err = cfg.Validate("serve")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "max_concurrent_companies must be between 1 and 50")
+
+	cfg.Batch.MaxConcurrentCompanies = 50
+	err = cfg.Validate("serve")
+	assert.NoError(t, err)
+}
+
+func TestValidateConfidenceThresholds(t *testing.T) {
+	cfg := validDefaults()
+	cfg.Server.Port = 8080
+
+	cfg.Pipeline.ConfidenceEscalationThreshold = -0.1
+	err := cfg.Validate("serve")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "confidence_escalation_threshold")
+
+	cfg.Pipeline.ConfidenceEscalationThreshold = 1.1
+	err = cfg.Validate("serve")
+	assert.Error(t, err)
+
+	cfg.Pipeline.ConfidenceEscalationThreshold = 0.4
+	cfg.Pipeline.QualityScoreThreshold = 2.0
+	err = cfg.Validate("serve")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "quality_score_threshold")
+
+	cfg.Pipeline.QualityScoreThreshold = 0.6
+	cfg.Pipeline.SkipConfidenceThreshold = -1
+	err = cfg.Validate("serve")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "skip_confidence_threshold")
 }

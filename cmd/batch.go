@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"os/signal"
 	"strings"
 	"sync/atomic"
+	"syscall"
 
 	"github.com/jomei/notionapi"
 	"github.com/rotisserie/eris"
@@ -21,7 +23,8 @@ var batchCmd = &cobra.Command{
 	Use:   "batch",
 	Short: "Batch enrich companies from Notion queue",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := cmd.Context()
+		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
 
 		env, err := initPipeline(ctx)
 		if err != nil {

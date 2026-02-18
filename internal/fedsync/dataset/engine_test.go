@@ -300,6 +300,92 @@ func TestEngine_Run_InvalidDatasetSelection(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// blockingMockDataset implements Dataset with a Sync that blocks until ctx is cancelled.
+type blockingMockDataset struct {
+	mockDataset
+}
+
+func (m *blockingMockDataset) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+	m.synced = true
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestEngine_Run_DatasetTimeout(t *testing.T) {
+	mock, syncLog := newMockSyncLog(t)
+	mock.MatchExpectationsInOrder(false)
+
+	ds := &blockingMockDataset{mockDataset: mockDataset{name: "slow_ds", phase: Phase1, shouldRun: true}}
+	reg := &Registry{datasets: map[string]Dataset{"slow_ds": ds}, order: []string{"slow_ds"}}
+
+	// Start query - returns sync ID
+	mock.ExpectQuery("INSERT INTO fed_data.sync_log").
+		WithArgs("slow_ds").
+		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(1)))
+
+	// Fail query - the dataset times out and is recorded as failed
+	mock.ExpectExec("UPDATE fed_data.sync_log").
+		WithArgs(pgxmock.AnyArg(), int64(1)).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	engine := NewEngine(mock, nil, syncLog, reg, t.TempDir())
+	err := engine.Run(ctx, RunOpts{Force: true})
+	// The engine may return a context error if the errgroup goroutine
+	// returns gctx.Err() via the initial select check, OR it may return nil
+	// if the dataset goroutine handled the error internally (failed.Add(1); return nil).
+	// Either way, the sync should have been attempted and recorded as failed.
+	if err != nil {
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+	}
+	assert.True(t, ds.synced)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestEngine_Run_TimeoutDoesNotAffectOthers(t *testing.T) {
+	mock, syncLog := newMockSyncLog(t)
+	mock.MatchExpectationsInOrder(false)
+
+	slowDS := &blockingMockDataset{mockDataset: mockDataset{name: "slow_ds", phase: Phase1, shouldRun: true}}
+	fastDS := &mockDataset{name: "fast_ds", phase: Phase1, shouldRun: true, syncRows: 42}
+	reg := &Registry{
+		datasets: map[string]Dataset{"slow_ds": slowDS, "fast_ds": fastDS},
+		order:    []string{"fast_ds", "slow_ds"},
+	}
+
+	// fast_ds: Start -> Complete
+	mock.ExpectQuery("INSERT INTO fed_data.sync_log").
+		WithArgs("fast_ds").
+		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(1)))
+	mock.ExpectExec("UPDATE fed_data.sync_log").
+		WithArgs(int64(42), pgxmock.AnyArg(), int64(1)).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	// slow_ds: Start -> Fail (timeout)
+	mock.ExpectQuery("INSERT INTO fed_data.sync_log").
+		WithArgs("slow_ds").
+		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(2)))
+	mock.ExpectExec("UPDATE fed_data.sync_log").
+		WithArgs(pgxmock.AnyArg(), int64(2)).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	engine := NewEngine(mock, nil, syncLog, reg, t.TempDir())
+	err := engine.Run(ctx, RunOpts{Force: true})
+	// The engine may return a context error or nil depending on goroutine scheduling.
+	if err != nil {
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+	}
+	// The fast dataset should have completed successfully regardless of the slow one timing out.
+	assert.True(t, fastDS.synced)
+	assert.True(t, slowDS.synced)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestEngine_Run_MultipleDatasets(t *testing.T) {
 	mock, syncLog := newMockSyncLog(t)
 	mock.MatchExpectationsInOrder(false)

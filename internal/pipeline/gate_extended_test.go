@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -293,4 +294,189 @@ func TestBuildSFFields_AllEmpty(t *testing.T) {
 
 	fields := buildSFFields(fieldValues)
 	assert.Empty(t, fields)
+}
+
+// TestQualityGate_SFSuccessNotionFailRetries verifies that when SF succeeds
+// but Notion fails on the first attempt, the gate retries Notion once and
+// succeeds on the retry. The overall gate should return no error.
+func TestQualityGate_SFSuccessNotionFailRetries(t *testing.T) {
+	ctx := context.Background()
+
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", Required: true},
+	})
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{
+			Name:         "RetryOK Corp",
+			SalesforceID: "001RETRY",
+			NotionPageID: "page-retry-ok",
+		},
+		FieldValues: map[string]model.FieldValue{
+			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Finance", Confidence: 0.95},
+		},
+	}
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001RETRY", mock.AnythingOfType("map[string]interface {}")).
+		Return(nil)
+
+	notionClient := notionmocks.NewMockClient(t)
+	// First call fails, second call (retry) succeeds.
+	notionClient.On("UpdatePage", mock.Anything, "page-retry-ok", mock.Anything).
+		Return(nil, errors.New("notion: rate limited")).Once()
+	notionClient.On("UpdatePage", mock.Anything, "page-retry-ok", mock.Anything).
+		Return(nil, nil).Once()
+
+	cfg := &config.Config{
+		Pipeline: config.PipelineConfig{
+			QualityScoreThreshold: 0.5,
+		},
+	}
+
+	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+
+	assert.NoError(t, err)
+	assert.True(t, gate.Passed)
+	assert.True(t, gate.SFUpdated)
+	// Notion UpdatePage should have been called exactly twice (initial + retry).
+	notionClient.AssertNumberOfCalls(t, "UpdatePage", 2)
+	sfClient.AssertExpectations(t)
+	notionClient.AssertExpectations(t)
+}
+
+// TestQualityGate_SFSuccessNotionFailRetryExhausted verifies that when SF
+// succeeds but Notion fails on both the initial attempt and the retry, the
+// gate still returns without a top-level error (Notion failure is logged but
+// non-blocking since the Notion goroutine always returns nil to errgroup).
+func TestQualityGate_SFSuccessNotionFailRetryExhausted(t *testing.T) {
+	ctx := context.Background()
+
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", Required: true},
+	})
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{
+			Name:         "RetryFail Corp",
+			SalesforceID: "001EXHAUST",
+			NotionPageID: "page-retry-fail",
+		},
+		FieldValues: map[string]model.FieldValue{
+			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Healthcare", Confidence: 0.85},
+		},
+	}
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001EXHAUST", mock.AnythingOfType("map[string]interface {}")).
+		Return(nil)
+
+	notionClient := notionmocks.NewMockClient(t)
+	// Both initial and retry calls fail.
+	notionClient.On("UpdatePage", mock.Anything, "page-retry-fail", mock.Anything).
+		Return(nil, errors.New("notion: service unavailable"))
+
+	cfg := &config.Config{
+		Pipeline: config.PipelineConfig{
+			QualityScoreThreshold: 0.5,
+		},
+	}
+
+	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+
+	// Gate should still return without error — Notion failure is non-blocking.
+	assert.NoError(t, err)
+	assert.True(t, gate.Passed)
+	assert.True(t, gate.SFUpdated)
+	// Notion UpdatePage called twice: initial attempt + one retry.
+	notionClient.AssertNumberOfCalls(t, "UpdatePage", 2)
+	sfClient.AssertExpectations(t)
+}
+
+// TestQualityGate_NotionSuccessSFFailLogsInconsistency verifies that when
+// Salesforce fails but Notion succeeds, the gate returns the SF error.
+// This tests the inconsistent state path where Notion is updated but SF is not.
+func TestQualityGate_NotionSuccessSFFailLogsInconsistency(t *testing.T) {
+	ctx := context.Background()
+
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", Required: true},
+	})
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{
+			Name:         "SFFail Corp",
+			SalesforceID: "001INCON",
+			NotionPageID: "page-inconsistent",
+		},
+		FieldValues: map[string]model.FieldValue{
+			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Energy", Confidence: 0.9},
+		},
+	}
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001INCON", mock.AnythingOfType("map[string]interface {}")).
+		Return(errors.New("sf: 500 internal server error"))
+
+	notionClient := notionmocks.NewMockClient(t)
+	notionClient.On("UpdatePage", mock.Anything, "page-inconsistent", mock.Anything).
+		Return(nil, nil).Maybe()
+
+	cfg := &config.Config{
+		Pipeline: config.PipelineConfig{
+			QualityScoreThreshold: 0.5,
+		},
+	}
+
+	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+
+	// The SF error should propagate from errgroup.Wait().
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "sf")
+	assert.True(t, gate.Passed)
+	assert.False(t, gate.SFUpdated)
+	sfClient.AssertExpectations(t)
+}
+
+// TestSendToToolJet_Timeout verifies that the webhook call to ToolJet respects
+// the webhookClient timeout and returns an error when the server is too slow.
+func TestSendToToolJet_Timeout(t *testing.T) {
+	// Save original client and restore after test.
+	origClient := webhookClient
+	t.Cleanup(func() { webhookClient = origClient })
+
+	// Use a very short timeout for the test.
+	webhookClient = &http.Client{Timeout: 100 * time.Millisecond}
+
+	// Server that blocks longer than the client timeout. Use a done channel so
+	// the handler exits promptly when the test finishes, avoiding slow Close().
+	done := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-done
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	defer close(done) // unblock handler before ts.Close() waits for connections
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{
+			Name: "Slow Webhook Corp",
+		},
+		FieldValues: map[string]model.FieldValue{},
+	}
+
+	start := time.Now()
+	err := sendToToolJet(context.Background(), result, ts.URL)
+	elapsed := time.Since(start)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "tooljet request failed")
+	// Should have returned well before 2s, respecting the 100ms timeout.
+	assert.Less(t, elapsed, 2*time.Second, "should timeout quickly, not wait for server")
+}
+
+// TestWebhookClient_HasTimeout verifies that the package-level webhookClient
+// is configured with the expected 10-second timeout.
+func TestWebhookClient_HasTimeout(t *testing.T) {
+	assert.Equal(t, 10*time.Second, webhookClient.Timeout)
 }

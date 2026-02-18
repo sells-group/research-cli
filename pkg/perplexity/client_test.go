@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -273,4 +275,144 @@ func TestChatCompletion_MaxTokens(t *testing.T) {
 		MaxTokens: &maxTokens,
 	})
 	require.NoError(t, err)
+}
+
+func TestChatCompletion_Retries5xx(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := attempts.Add(1)
+		if n <= 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"internal server error"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"retry-ok","choices":[{"index":0,"message":{"role":"assistant","content":"recovered"}}],"usage":{"prompt_tokens":5,"completion_tokens":3}}`))
+	}))
+	defer srv.Close()
+
+	client := NewClient("test-key", WithBaseURL(srv.URL))
+	resp, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "test"}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "retry-ok", resp.ID)
+	assert.Equal(t, int32(3), attempts.Load())
+}
+
+func TestChatCompletion_Retries429(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := attempts.Add(1)
+		if n == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"rate limit exceeded"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"rate-ok","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{}}`))
+	}))
+	defer srv.Close()
+
+	client := NewClient("test-key", WithBaseURL(srv.URL))
+	resp, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "test"}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "rate-ok", resp.ID)
+	assert.Equal(t, int32(2), attempts.Load())
+}
+
+func TestChatCompletion_NoRetryOn4xx(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"bad request"}`))
+	}))
+	defer srv.Close()
+
+	client := NewClient("test-key", WithBaseURL(srv.URL))
+	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "test"}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "400")
+	assert.Equal(t, int32(1), attempts.Load())
+}
+
+func TestChatCompletion_ExhaustsRetries(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"internal server error"}`))
+	}))
+	defer srv.Close()
+
+	client := NewClient("test-key", WithBaseURL(srv.URL))
+	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "test"}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "500")
+	assert.Equal(t, int32(maxRetryAttempts), attempts.Load())
+}
+
+func TestChatCompletion_RetryRespectsContextCancel(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"internal server error"}`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel the context shortly after the first attempt so it triggers during backoff.
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	client := NewClient("test-key", WithBaseURL(srv.URL))
+	_, err := client.ChatCompletion(ctx, ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "test"}},
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	// Should have completed fewer attempts than the maximum because the context
+	// was cancelled during the backoff between the first and second attempt.
+	assert.Less(t, attempts.Load(), int32(maxRetryAttempts))
+}
+
+func TestChatCompletion_RetrySucceedsOnSecondAttempt(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := attempts.Add(1)
+		if n == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"temporary failure"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"second-try","choices":[{"index":0,"message":{"role":"assistant","content":"success on retry"}}],"usage":{"prompt_tokens":8,"completion_tokens":4}}`))
+	}))
+	defer srv.Close()
+
+	client := NewClient("test-key", WithBaseURL(srv.URL))
+	resp, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "test"}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "second-try", resp.ID)
+	require.Len(t, resp.Choices, 1)
+	assert.Equal(t, "success on retry", resp.Choices[0].Message.Content)
+	assert.Equal(t, 8, resp.Usage.PromptTokens)
+	assert.Equal(t, 4, resp.Usage.CompletionTokens)
+	assert.Equal(t, int32(2), attempts.Load())
 }

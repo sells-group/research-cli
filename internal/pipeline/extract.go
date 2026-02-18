@@ -171,7 +171,7 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient a
 }
 
 // ExtractTier2 runs Tier 2 extraction: multi-page synthesis using Sonnet.
-// Includes T1 answers as context.
+// Includes T1 answers as context (only low-confidence ones to reduce prompt size).
 func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers []model.ExtractionAnswer, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
 	start := time.Now()
 	result := &model.TierResult{Tier: 2}
@@ -186,8 +186,18 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 	primerSystemBlocks := anthropic.BuildCachedSystemBlocks(t2SystemText)
 	batchSystemBlocks := []anthropic.SystemBlock{{Text: t2SystemText}}
 
-	// Build context from T1 answers.
-	t1Context := buildT1Context(t1Answers)
+	// Filter T1 answers to only include low-confidence ones for T2 context.
+	// High-confidence answers are already reliable and just add noise/cost.
+	const t2ConfidenceThreshold = 0.4
+	var lowConfT1 []model.ExtractionAnswer
+	for _, a := range t1Answers {
+		if a.Confidence < t2ConfidenceThreshold {
+			lowConfT1 = append(lowConfT1, a)
+		}
+	}
+
+	// Build context from low-confidence T1 answers.
+	t1Context := buildT1Context(lowConfT1)
 
 	// Build page context per question.
 	var batchItems []anthropic.BatchRequestItem
@@ -582,10 +592,12 @@ func executeBatch(ctx context.Context, items []anthropic.BatchRequestItem, route
 							zap.Int("attempt", attempt+1),
 							zap.Error(lastErr),
 						)
+						timer := time.NewTimer(backoff)
 						select {
 						case <-gCtx.Done():
+							timer.Stop()
 							return nil
-						case <-time.After(backoff):
+						case <-timer.C:
 						}
 						backoff *= 2
 					}

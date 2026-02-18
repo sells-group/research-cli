@@ -9,6 +9,7 @@ import (
 
 	"github.com/rotisserie/eris"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/fedsync"
 )
@@ -33,7 +34,7 @@ var fedsyncStatusCmd = &cobra.Command{
 		}
 
 		if len(entries) == 0 {
-			fmt.Println("No sync entries found. Run 'fedsync sync' to start syncing datasets.")
+			zap.L().Info("no sync entries found, run 'fedsync sync' to start syncing datasets")
 			return nil
 		}
 

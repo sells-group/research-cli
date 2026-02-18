@@ -13,3 +13,13 @@ primary_region = "dfw"
 [[vm]]
   size = "performance-4x"
   memory = "8gb"
+
+[checks]
+  [checks.health]
+    type = "http"
+    port = 8080
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/health"

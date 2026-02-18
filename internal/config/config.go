@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/rotisserie/eris"
@@ -192,6 +193,67 @@ type LogConfig struct {
 	Format string `yaml:"format" mapstructure:"format"`
 }
 
+// Validate checks required configuration fields based on run mode.
+// Supported modes: "enrichment", "fedsync", "serve".
+func (c *Config) Validate(mode string) error {
+	var errs []string
+
+	switch mode {
+	case "enrichment":
+		if c.Store.DatabaseURL == "" {
+			errs = append(errs, "store.database_url is required")
+		}
+		if c.Notion.Token == "" {
+			errs = append(errs, "notion.token is required")
+		}
+		if c.Notion.LeadDB == "" {
+			errs = append(errs, "notion.lead_db is required")
+		}
+		if c.Notion.QuestionDB == "" {
+			errs = append(errs, "notion.question_db is required")
+		}
+		if c.Notion.FieldDB == "" {
+			errs = append(errs, "notion.field_db is required")
+		}
+		if c.Anthropic.Key == "" {
+			errs = append(errs, "anthropic.key is required")
+		}
+	case "fedsync":
+		dbURL := c.Fedsync.DatabaseURL
+		if dbURL == "" {
+			dbURL = c.Store.DatabaseURL
+		}
+		if dbURL == "" {
+			errs = append(errs, "fedsync.database_url (or store.database_url) is required")
+		}
+	case "serve":
+		if c.Server.Port <= 0 {
+			errs = append(errs, "server.port must be > 0")
+		}
+	default:
+		return eris.Errorf("config: unknown mode %q", mode)
+	}
+
+	// Common validations
+	if c.Batch.MaxConcurrentCompanies < 1 || c.Batch.MaxConcurrentCompanies > 50 {
+		errs = append(errs, "batch.max_concurrent_companies must be between 1 and 50")
+	}
+	if c.Pipeline.ConfidenceEscalationThreshold < 0 || c.Pipeline.ConfidenceEscalationThreshold > 1 {
+		errs = append(errs, "pipeline.confidence_escalation_threshold must be between 0.0 and 1.0")
+	}
+	if c.Pipeline.QualityScoreThreshold < 0 || c.Pipeline.QualityScoreThreshold > 1 {
+		errs = append(errs, "pipeline.quality_score_threshold must be between 0.0 and 1.0")
+	}
+	if c.Pipeline.SkipConfidenceThreshold < 0 || c.Pipeline.SkipConfidenceThreshold > 1 {
+		errs = append(errs, "pipeline.skip_confidence_threshold must be between 0.0 and 1.0")
+	}
+
+	if len(errs) > 0 {
+		return eris.New(fmt.Sprintf("config: validation failed: %s", strings.Join(errs, "; ")))
+	}
+	return nil
+}
+
 // Load reads configuration from file and environment.
 func Load() (*Config, error) {
 	v := viper.New()
@@ -213,7 +275,7 @@ func Load() (*Config, error) {
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "json")
 	v.SetDefault("server.port", 8080)
-	v.SetDefault("batch.max_concurrent_companies", 5)
+	v.SetDefault("batch.max_concurrent_companies", 15)
 	v.SetDefault("crawl.max_pages", 50)
 	v.SetDefault("crawl.max_depth", 2)
 	v.SetDefault("crawl.timeout_secs", 60)

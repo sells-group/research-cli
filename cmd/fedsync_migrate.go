@@ -1,10 +1,9 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/rotisserie/eris"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/fedsync"
 )
@@ -26,7 +25,7 @@ var fedsyncMigrateCmd = &cobra.Command{
 			return eris.Wrap(err, "fedsync migrate")
 		}
 
-		fmt.Println("All migrations applied successfully")
+		zap.L().Info("all migrations applied successfully")
 		return nil
 	},
 }

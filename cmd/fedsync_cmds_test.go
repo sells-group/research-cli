@@ -52,6 +52,9 @@ func TestFedsyncSyncCmd_RunE_NoDSN(t *testing.T) {
 		},
 	}
 
+	fedsyncSyncCmd.SetContext(context.Background())
+	defer fedsyncSyncCmd.SetContext(nil)
+
 	err := fedsyncSyncCmd.RunE(fedsyncSyncCmd, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no database_url configured")
@@ -66,6 +69,9 @@ func TestFedsyncXrefCmd_RunE_NoDSN(t *testing.T) {
 			DatabaseURL: "",
 		},
 	}
+
+	fedsyncXrefCmd.SetContext(context.Background())
+	defer fedsyncXrefCmd.SetContext(nil)
 
 	err := fedsyncXrefCmd.RunE(fedsyncXrefCmd, nil)
 	require.Error(t, err)

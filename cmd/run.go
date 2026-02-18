@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/rotisserie/eris"
 	"github.com/spf13/cobra"
@@ -35,7 +37,8 @@ var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run enrichment for a single company",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := cmd.Context()
+		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
 
 		env, err := initPipeline(ctx)
 		if err != nil {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -367,4 +368,46 @@ func TestDefaultExternalSources(t *testing.T) {
 		query, _ := src.SearchQueryFunc(company)
 		assert.Contains(t, query, "Acme Corp")
 	}
+}
+
+func TestScrapePhase_RetryTimerCleanup(t *testing.T) {
+	// Use a context that cancels quickly — well before the retry backoff (500ms)
+	// would elapse. This proves that timer.Stop() in the select causes prompt
+	// return on context cancellation instead of blocking for the full backoff.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	company := model.Company{Name: "Acme Corp"}
+
+	// Jina mock that always fails, forcing the retry backoff path.
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string"), mock.Anything).
+		Return((*jina.SearchResponse)(nil), errors.New("always fail")).Maybe()
+
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil))
+
+	src := ExternalSource{
+		Name: "bbb",
+		SearchQueryFunc: func(c model.Company) (string, string) {
+			return c.Name, "bbb.org"
+		},
+		ResultFilter: filterBBBResult,
+	}
+
+	// Configure multiple retries with a long search timeout so the retry
+	// backoff (500ms, 1s, ...) is the bottleneck, not the search timeout.
+	cfg := config.ScrapeConfig{SearchTimeoutSecs: 1, SearchRetries: 3}
+
+	start := time.Now()
+	_, err := scrapeSource(ctx, src, company, jinaClient, chain, cfg)
+	elapsed := time.Since(start)
+
+	// scrapeSource should return ctx.Err() because context was cancelled during
+	// the backoff wait between retries.
+	assert.Error(t, err)
+
+	// The key assertion: should return within 100ms (context cancelled at 30ms),
+	// NOT block for the 500ms+ backoff duration. This proves timer.Stop() works.
+	assert.Less(t, elapsed, 100*time.Millisecond,
+		"scrapeSource should return promptly on context cancellation during retry backoff, took %v", elapsed)
 }

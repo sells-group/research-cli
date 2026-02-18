@@ -105,6 +105,8 @@ func NewClient(apiKey string, opts ...Option) Client {
 	return c
 }
 
+const maxRetryAttempts = 3
+
 func (c *httpClient) ChatCompletion(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionResponse, error) {
 	if req.Model == "" {
 		req.Model = c.model
@@ -115,32 +117,60 @@ func (c *httpClient) ChatCompletion(ctx context.Context, req ChatCompletionReque
 		return nil, eris.Wrap(err, "perplexity: marshal request")
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, eris.Wrap(err, "perplexity: create request")
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	backoff := 500 * time.Millisecond
+	var lastErr error
 
-	resp, err := c.http.Do(httpReq)
-	if err != nil {
-		return nil, eris.Wrap(err, "perplexity: send request")
-	}
-	defer resp.Body.Close()
+	for attempt := 0; attempt < maxRetryAttempts; attempt++ {
+		if attempt > 0 {
+			timer := time.NewTimer(backoff)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
+			backoff *= 2
+		}
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, eris.Wrap(err, "perplexity: read response")
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return nil, eris.Wrap(err, "perplexity: create request")
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+		resp, err := c.http.Do(httpReq)
+		if err != nil {
+			// Don't retry on context cancellation/deadline.
+			if ctx.Err() != nil {
+				return nil, eris.Wrap(err, "perplexity: send request")
+			}
+			lastErr = eris.Wrap(err, "perplexity: send request")
+			continue
+		}
+
+		respBody, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, eris.Wrap(err, "perplexity: read response")
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			var result ChatCompletionResponse
+			if err := json.Unmarshal(respBody, &result); err != nil {
+				return nil, eris.Wrap(err, "perplexity: unmarshal response")
+			}
+			return &result, nil
+		}
+
+		lastErr = eris.Errorf("perplexity: unexpected status %d: %s", resp.StatusCode, string(respBody))
+
+		// Retry on 5xx and 429; don't retry other 4xx.
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			continue
+		}
+		return nil, lastErr
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, eris.Errorf("perplexity: unexpected status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result ChatCompletionResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, eris.Wrap(err, "perplexity: unmarshal response")
-	}
-
-	return &result, nil
+	return nil, lastErr
 }

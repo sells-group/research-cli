@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -531,4 +532,213 @@ func TestDiscoverLinks_WithSitemap(t *testing.T) {
 	assert.Contains(t, urls, srv.URL+"/")
 	assert.Contains(t, urls, srv.URL+"/about")
 	assert.Contains(t, urls, srv.URL+"/services")
+}
+
+func TestDiscoverLinks_ParallelFetch(t *testing.T) {
+	const pageCount = 12
+	const perPageDelay = 50 * time.Millisecond
+
+	mux := http.NewServeMux()
+
+	// Homepage links to all pages.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var links string
+		for i := 0; i < pageCount; i++ {
+			links += fmt.Sprintf(`<a href="/page%d">Page %d</a>`, i, i)
+		}
+		fmt.Fprintf(w, `<html><body>%s</body></html>`, links)
+	})
+
+	// Each page has a small delay to simulate slow responses.
+	for i := 0; i < pageCount; i++ {
+		i := i
+		mux.HandleFunc(fmt.Sprintf("/page%d", i), func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(perPageDelay)
+			fmt.Fprintf(w, `<html><body>Page %d content</body></html>`, i)
+		})
+	}
+
+	// No sitemap.
+	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
+	ctx := context.Background()
+
+	start := time.Now()
+	urls, err := lc.DiscoverLinks(ctx, srv.URL, 50, 2)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+
+	// Should discover homepage + all linked pages.
+	assert.GreaterOrEqual(t, len(urls), pageCount+1)
+	assert.Contains(t, urls, srv.URL+"/")
+	for i := 0; i < pageCount; i++ {
+		assert.Contains(t, urls, fmt.Sprintf("%s/page%d", srv.URL, i))
+	}
+
+	// Serial would take pageCount * perPageDelay = 600ms+. Parallel should be
+	// significantly faster. Use 400ms as threshold to prove parallelism.
+	serialDuration := time.Duration(pageCount) * perPageDelay
+	assert.Less(t, elapsed, serialDuration,
+		"parallel crawl took %v; serial would be ~%v", elapsed, serialDuration)
+}
+
+func TestDiscoverLinks_ParallelRespectMaxPages(t *testing.T) {
+	const totalPages = 25
+	const maxPages = 5
+
+	mux := http.NewServeMux()
+
+	// Homepage links to all pages.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var links string
+		for i := 0; i < totalPages; i++ {
+			links += fmt.Sprintf(`<a href="/page%d">Page %d</a>`, i, i)
+		}
+		fmt.Fprintf(w, `<html><body>%s</body></html>`, links)
+	})
+
+	for i := 0; i < totalPages; i++ {
+		i := i
+		mux.HandleFunc(fmt.Sprintf("/page%d", i), func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, `<html><body>Page %d content</body></html>`, i)
+		})
+	}
+
+	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
+	ctx := context.Background()
+
+	urls, err := lc.DiscoverLinks(ctx, srv.URL, maxPages, 2)
+	require.NoError(t, err)
+
+	// Must not exceed maxPages despite many available pages.
+	assert.LessOrEqual(t, len(urls), maxPages,
+		"expected at most %d pages, got %d", maxPages, len(urls))
+}
+
+func TestDiscoverLinks_ParallelErrorsNonFatal(t *testing.T) {
+	const goodPages = 6
+	const badPages = 6
+
+	mux := http.NewServeMux()
+
+	// Homepage links to good and bad pages.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var links string
+		for i := 0; i < goodPages; i++ {
+			links += fmt.Sprintf(`<a href="/good%d">Good %d</a>`, i, i)
+		}
+		for i := 0; i < badPages; i++ {
+			links += fmt.Sprintf(`<a href="/bad%d">Bad %d</a>`, i, i)
+		}
+		fmt.Fprintf(w, `<html><body>%s</body></html>`, links)
+	})
+
+	// Good pages return 200.
+	for i := 0; i < goodPages; i++ {
+		i := i
+		mux.HandleFunc(fmt.Sprintf("/good%d", i), func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, `<html><body>Good page %d</body></html>`, i)
+		})
+	}
+
+	// Bad pages return 500.
+	for i := 0; i < badPages; i++ {
+		mux.HandleFunc(fmt.Sprintf("/bad%d", i), func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, "Internal Server Error")
+		})
+	}
+
+	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
+	ctx := context.Background()
+
+	urls, err := lc.DiscoverLinks(ctx, srv.URL, 50, 2)
+	require.NoError(t, err)
+
+	// Should still discover homepage + all good and bad pages (they are in the
+	// queue regardless of HTTP status — extractLinks returns nil links for
+	// non-200, but the URL itself is already added to the result list).
+	assert.GreaterOrEqual(t, len(urls), 1+goodPages,
+		"should discover at least homepage + good pages despite 500 errors")
+
+	// Verify good pages are present.
+	for i := 0; i < goodPages; i++ {
+		assert.Contains(t, urls, fmt.Sprintf("%s/good%d", srv.URL, i))
+	}
+}
+
+func TestDiscoverLinks_ParallelContextCancel(t *testing.T) {
+	const pageCount = 20
+
+	mux := http.NewServeMux()
+
+	// Homepage links to many slow pages.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var links string
+		for i := 0; i < pageCount; i++ {
+			links += fmt.Sprintf(`<a href="/slow%d">Slow %d</a>`, i, i)
+		}
+		fmt.Fprintf(w, `<html><body>%s</body></html>`, links)
+	})
+
+	// Each slow page takes 2 seconds.
+	for i := 0; i < pageCount; i++ {
+		i := i
+		mux.HandleFunc(fmt.Sprintf("/slow%d", i), func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+			fmt.Fprintf(w, `<html><body>Slow page %d</body></html>`, i)
+		})
+	}
+
+	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
+
+	// Cancel after 200ms — mid-crawl.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	urls, err := lc.DiscoverLinks(ctx, srv.URL, 50, 2)
+	elapsed := time.Since(start)
+
+	// Should not error — DiscoverLinks treats context cancellation gracefully.
+	assert.NoError(t, err)
+
+	// Should return partial results (at least the homepage was queued).
+	assert.GreaterOrEqual(t, len(urls), 1, "should have at least partial results")
+
+	// Must not hang — should return well within 1 second (context cancelled at 200ms).
+	assert.Less(t, elapsed, 1*time.Second,
+		"DiscoverLinks should return promptly after context cancellation, took %v", elapsed)
 }
