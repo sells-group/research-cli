@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/rotisserie/eris"
@@ -23,11 +24,74 @@ type HTTPOptions struct {
 	RateLimiters map[string]*rate.Limiter
 }
 
+// AdaptiveLimiter wraps a rate.Limiter with adaptive rate adjustment.
+// On success it increases the rate by 20% (up to 2x initial).
+// On 429 it halves the rate (down to initial/4 minimum).
+type AdaptiveLimiter struct {
+	mu          sync.Mutex
+	limiter     *rate.Limiter
+	initialRate rate.Limit
+	maxRate     rate.Limit
+	minRate     rate.Limit
+	currentRate rate.Limit
+}
+
+// NewAdaptiveLimiter creates an adaptive rate limiter that auto-tunes.
+func NewAdaptiveLimiter(initialRate rate.Limit, burst int) *AdaptiveLimiter {
+	return &AdaptiveLimiter{
+		limiter:     rate.NewLimiter(initialRate, burst),
+		initialRate: initialRate,
+		maxRate:     initialRate * 2,
+		minRate:     initialRate / 4,
+		currentRate: initialRate,
+	}
+}
+
+// Wait blocks until the limiter allows an event.
+func (a *AdaptiveLimiter) Wait(ctx context.Context) error {
+	return a.limiter.Wait(ctx)
+}
+
+// OnSuccess increases the rate by 20%, up to 2x initial.
+func (a *AdaptiveLimiter) OnSuccess() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	newRate := a.currentRate * 1.2
+	if newRate > a.maxRate {
+		newRate = a.maxRate
+	}
+	a.currentRate = newRate
+	a.limiter.SetLimit(newRate)
+}
+
+// OnRateLimit halves the rate on 429 responses.
+func (a *AdaptiveLimiter) OnRateLimit() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	newRate := a.currentRate * 0.5
+	if newRate < a.minRate {
+		newRate = a.minRate
+	}
+	a.currentRate = newRate
+	a.limiter.SetLimit(newRate)
+	zap.L().Warn("adaptive rate limit: reducing rate after 429",
+		zap.Float64("new_rate", float64(newRate)),
+	)
+}
+
+// Limit returns the current rate limit.
+func (a *AdaptiveLimiter) Limit() rate.Limit {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.currentRate
+}
+
 // HTTPFetcher implements Fetcher using net/http with retry and rate limiting.
 type HTTPFetcher struct {
-	client   *http.Client
-	opts     HTTPOptions
-	limiters map[string]*rate.Limiter
+	client           *http.Client
+	opts             HTTPOptions
+	limiters         map[string]*rate.Limiter
+	adaptiveLimiters map[string]*AdaptiveLimiter
 }
 
 // DefaultRateLimiters returns the default per-host rate limiters.
@@ -55,11 +119,39 @@ func NewHTTPFetcher(opts HTTPOptions) *HTTPFetcher {
 	for k, v := range opts.RateLimiters {
 		limiters[k] = v
 	}
-	return &HTTPFetcher{
-		client: &http.Client{Timeout: opts.Timeout},
-		opts:   opts,
-		limiters: limiters,
+	transport := &http.Transport{
+		MaxIdleConnsPerHost: 10,
+		MaxConnsPerHost:     20,
+		IdleConnTimeout:     90 * time.Second,
 	}
+	return &HTTPFetcher{
+		client: &http.Client{
+			Timeout:   opts.Timeout,
+			Transport: transport,
+		},
+		opts:             opts,
+		limiters:         limiters,
+		adaptiveLimiters: DefaultAdaptiveLimiters(),
+	}
+}
+
+// DefaultAdaptiveLimiters returns adaptive rate limiters for known hosts.
+func DefaultAdaptiveLimiters() map[string]*AdaptiveLimiter {
+	return map[string]*AdaptiveLimiter{
+		"efts.sec.gov": NewAdaptiveLimiter(10, 10),
+		"www.sec.gov":  NewAdaptiveLimiter(10, 10),
+		"data.sec.gov": NewAdaptiveLimiter(10, 10),
+		"api.sam.gov":  NewAdaptiveLimiter(5, 5),
+	}
+}
+
+// adaptiveLimiterFor returns the adaptive limiter for the given host, if any.
+func (f *HTTPFetcher) adaptiveLimiterFor(rawURL string) *AdaptiveLimiter {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil
+	}
+	return f.adaptiveLimiters[u.Host]
 }
 
 func (f *HTTPFetcher) limiterFor(rawURL string) *rate.Limiter {
@@ -74,12 +166,20 @@ func (f *HTTPFetcher) limiterFor(rawURL string) *rate.Limiter {
 }
 
 func (f *HTTPFetcher) doWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
-	lim := f.limiterFor(req.URL.String())
+	adaptive := f.adaptiveLimiterFor(req.URL.String())
 
 	var lastErr error
 	for attempt := range f.opts.MaxRetries {
-		if err := lim.Wait(ctx); err != nil {
-			return nil, eris.Wrap(err, "rate limiter wait")
+		// Use adaptive limiter if available, otherwise fall back to fixed.
+		if adaptive != nil {
+			if err := adaptive.Wait(ctx); err != nil {
+				return nil, eris.Wrap(err, "rate limiter wait")
+			}
+		} else {
+			lim := f.limiterFor(req.URL.String())
+			if err := lim.Wait(ctx); err != nil {
+				return nil, eris.Wrap(err, "rate limiter wait")
+			}
 		}
 
 		cloned := req.Clone(ctx)
@@ -95,6 +195,21 @@ func (f *HTTPFetcher) doWithRetry(ctx context.Context, req *http.Request) (*http
 			continue
 		}
 
+		// Handle 429 Too Many Requests with adaptive backoff.
+		if resp.StatusCode == http.StatusTooManyRequests {
+			resp.Body.Close()
+			lastErr = eris.Errorf("http 429 from %s", req.URL.String())
+			if adaptive != nil {
+				adaptive.OnRateLimit()
+			}
+			zap.L().Warn("rate limited (429), backing off",
+				zap.String("url", req.URL.String()),
+				zap.Int("attempt", attempt+1),
+			)
+			f.backoff(ctx, attempt)
+			continue
+		}
+
 		if resp.StatusCode >= 500 {
 			resp.Body.Close()
 			lastErr = eris.Errorf("http %d from %s", resp.StatusCode, req.URL.String())
@@ -105,6 +220,11 @@ func (f *HTTPFetcher) doWithRetry(ctx context.Context, req *http.Request) (*http
 			)
 			f.backoff(ctx, attempt)
 			continue
+		}
+
+		// Success: increase adaptive rate.
+		if adaptive != nil {
+			adaptive.OnSuccess()
 		}
 
 		return resp, nil

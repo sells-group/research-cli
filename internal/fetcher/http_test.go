@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -300,4 +301,137 @@ func TestDownload_ContextCancelled(t *testing.T) {
 
 	_, err := f.Download(ctx, srv.URL+"/data")
 	require.Error(t, err)
+}
+
+// --- AdaptiveLimiter Tests ---
+
+func TestAdaptiveLimiter_OnSuccess_IncreasesRate(t *testing.T) {
+	lim := NewAdaptiveLimiter(10, 10) // 10 req/s initial
+
+	lim.OnSuccess()
+	assert.InDelta(t, 12.0, float64(lim.Limit()), 0.1) // 10 * 1.2 = 12
+
+	lim.OnSuccess()
+	assert.InDelta(t, 14.4, float64(lim.Limit()), 0.1) // 12 * 1.2 = 14.4
+}
+
+func TestAdaptiveLimiter_OnRateLimit_DecreasesRate(t *testing.T) {
+	lim := NewAdaptiveLimiter(10, 10) // 10 req/s initial
+
+	lim.OnRateLimit()
+	assert.InDelta(t, 5.0, float64(lim.Limit()), 0.1) // 10 * 0.5 = 5
+
+	lim.OnRateLimit()
+	assert.InDelta(t, 2.5, float64(lim.Limit()), 0.1) // 5 * 0.5 = 2.5
+}
+
+func TestAdaptiveLimiter_OnSuccess_CapsAt2x(t *testing.T) {
+	lim := NewAdaptiveLimiter(10, 10) // max = 20
+
+	// Call OnSuccess many times to exceed 2x
+	for range 20 {
+		lim.OnSuccess()
+	}
+
+	// Should be capped at 2x initial = 20
+	assert.InDelta(t, 20.0, float64(lim.Limit()), 0.1)
+}
+
+func TestAdaptiveLimiter_OnRateLimit_FloorAtQuarter(t *testing.T) {
+	lim := NewAdaptiveLimiter(10, 10) // min = 2.5
+
+	// Call OnRateLimit many times
+	for range 10 {
+		lim.OnRateLimit()
+	}
+
+	// Should be floored at initial/4 = 2.5
+	assert.InDelta(t, 2.5, float64(lim.Limit()), 0.1)
+}
+
+func TestAdaptiveLimiter_Wait(t *testing.T) {
+	lim := NewAdaptiveLimiter(1000, 10) // Very high rate for quick test
+	err := lim.Wait(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestAdaptiveLimiter_Wait_ContextCancelled(t *testing.T) {
+	lim := NewAdaptiveLimiter(0.001, 0) // Very low rate, 0 burst
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := lim.Wait(ctx)
+	assert.Error(t, err)
+}
+
+func TestDoWithRetry_429_AdaptiveBackoff(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := attempts.Add(1)
+		if n <= 2 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	// Create fetcher with adaptive limiter for the test server host
+	f := NewHTTPFetcher(HTTPOptions{
+		UserAgent:  "test-agent",
+		Timeout:    10 * time.Second,
+		MaxRetries: 3,
+	})
+
+	// Get the adaptive limiter for the server host and replace it
+	// Since the server URL host won't match any default adaptive limiters,
+	// we need to add one manually
+	u, _ := url.Parse(srv.URL)
+	f.adaptiveLimiters[u.Host] = NewAdaptiveLimiter(100, 100) // high rate for test speed
+
+	initialRate := f.adaptiveLimiters[u.Host].Limit()
+
+	body, err := f.Download(context.Background(), srv.URL+"/data")
+	require.NoError(t, err)
+	defer body.Close()
+
+	data, _ := io.ReadAll(body)
+	assert.Equal(t, "ok", string(data))
+	assert.Equal(t, int32(3), attempts.Load())
+
+	// Adaptive limiter should have decreased from 429s then increased from success
+	// After 2x OnRateLimit and 1x OnSuccess: 100 → 50 → 25 → 30
+	currentRate := f.adaptiveLimiters[u.Host].Limit()
+	assert.Less(t, float64(currentRate), float64(initialRate))
+}
+
+func TestHTTPTransport_PoolingConfig(t *testing.T) {
+	f := NewHTTPFetcher(HTTPOptions{UserAgent: "test"})
+	transport, ok := f.client.Transport.(*http.Transport)
+	require.True(t, ok)
+	assert.Equal(t, 10, transport.MaxIdleConnsPerHost)
+	assert.Equal(t, 20, transport.MaxConnsPerHost)
+}
+
+func TestDefaultAdaptiveLimiters(t *testing.T) {
+	limiters := DefaultAdaptiveLimiters()
+	assert.Contains(t, limiters, "efts.sec.gov")
+	assert.Contains(t, limiters, "www.sec.gov")
+	assert.Contains(t, limiters, "data.sec.gov")
+	assert.Contains(t, limiters, "api.sam.gov")
+
+	// Verify initial rates
+	assert.InDelta(t, 10.0, float64(limiters["efts.sec.gov"].Limit()), 0.1)
+	assert.InDelta(t, 5.0, float64(limiters["api.sam.gov"].Limit()), 0.1)
+}
+
+func TestAdaptiveLimiterFor_KnownHost(t *testing.T) {
+	f := NewHTTPFetcher(HTTPOptions{UserAgent: "test"})
+	lim := f.adaptiveLimiterFor("https://data.sec.gov/submissions/CIK0001.json")
+	assert.NotNil(t, lim)
+}
+
+func TestAdaptiveLimiterFor_UnknownHost(t *testing.T) {
+	f := NewHTTPFetcher(HTTPOptions{UserAgent: "test"})
+	lim := f.adaptiveLimiterFor("https://example.com/data")
+	assert.Nil(t, lim) // No adaptive limiter for unknown hosts
 }
