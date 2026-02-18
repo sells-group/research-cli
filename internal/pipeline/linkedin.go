@@ -111,10 +111,12 @@ func LinkedInPhase(ctx context.Context, company model.Company, chain *scrape.Cha
 
 	// Step 2: Fallback to Perplexity if Jina failed or returned empty/login wall.
 	if rawData == "" {
+		pplxTemp := 0.2
 		pplxResp, err := pplxClient.ChatCompletion(ctx, perplexity.ChatCompletionRequest{
 			Messages: []perplexity.Message{
 				{Role: "user", Content: fmt.Sprintf(perplexityPrompt, company.Name, company.URL)},
 			},
+			Temperature: &pplxTemp,
 		})
 		if err != nil {
 			return nil, usage, eris.Wrap(err, "linkedin: perplexity search")

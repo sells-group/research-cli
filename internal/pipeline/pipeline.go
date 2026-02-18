@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -179,6 +180,10 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 
 	g, gCtx := errgroup.WithContext(ctx)
 
+	// Track Phase 1 sub-phase outcomes for error categorization.
+	var phase1Mu sync.Mutex
+	phase1Results := make(map[string]bool) // phase name → succeeded
+
 	// Phase 1A: Crawl
 	g.Go(func() error {
 		pr := trackPhase("1a_crawl", func() (*model.PhaseResult, error) {
@@ -195,7 +200,9 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 				},
 			}, nil
 		})
-		_ = pr
+		phase1Mu.Lock()
+		phase1Results["1a_crawl"] = pr.Status == model.PhaseStatusComplete
+		phase1Mu.Unlock()
 		return nil
 	})
 
@@ -215,7 +222,9 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 				Metadata: metadata,
 			}, nil
 		})
-		_ = pr
+		phase1Mu.Lock()
+		phase1Results["1b_scrape"] = pr.Status == model.PhaseStatusComplete
+		phase1Mu.Unlock()
 		return nil
 	})
 
@@ -234,7 +243,9 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 				TokenUsage: *usage,
 			}, nil
 		})
-		_ = pr
+		phase1Mu.Lock()
+		phase1Results["1c_linkedin"] = pr.Status == model.PhaseStatusComplete
+		phase1Mu.Unlock()
 		return nil
 	})
 
@@ -252,12 +263,38 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 				},
 			}, nil
 		})
-		_ = pr
+		phase1Mu.Lock()
+		phase1Results["1d_ppp"] = pr.Status == model.PhaseStatusComplete
+		phase1Mu.Unlock()
 		return nil
 	})
 
-	// Wait for all Phase 1 tasks (errors are tracked per-phase, don't fail the pipeline).
 	_ = g.Wait()
+
+	// Categorize Phase 1 errors: count data-producing phases that succeeded.
+	dataPhases := []string{"1a_crawl", "1b_scrape", "1c_linkedin"}
+	var succeeded, failed int
+	var failedNames []string
+	for _, name := range dataPhases {
+		if phase1Results[name] {
+			succeeded++
+		} else {
+			failed++
+			failedNames = append(failedNames, name)
+		}
+	}
+
+	if succeeded == 0 && failed == len(dataPhases) {
+		setStatus(model.RunStatusFailed)
+		return result, eris.Errorf("pipeline: all Phase 1 data sources failed (%s)", strings.Join(failedNames, ", "))
+	}
+	if failed > 0 {
+		log.Warn("pipeline: some Phase 1 sources failed, continuing with partial data",
+			zap.Strings("failed_phases", failedNames),
+			zap.Int("succeeded", succeeded),
+			zap.Int("failed", failed),
+		)
+	}
 
 	// Store PPP matches.
 	result.PPPMatches = pppMatches
@@ -318,16 +355,91 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		}, nil
 	})
 
-	// ===== Phases 4+5: T1 and T2-native run in parallel =====
+	// --- Optimization: Existing-answer lookup ---
+	// Skip questions that already have high-confidence answers from prior runs.
+	skipThreshold := p.cfg.Pipeline.SkipConfidenceThreshold
+	if skipThreshold <= 0 {
+		skipThreshold = 0.8
+	}
+	existingAnswers, existErr := p.store.GetHighConfidenceAnswers(ctx, company.URL, skipThreshold)
+	if existErr != nil {
+		log.Warn("pipeline: failed to load existing answers", zap.Error(existErr))
+	}
+	var skippedByExisting int
+	if len(existingAnswers) > 0 {
+		existingKeys := make(map[string]bool, len(existingAnswers))
+		for _, a := range existingAnswers {
+			existingKeys[a.FieldKey] = true
+		}
+		batches.Tier1 = filterRoutedQuestions(batches.Tier1, existingKeys, &skippedByExisting)
+		batches.Tier2 = filterRoutedQuestions(batches.Tier2, existingKeys, &skippedByExisting)
+		batches.Tier3 = filterRoutedQuestions(batches.Tier3, existingKeys, &skippedByExisting)
+		if skippedByExisting > 0 {
+			log.Info("pipeline: skipped questions with existing high-confidence answers",
+				zap.Int("skipped", skippedByExisting),
+				zap.Int("existing_answers", len(existingAnswers)),
+			)
+		}
+	}
+
+	// --- Optimization: Checkpoint/resume ---
+	// Check for existing T1 checkpoint from a prior failed run.
+	var checkpointT1 []model.ExtractionAnswer
+	checkpoint, cpErr := p.store.LoadCheckpoint(ctx, company.URL)
+	if cpErr != nil {
+		log.Warn("pipeline: failed to load checkpoint", zap.Error(cpErr))
+	}
+	if checkpoint != nil && checkpoint.Phase == "t1_complete" {
+		if err := json.Unmarshal(checkpoint.Data, &checkpointT1); err != nil {
+			log.Warn("pipeline: failed to parse checkpoint data", zap.Error(err))
+		} else {
+			log.Info("pipeline: resuming from T1 checkpoint",
+				zap.Int("checkpoint_answers", len(checkpointT1)),
+			)
+		}
+	}
+
+	// --- Optimization: Per-company cost budget ---
+	maxCost := p.cfg.Pipeline.MaxCostPerCompanyUSD
+	if maxCost <= 0 {
+		maxCost = 10.0
+	}
+	var cumulativeCost float64
+
+	// ===== Phases 4+5: T1, T2-native, and T2-escalated with max overlap =====
+	// T1 and T2-native start in parallel. Once T1 completes, T2-escalated
+	// starts immediately (overlapping with the still-running T2-native).
 	setStatus(model.RunStatusExtracting)
 	var t1Answers []model.ExtractionAnswer
 	var t2NativeAnswers []model.ExtractionAnswer
 	var t2NativeUsage model.TokenUsage
+	var escalatedAnswers []model.ExtractionAnswer
+	var escalatedUsage model.TokenUsage
+
+	// Channel signals T1 completion so T2-escalated can start immediately.
+	t1Done := make(chan struct{})
 
 	g2, g2Ctx := errgroup.WithContext(ctx)
 
 	// Phase 4: T1 extraction (concurrent with T2-native).
+	// If we have a checkpoint, skip T1 extraction and use cached answers.
 	g2.Go(func() error {
+		defer close(t1Done) // Signal T1 is complete, unblocking T2-escalated.
+
+		if len(checkpointT1) > 0 {
+			trackPhase("4_extract_t1", func() (*model.PhaseResult, error) {
+				t1Answers = checkpointT1
+				return &model.PhaseResult{
+					Status: model.PhaseStatusComplete,
+					Metadata: map[string]any{
+						"answers":        len(checkpointT1),
+						"from_checkpoint": true,
+					},
+				}, nil
+			})
+			return nil
+		}
+
 		trackPhase("4_extract_t1", func() (*model.PhaseResult, error) {
 			t1Result, t1Err := ExtractTier1(g2Ctx, batches.Tier1, p.anthropic, p.cfg.Anthropic)
 			if t1Err != nil {
@@ -335,6 +447,14 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			}
 			t1Answers = t1Result.Answers
 			totalUsage.Add(t1Result.TokenUsage)
+
+			// Save T1 checkpoint for resume on failure.
+			if cpData, marshalErr := json.Marshal(t1Result.Answers); marshalErr == nil {
+				if saveErr := p.store.SaveCheckpoint(ctx, company.URL, "t1_complete", cpData); saveErr != nil {
+					log.Warn("pipeline: failed to save T1 checkpoint", zap.Error(saveErr))
+				}
+			}
+
 			return &model.PhaseResult{
 				TokenUsage: t1Result.TokenUsage,
 				Metadata: map[string]any{
@@ -360,27 +480,38 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		})
 	}
 
+	// T2-escalated: starts as soon as T1 completes, overlapping with T2-native.
+	g2.Go(func() error {
+		select {
+		case <-t1Done:
+		case <-g2Ctx.Done():
+			return nil
+		}
+
+		esc := EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold)
+		if len(esc) == 0 {
+			return nil
+		}
+
+		t2Result, t2Err := ExtractTier2(g2Ctx, esc, t1Answers, p.anthropic, p.cfg.Anthropic)
+		if t2Err != nil {
+			zap.L().Warn("pipeline: t2-escalated extraction failed", zap.Error(t2Err))
+			return nil
+		}
+		escalatedAnswers = t2Result.Answers
+		escalatedUsage = t2Result.TokenUsage
+		return nil
+	})
+
 	_ = g2.Wait()
 
-	// Escalate low-confidence T1 answers to T2.
+	// Escalation count for reporting (re-derive from answers).
 	escalated := EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold)
 
-	// ===== Phase 5: T2 escalated + combine with native results =====
+	// ===== Phase 5: Combine T2 results =====
 	var t2Answers []model.ExtractionAnswer
 
 	trackPhase("5_extract_t2", func() (*model.PhaseResult, error) {
-		var escalatedAnswers []model.ExtractionAnswer
-		var escalatedUsage model.TokenUsage
-
-		if len(escalated) > 0 {
-			t2Result, t2Err := ExtractTier2(ctx, escalated, t1Answers, p.anthropic, p.cfg.Anthropic)
-			if t2Err != nil {
-				return nil, t2Err
-			}
-			escalatedAnswers = t2Result.Answers
-			escalatedUsage = t2Result.TokenUsage
-		}
-
 		// Merge T2-native + T2-escalated.
 		t2Answers = append(t2NativeAnswers, escalatedAnswers...)
 
@@ -402,8 +533,14 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	// ===== Phase 6: Tier 3 Extraction =====
 	var t3Answers []model.ExtractionAnswer
 
+	// Update cumulative cost from phases so far.
+	for _, ph := range result.Phases {
+		cumulativeCost += ph.TokenUsage.Cost
+	}
+
 	// Determine if T3 should run.
 	shouldRunT3 := len(batches.Tier3) > 0
+	var t3SkipReason string
 	switch p.cfg.Pipeline.Tier3Gate {
 	case "always":
 		// Run T3 unconditionally (if there are T3 questions).
@@ -422,6 +559,16 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		shouldRunT3 = false
 	}
 
+	// Cost budget gate: skip T3 if cumulative cost exceeds budget.
+	if shouldRunT3 && cumulativeCost >= maxCost {
+		shouldRunT3 = false
+		t3SkipReason = "cost_budget_exceeded"
+		log.Warn("pipeline: skipping T3 due to cost budget",
+			zap.Float64("cumulative_cost", cumulativeCost),
+			zap.Float64("max_cost", maxCost),
+		)
+	}
+
 	if shouldRunT3 {
 		trackPhase("6_extract_t3", func() (*model.PhaseResult, error) {
 			t3Result, t3Err := ExtractTier3(ctx, batches.Tier3, MergeAnswers(t1Answers, t2Answers, nil), allPages, p.anthropic, p.cfg.Anthropic)
@@ -438,15 +585,17 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			}, nil
 		})
 	} else {
-		skipReason := "not needed"
-		if p.cfg.Pipeline.Tier3Gate == "off" || p.cfg.Pipeline.Tier3Gate == "" {
-			skipReason = "tier3_gate=off (use --with-t3 to enable)"
+		if t3SkipReason == "" {
+			t3SkipReason = "not needed"
+			if p.cfg.Pipeline.Tier3Gate == "off" || p.cfg.Pipeline.Tier3Gate == "" {
+				t3SkipReason = "tier3_gate=off (use --with-t3 to enable)"
+			}
 		}
 		trackPhase("6_extract_t3", func() (*model.PhaseResult, error) {
 			return &model.PhaseResult{
 				Status: model.PhaseStatusSkipped,
 				Metadata: map[string]any{
-					"reason": skipReason,
+					"reason": t3SkipReason,
 				},
 			}, nil
 		})
@@ -460,11 +609,17 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 
 	trackPhase("7_aggregate", func() (*model.PhaseResult, error) {
 		allAnswers = MergeAnswers(t1Answers, t2Answers, t3Answers)
+		// Merge in existing high-confidence answers for fields we skipped.
+		if len(existingAnswers) > 0 {
+			allAnswers = MergeAnswers(existingAnswers, allAnswers, nil)
+		}
 		fieldValues = BuildFieldValues(allAnswers, p.fields)
 		return &model.PhaseResult{
 			Metadata: map[string]any{
-				"total_answers": len(allAnswers),
-				"field_values":  len(fieldValues),
+				"total_answers":         len(allAnswers),
+				"field_values":          len(fieldValues),
+				"reused_from_existing":  len(existingAnswers),
+				"skipped_by_existing":   skippedByExisting,
 			},
 		}, nil
 	})
@@ -530,6 +685,11 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		log.Warn("pipeline: failed to save run result", zap.Error(saveErr))
 	}
 
+	// Clean up checkpoint on successful completion.
+	if delErr := p.store.DeleteCheckpoint(ctx, company.URL); delErr != nil {
+		log.Warn("pipeline: failed to delete checkpoint", zap.Error(delErr))
+	}
+
 	log.Info("pipeline: enrichment complete",
 		zap.String("run_id", run.ID),
 		zap.Float64("score", result.Score),
@@ -568,6 +728,20 @@ func (p *Pipeline) computePhaseCost(phase string, usage model.TokenUsage) float6
 		usage.InputTokens, usage.OutputTokens,
 		usage.CacheCreationTokens, usage.CacheReadTokens,
 	)
+}
+
+// filterRoutedQuestions removes questions whose field keys already have
+// high-confidence answers, returning only questions that still need extraction.
+func filterRoutedQuestions(routed []model.RoutedQuestion, existingKeys map[string]bool, skipped *int) []model.RoutedQuestion {
+	var filtered []model.RoutedQuestion
+	for _, rq := range routed {
+		if existingKeys[rq.Question.FieldKey] {
+			*skipped++
+			continue
+		}
+		filtered = append(filtered, rq)
+	}
+	return filtered
 }
 
 // linkedInToPage converts LinkedIn data into a synthetic CrawledPage.
