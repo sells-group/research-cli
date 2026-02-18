@@ -770,6 +770,150 @@ func (_c *MockStore_SetCachedLinkedIn_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// GetCachedScrape provides a mock function with given fields: ctx, urlHash
+func (_m *MockStore) GetCachedScrape(ctx context.Context, urlHash string) ([]byte, error) {
+	ret := _m.Called(ctx, urlHash)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCachedScrape")
+	}
+
+	var r0 []byte
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]byte, error)); ok {
+		return rf(ctx, urlHash)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) []byte); ok {
+		r0 = rf(ctx, urlHash)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]byte)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, urlHash)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// SetCachedScrape provides a mock function with given fields: ctx, urlHash, content, ttl
+func (_m *MockStore) SetCachedScrape(ctx context.Context, urlHash string, content []byte, ttl time.Duration) error {
+	ret := _m.Called(ctx, urlHash, content, ttl)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetCachedScrape")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, []byte, time.Duration) error); ok {
+		r0 = rf(ctx, urlHash, content, ttl)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// GetHighConfidenceAnswers provides a mock function with given fields: ctx, companyURL, minConfidence
+func (_m *MockStore) GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64) ([]model.ExtractionAnswer, error) {
+	ret := _m.Called(ctx, companyURL, minConfidence)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetHighConfidenceAnswers")
+	}
+
+	var r0 []model.ExtractionAnswer
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, float64) ([]model.ExtractionAnswer, error)); ok {
+		return rf(ctx, companyURL, minConfidence)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, float64) []model.ExtractionAnswer); ok {
+		r0 = rf(ctx, companyURL, minConfidence)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]model.ExtractionAnswer)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, float64) error); ok {
+		r1 = rf(ctx, companyURL, minConfidence)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// SaveCheckpoint provides a mock function with given fields: ctx, companyID, phase, data
+func (_m *MockStore) SaveCheckpoint(ctx context.Context, companyID string, phase string, data []byte) error {
+	ret := _m.Called(ctx, companyID, phase, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveCheckpoint")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, []byte) error); ok {
+		r0 = rf(ctx, companyID, phase, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// LoadCheckpoint provides a mock function with given fields: ctx, companyID
+func (_m *MockStore) LoadCheckpoint(ctx context.Context, companyID string) (*model.Checkpoint, error) {
+	ret := _m.Called(ctx, companyID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadCheckpoint")
+	}
+
+	var r0 *model.Checkpoint
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*model.Checkpoint, error)); ok {
+		return rf(ctx, companyID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *model.Checkpoint); ok {
+		r0 = rf(ctx, companyID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.Checkpoint)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, companyID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DeleteCheckpoint provides a mock function with given fields: ctx, companyID
+func (_m *MockStore) DeleteCheckpoint(ctx context.Context, companyID string) error {
+	ret := _m.Called(ctx, companyID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteCheckpoint")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, companyID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // NewMockStore creates a new instance of MockStore. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockStore(t interface {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 
@@ -20,9 +21,60 @@ type PostgresStore struct {
 	pool *pgxpool.Pool
 }
 
+// PoolConfig holds optional connection pool tuning parameters.
+type PoolConfig struct {
+	MaxConns int32 `yaml:"max_conns" mapstructure:"max_conns"`
+	MinConns int32 `yaml:"min_conns" mapstructure:"min_conns"`
+}
+
+// preparedStatements lists queries to prepare on each new connection for
+// faster execution of the most frequently used store operations.
+var preparedStatements = map[string]string{
+	"insert_run":         `INSERT INTO runs (id, company, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)`,
+	"update_run_status":  `UPDATE runs SET status = $1, updated_at = $2 WHERE id = $3`,
+	"update_run_result":  `UPDATE runs SET result = $1, status = $2, updated_at = $3 WHERE id = $4`,
+	"get_run":            `SELECT id, company, status, result, created_at, updated_at FROM runs WHERE id = $1`,
+	"insert_phase":       `INSERT INTO run_phases (id, run_id, name, status, started_at) VALUES ($1, $2, $3, $4, $5)`,
+	"complete_phase":     `UPDATE run_phases SET status = $1, result = $2 WHERE id = $3`,
+	"get_cached_crawl":   `SELECT id, company_url, pages, crawled_at, expires_at FROM crawl_cache WHERE company_url = $1 AND expires_at > now() ORDER BY crawled_at DESC LIMIT 1`,
+	"set_cached_crawl":   `INSERT INTO crawl_cache (id, company_url, pages, crawled_at, expires_at) VALUES ($1, $2, $3, $4, $5)`,
+	"get_cached_linkedin": `SELECT data FROM linkedin_cache WHERE domain = $1 AND expires_at > now() ORDER BY cached_at DESC LIMIT 1`,
+	"set_cached_linkedin": `INSERT INTO linkedin_cache (id, domain, data, cached_at, expires_at) VALUES ($1, $2, $3, $4, $5)`,
+	"delete_expired_crawls": `DELETE FROM crawl_cache WHERE expires_at <= now()`,
+}
+
 // NewPostgres creates a PostgresStore with a connection pool.
-func NewPostgres(ctx context.Context, connString string) (*PostgresStore, error) {
-	pool, err := pgxpool.New(ctx, connString)
+func NewPostgres(ctx context.Context, connString string, poolCfg *PoolConfig) (*PostgresStore, error) {
+	pgxCfg, err := pgxpool.ParseConfig(connString)
+	if err != nil {
+		return nil, eris.Wrap(err, "postgres: parse config")
+	}
+
+	// Apply pool sizing from config with sensible defaults.
+	maxConns := int32(10)
+	minConns := int32(2)
+	if poolCfg != nil {
+		if poolCfg.MaxConns > 0 {
+			maxConns = poolCfg.MaxConns
+		}
+		if poolCfg.MinConns > 0 {
+			minConns = poolCfg.MinConns
+		}
+	}
+	pgxCfg.MaxConns = maxConns
+	pgxCfg.MinConns = minConns
+
+	// Prepare frequently-used statements on each new connection.
+	pgxCfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		for name, sql := range preparedStatements {
+			if _, err := conn.Prepare(ctx, name, sql); err != nil {
+				return eris.Wrapf(err, "postgres: prepare %s", name)
+			}
+		}
+		return nil
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, pgxCfg)
 	if err != nil {
 		return nil, eris.Wrap(err, "postgres: create pool")
 	}
@@ -64,6 +116,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 CREATE INDEX IF NOT EXISTS idx_run_phases_run_id ON run_phases(run_id);
 CREATE INDEX IF NOT EXISTS idx_crawl_cache_company_url ON crawl_cache(company_url);
 CREATE INDEX IF NOT EXISTS idx_crawl_cache_expires_at ON crawl_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_crawl_cache_url_expires ON crawl_cache(company_url, expires_at DESC);
 
 CREATE TABLE IF NOT EXISTS linkedin_cache (
 	id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -75,6 +128,24 @@ CREATE TABLE IF NOT EXISTS linkedin_cache (
 
 CREATE INDEX IF NOT EXISTS idx_linkedin_cache_domain ON linkedin_cache(domain);
 CREATE INDEX IF NOT EXISTS idx_linkedin_cache_expires_at ON linkedin_cache(expires_at);
+
+CREATE TABLE IF NOT EXISTS scrape_cache (
+	id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+	url_hash   TEXT NOT NULL UNIQUE,
+	content    JSONB NOT NULL,
+	cached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+	expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_scrape_cache_url_hash ON scrape_cache(url_hash);
+CREATE INDEX IF NOT EXISTS idx_scrape_cache_expires_at ON scrape_cache(expires_at);
+
+CREATE TABLE IF NOT EXISTS checkpoints (
+	company_id TEXT PRIMARY KEY,
+	phase      TEXT NOT NULL,
+	data       JSONB NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `
 
 func (s *PostgresStore) Migrate(ctx context.Context) error {
@@ -349,4 +420,97 @@ func (s *PostgresStore) DeleteExpiredCrawls(ctx context.Context) (int, error) {
 		return 0, eris.Wrap(err, "postgres: delete expired crawls")
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+func (s *PostgresStore) GetCachedScrape(ctx context.Context, urlHash string) ([]byte, error) {
+	var content []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT content FROM scrape_cache
+		 WHERE url_hash = $1 AND expires_at > now()`,
+		urlHash,
+	).Scan(&content)
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return nil, nil
+		}
+		return nil, eris.Wrap(err, "postgres: get cached scrape")
+	}
+	return content, nil
+}
+
+func (s *PostgresStore) SetCachedScrape(ctx context.Context, urlHash string, content []byte, ttl time.Duration) error {
+	id := uuid.New().String()
+	now := time.Now().UTC()
+	expiresAt := now.Add(ttl)
+
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO scrape_cache (id, url_hash, content, cached_at, expires_at)
+		 VALUES ($1, $2, $3, $4, $5)
+		 ON CONFLICT (url_hash) DO UPDATE SET content = $3, cached_at = $4, expires_at = $5`,
+		id, urlHash, content, now, expiresAt,
+	)
+	return eris.Wrap(err, "postgres: set cached scrape")
+}
+
+func (s *PostgresStore) GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64) ([]model.ExtractionAnswer, error) {
+	var resultJSON []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT result FROM runs
+		 WHERE company->>'url' = $1 AND status = 'complete' AND result IS NOT NULL
+		 ORDER BY created_at DESC LIMIT 1`,
+		companyURL,
+	).Scan(&resultJSON)
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return nil, nil
+		}
+		return nil, eris.Wrap(err, "postgres: get high confidence answers")
+	}
+
+	var result model.RunResult
+	if err := json.Unmarshal(resultJSON, &result); err != nil {
+		return nil, eris.Wrap(err, "postgres: unmarshal result")
+	}
+
+	var highConf []model.ExtractionAnswer
+	for _, a := range result.Answers {
+		if a.Confidence >= minConfidence {
+			highConf = append(highConf, a)
+		}
+	}
+	return highConf, nil
+}
+
+func (s *PostgresStore) SaveCheckpoint(ctx context.Context, companyID string, phase string, data []byte) error {
+	now := time.Now().UTC()
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO checkpoints (company_id, phase, data, created_at)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (company_id) DO UPDATE SET phase = $2, data = $3, created_at = $4`,
+		companyID, phase, data, now,
+	)
+	return eris.Wrap(err, "postgres: save checkpoint")
+}
+
+func (s *PostgresStore) LoadCheckpoint(ctx context.Context, companyID string) (*model.Checkpoint, error) {
+	var cp model.Checkpoint
+	err := s.pool.QueryRow(ctx,
+		`SELECT company_id, phase, data, created_at FROM checkpoints WHERE company_id = $1`,
+		companyID,
+	).Scan(&cp.CompanyID, &cp.Phase, &cp.Data, &cp.CreatedAt)
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return nil, nil
+		}
+		return nil, eris.Wrap(err, "postgres: load checkpoint")
+	}
+	return &cp, nil
+}
+
+func (s *PostgresStore) DeleteCheckpoint(ctx context.Context, companyID string) error {
+	_, err := s.pool.Exec(ctx,
+		`DELETE FROM checkpoints WHERE company_id = $1`,
+		companyID,
+	)
+	return eris.Wrap(err, "postgres: delete checkpoint")
 }

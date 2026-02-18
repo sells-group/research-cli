@@ -37,6 +37,18 @@ type Store interface {
 	GetCachedLinkedIn(ctx context.Context, domain string) ([]byte, error)
 	SetCachedLinkedIn(ctx context.Context, domain string, data []byte, ttl time.Duration) error
 
+	// Scrape cache (per-URL Firecrawl result caching)
+	GetCachedScrape(ctx context.Context, urlHash string) ([]byte, error)
+	SetCachedScrape(ctx context.Context, urlHash string, content []byte, ttl time.Duration) error
+
+	// High-confidence answer lookup (skip re-extraction)
+	GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64) ([]model.ExtractionAnswer, error)
+
+	// Checkpoint/resume
+	SaveCheckpoint(ctx context.Context, companyID string, phase string, data []byte) error
+	LoadCheckpoint(ctx context.Context, companyID string) (*model.Checkpoint, error)
+	DeleteCheckpoint(ctx context.Context, companyID string) error
+
 	// Lifecycle
 	Migrate(ctx context.Context) error
 	Close() error

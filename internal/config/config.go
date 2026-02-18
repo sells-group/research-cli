@@ -55,6 +55,8 @@ type OCRConfig struct {
 type StoreConfig struct {
 	Driver      string `yaml:"driver" mapstructure:"driver"`
 	DatabaseURL string `yaml:"database_url" mapstructure:"database_url"`
+	MaxConns    int32  `yaml:"max_conns" mapstructure:"max_conns"`
+	MinConns    int32  `yaml:"min_conns" mapstructure:"min_conns"`
 }
 
 // NotionConfig holds Notion API credentials and database IDs.
@@ -170,6 +172,8 @@ type PipelineConfig struct {
 	ConfidenceEscalationThreshold float64 `yaml:"confidence_escalation_threshold" mapstructure:"confidence_escalation_threshold"`
 	Tier3Gate                     string  `yaml:"tier3_gate" mapstructure:"tier3_gate"`
 	QualityScoreThreshold         float64 `yaml:"quality_score_threshold" mapstructure:"quality_score_threshold"`
+	MaxCostPerCompanyUSD          float64 `yaml:"max_cost_per_company_usd" mapstructure:"max_cost_per_company_usd"`
+	SkipConfidenceThreshold       float64 `yaml:"skip_confidence_threshold" mapstructure:"skip_confidence_threshold"`
 }
 
 // BatchConfig configures batch processing.
@@ -204,6 +208,8 @@ func Load() (*Config, error) {
 
 	// Defaults
 	v.SetDefault("store.driver", "postgres")
+	v.SetDefault("store.max_conns", 10)
+	v.SetDefault("store.min_conns", 2)
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "json")
 	v.SetDefault("server.port", 8080)
@@ -218,6 +224,8 @@ func Load() (*Config, error) {
 	v.SetDefault("pipeline.confidence_escalation_threshold", 0.4)
 	v.SetDefault("pipeline.tier3_gate", "off")
 	v.SetDefault("pipeline.quality_score_threshold", 0.6)
+	v.SetDefault("pipeline.max_cost_per_company_usd", 10.0)
+	v.SetDefault("pipeline.skip_confidence_threshold", 0.8)
 	v.SetDefault("jina.base_url", "https://r.jina.ai")
 	v.SetDefault("jina.search_base_url", "https://s.jina.ai")
 	v.SetDefault("firecrawl.base_url", "https://api.firecrawl.dev/v2")

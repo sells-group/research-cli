@@ -23,7 +23,10 @@ func initStore(ctx context.Context) (store.Store, error) {
 		}
 		return store.NewSQLite(dsn)
 	case "postgres":
-		return store.NewPostgres(ctx, cfg.Store.DatabaseURL)
+		return store.NewPostgres(ctx, cfg.Store.DatabaseURL, &store.PoolConfig{
+			MaxConns: cfg.Store.MaxConns,
+			MinConns: cfg.Store.MinConns,
+		})
 	default:
 		return nil, eris.Errorf("unsupported store driver: %s", cfg.Store.Driver)
 	}

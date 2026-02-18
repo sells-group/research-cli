@@ -110,3 +110,11 @@ type FieldValue struct {
 	Source     string  `json:"source"`
 	Tier       int     `json:"tier"`
 }
+
+// Checkpoint stores intermediate pipeline state for resume after failure.
+type Checkpoint struct {
+	CompanyID string `json:"company_id"`
+	Phase     string `json:"phase"`
+	Data      []byte `json:"data"`
+	CreatedAt time.Time `json:"created_at"`
+}
