@@ -222,7 +222,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	// Phase 1C: LinkedIn
 	g.Go(func() error {
 		pr := trackPhase("1c_linkedin", func() (*model.PhaseResult, error) {
-			ld, usage, liErr := LinkedInPhase(gCtx, company, p.chain, p.perplexity, p.anthropic, p.cfg.Anthropic)
+			ld, usage, liErr := LinkedInPhase(gCtx, company, p.chain, p.perplexity, p.anthropic, p.cfg.Anthropic, p.store)
 			if liErr != nil {
 				return nil, liErr
 			}

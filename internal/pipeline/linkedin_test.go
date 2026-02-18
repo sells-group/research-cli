@@ -46,7 +46,7 @@ func TestLinkedInPhase_ChainSuccess(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	data, usage, err := LinkedInPhase(ctx, company, chain, pplxClient, aiClient, aiCfg)
+	data, usage, err := LinkedInPhase(ctx, company, chain, pplxClient, aiClient, aiCfg, nil)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, data)
@@ -91,7 +91,7 @@ func TestLinkedInPhase_ChainLoginWall_FallsBackToPerplexity(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	data, usage, err := LinkedInPhase(ctx, company, chain, pplxClient, aiClient, aiCfg)
+	data, usage, err := LinkedInPhase(ctx, company, chain, pplxClient, aiClient, aiCfg, nil)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, data)
@@ -126,7 +126,7 @@ func TestLinkedInPhase_NilChain_FallsBackToPerplexity(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	data, usage, err := LinkedInPhase(ctx, company, nil, pplxClient, aiClient, aiCfg)
+	data, usage, err := LinkedInPhase(ctx, company, nil, pplxClient, aiClient, aiCfg, nil)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, data)
@@ -149,7 +149,7 @@ func TestLinkedInPhase_PerplexityError(t *testing.T) {
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
 	// nil chain → falls to perplexity which errors
-	data, _, err := LinkedInPhase(ctx, company, nil, pplxClient, aiClient, aiCfg)
+	data, _, err := LinkedInPhase(ctx, company, nil, pplxClient, aiClient, aiCfg, nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, data)
@@ -178,7 +178,7 @@ func TestLinkedInPhase_HaikuParseError(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	data, usage, err := LinkedInPhase(ctx, company, nil, pplxClient, aiClient, aiCfg)
+	data, usage, err := LinkedInPhase(ctx, company, nil, pplxClient, aiClient, aiCfg, nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, data)

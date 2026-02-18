@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/sells-group/research-cli/internal/model"
@@ -182,16 +183,32 @@ func TestToBool_UnsupportedType(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// --- matchesValidation ---
+// --- Pre-compiled validation regex ---
 
-func TestMatchesValidation_ValidPattern(t *testing.T) {
-	assert.True(t, matchesValidation("CA", `^[A-Z]{2}$`))
-	assert.False(t, matchesValidation("California", `^[A-Z]{2}$`))
+func TestValidationRegex_ValidPattern(t *testing.T) {
+	field := &model.FieldMapping{
+		Key:        "state_code",
+		DataType:   "string",
+		Validation: `^[A-Z]{2}$`,
+	}
+	// Simulate what NewFieldRegistry does.
+	re, err := regexp.Compile(field.Validation)
+	assert.NoError(t, err)
+	field.ValidationRegex = re
+
+	fv := ValidateField(model.ExtractionAnswer{Value: "CA", Confidence: 0.9, Tier: 1, FieldKey: "state_code"}, field)
+	assert.NotNil(t, fv)
+	assert.Equal(t, "CA", fv.Value)
+
+	fv = ValidateField(model.ExtractionAnswer{Value: "California", Confidence: 0.9, Tier: 1, FieldKey: "state_code"}, field)
+	assert.Nil(t, fv)
 }
 
-func TestMatchesValidation_InvalidPattern(t *testing.T) {
-	// Invalid regex should return true (skip validation).
-	assert.True(t, matchesValidation("anything", `[invalid(regex`))
+func TestValidationRegex_NilRegex(t *testing.T) {
+	// When no validation regex is set, all strings should pass.
+	field := &model.FieldMapping{Key: "name", DataType: "string"}
+	fv := ValidateField(model.ExtractionAnswer{Value: "anything", Confidence: 0.9, Tier: 1, FieldKey: "name"}, field)
+	assert.NotNil(t, fv)
 }
 
 // --- MergeAnswers: all three tiers ---

@@ -104,7 +104,13 @@ func NewClient(apiKey string, opts ...Option) Client {
 		apiKey:        apiKey,
 		baseURL:       "https://r.jina.ai",
 		searchBaseURL: "https://s.jina.ai",
-		http:          &http.Client{Timeout: 30 * time.Second},
+		http: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConnsPerHost: 20,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
 	}
 	for _, opt := range opts {
 		opt(c)

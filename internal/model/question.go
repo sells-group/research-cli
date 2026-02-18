@@ -34,14 +34,23 @@ type RoutedBatches struct {
 
 // ExtractionAnswer holds the result of extracting an answer for a question.
 type ExtractionAnswer struct {
-	QuestionID string  `json:"question_id"`
-	FieldKey   string  `json:"field_key"`
-	Value      any     `json:"value"`
-	Confidence float64 `json:"confidence"`
-	Source     string  `json:"source"`
-	SourceURL  string  `json:"source_url"`
-	Tier       int     `json:"tier"`
-	Reasoning  string  `json:"reasoning"`
+	QuestionID    string        `json:"question_id"`
+	FieldKey      string        `json:"field_key"`
+	Value         any           `json:"value"`
+	Confidence    float64       `json:"confidence"`
+	Source        string        `json:"source"`
+	SourceURL     string        `json:"source_url"`
+	Tier          int           `json:"tier"`
+	Reasoning     string        `json:"reasoning"`
+	Contradiction *Contradiction `json:"contradiction,omitempty"`
+}
+
+// Contradiction flags when two tiers disagree on a field value
+// with moderate+ confidence on both sides.
+type Contradiction struct {
+	OtherTier       int     `json:"other_tier"`
+	OtherValue      any     `json:"other_value"`
+	OtherConfidence float64 `json:"other_confidence"`
 }
 
 // TierResult holds the outcome of a single tier extraction.

@@ -35,11 +35,12 @@ func TestQualityGate_SFUpdateFails(t *testing.T) {
 	}
 
 	sfClient := salesforcemocks.NewMockClient(t)
-	sfClient.On("UpdateOne", ctx, "Account", "001ERR", mock.AnythingOfType("map[string]interface {}")).
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001ERR", mock.AnythingOfType("map[string]interface {}")).
 		Return(errors.New("sf connection error"))
 
 	notionClient := notionmocks.NewMockClient(t)
-	// Notion update should NOT be called because SF fails first.
+	// Notion runs concurrently with SF; it may or may not execute before SF error cancels context.
+	notionClient.On("UpdatePage", mock.Anything, "page-err", mock.Anything).Return(nil, nil).Maybe()
 
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{
@@ -75,7 +76,7 @@ func TestQualityGate_NoNotionPageID(t *testing.T) {
 	}
 
 	sfClient := salesforcemocks.NewMockClient(t)
-	sfClient.On("UpdateOne", ctx, "Account", "001ABC", mock.AnythingOfType("map[string]interface {}")).
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001ABC", mock.AnythingOfType("map[string]interface {}")).
 		Return(nil)
 
 	notionClient := notionmocks.NewMockClient(t)
@@ -117,7 +118,7 @@ func TestQualityGate_PassNoSFFieldValues(t *testing.T) {
 	// UpdateOne should NOT be called since no SF fields are populated.
 
 	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", ctx, "page-123", mock.Anything).Return(nil, nil)
+	notionClient.On("UpdatePage", mock.Anything, "page-123", mock.Anything).Return(nil, nil)
 
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
@@ -148,7 +149,7 @@ func TestQualityGate_FailNoWebhook(t *testing.T) {
 
 	sfClient := salesforcemocks.NewMockClient(t)
 	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", ctx, "page-789", mock.Anything).Return(nil, nil)
+	notionClient.On("UpdatePage", mock.Anything, "page-789", mock.Anything).Return(nil, nil)
 
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.6},
@@ -181,11 +182,11 @@ func TestQualityGate_NotionUpdateFails(t *testing.T) {
 	}
 
 	sfClient := salesforcemocks.NewMockClient(t)
-	sfClient.On("UpdateOne", ctx, "Account", "001ABC", mock.AnythingOfType("map[string]interface {}")).
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001ABC", mock.AnythingOfType("map[string]interface {}")).
 		Return(nil)
 
 	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", ctx, "page-fail", mock.Anything).
+	notionClient.On("UpdatePage", mock.Anything, "page-fail", mock.Anything).
 		Return(nil, errors.New("notion api error"))
 
 	cfg := &config.Config{
@@ -220,13 +221,13 @@ func TestQualityGate_WithReportInSFFields(t *testing.T) {
 	}
 
 	sfClient := salesforcemocks.NewMockClient(t)
-	sfClient.On("UpdateOne", ctx, "Account", "001REP", mock.MatchedBy(func(fields map[string]any) bool {
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001REP", mock.MatchedBy(func(fields map[string]any) bool {
 		_, hasReport := fields["Enrichment_Report__c"]
 		return hasReport
 	})).Return(nil)
 
 	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", ctx, "page-rep", mock.Anything).Return(nil, nil)
+	notionClient.On("UpdatePage", mock.Anything, "page-rep", mock.Anything).Return(nil, nil)
 
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},

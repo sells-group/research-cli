@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,16 +16,21 @@ import (
 	anthropicmocks "github.com/sells-group/research-cli/pkg/anthropic/mocks"
 )
 
+// testPageContent returns content >= 100 chars to bypass the tiny page filter.
+func testPageContent(i int) string {
+	return fmt.Sprintf("Content for page %d. %s", i, strings.Repeat("This is substantial content for testing purposes. ", 3))
+}
+
 func TestClassifyPhase_BatchMode(t *testing.T) {
 	ctx := context.Background()
 
-	// 5 pages: triggers batch mode (> 3).
+	// 5 pages with unique content >= 100 chars: triggers batch mode (> threshold after dedup).
 	pages := make([]model.CrawledPage, 5)
 	for i := 0; i < 5; i++ {
 		pages[i] = model.CrawledPage{
 			URL:      fmt.Sprintf("https://acme.com/page%d", i),
 			Title:    fmt.Sprintf("Page %d", i),
-			Markdown: fmt.Sprintf("Content for page %d", i),
+			Markdown: testPageContent(i),
 		}
 	}
 
@@ -58,7 +64,7 @@ func TestClassifyPhase_BatchMode(t *testing.T) {
 	aiClient.On("GetBatchResults", mock.Anything, "batch-classify").
 		Return(setupBatchIterator(t, resultItems), nil)
 
-	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001", SmallBatchThreshold: 3}
 
 	index, usage, err := ClassifyPhase(ctx, pages, aiClient, aiCfg)
 
@@ -74,14 +80,14 @@ func TestClassifyPhase_BatchMode_CreateError(t *testing.T) {
 
 	pages := make([]model.CrawledPage, 5)
 	for i := 0; i < 5; i++ {
-		pages[i] = model.CrawledPage{URL: fmt.Sprintf("https://acme.com/page%d", i), Markdown: "Content"}
+		pages[i] = model.CrawledPage{URL: fmt.Sprintf("https://acme.com/page%d", i), Markdown: testPageContent(i)}
 	}
 
 	aiClient := anthropicmocks.NewMockClient(t)
 	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
 		Return(nil, errors.New("rate limited"))
 
-	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001", SmallBatchThreshold: 3}
 
 	index, _, err := ClassifyPhase(ctx, pages, aiClient, aiCfg)
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/rotisserie/eris"
 )
@@ -90,7 +91,13 @@ func NewClient(apiKey string, opts ...Option) Client {
 		apiKey:  apiKey,
 		baseURL: defaultBaseURL,
 		model:   defaultModel,
-		http:    http.DefaultClient,
+		http: &http.Client{
+			Timeout: 60 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConnsPerHost: 20,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
 	}
 	for _, o := range opts {
 		o(c)

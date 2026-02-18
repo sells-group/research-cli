@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/sells-group/research-cli/internal/model"
@@ -219,10 +220,11 @@ func TestValidateField_FloatType(t *testing.T) {
 
 func TestValidateField_ValidationRegex(t *testing.T) {
 	field := &model.FieldMapping{
-		Key:        "state",
-		SFField:    "BillingState",
-		DataType:   "string",
-		Validation: `^[A-Z]{2}$`,
+		Key:             "state",
+		SFField:         "BillingState",
+		DataType:        "string",
+		Validation:      `^[A-Z]{2}$`,
+		ValidationRegex: regexp.MustCompile(`^[A-Z]{2}$`),
 	}
 
 	t.Run("valid", func(t *testing.T) {

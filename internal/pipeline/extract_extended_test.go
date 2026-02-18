@@ -204,8 +204,9 @@ func TestExtractTier3_MultipleQuestions_BatchPath(t *testing.T) {
 		Return(setupBatchIterator(t, resultItems), nil)
 
 	aiCfg := config.AnthropicConfig{
-		HaikuModel: "claude-haiku-4-5-20251001",
-		OpusModel:  "claude-opus-4-6",
+		HaikuModel:          "claude-haiku-4-5-20251001",
+		OpusModel:           "claude-opus-4-6",
+		SmallBatchThreshold: 3,
 	}
 
 	result, err := ExtractTier3(ctx, routed, allAnswers, pages, aiClient, aiCfg)

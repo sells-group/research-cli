@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/mail"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -13,9 +12,14 @@ import (
 	"github.com/sells-group/research-cli/internal/model"
 )
 
+// contradictionThreshold is the minimum confidence on both sides to flag
+// a disagreement between tiers.
+const contradictionThreshold = 0.5
+
 // MergeAnswers combines answers from all tiers, preferring higher-tier
 // answers and higher confidence scores. For each field key, the best
-// answer wins.
+// answer wins. Flags contradictions when tiers disagree with moderate+
+// confidence on both sides.
 func MergeAnswers(t1, t2, t3 []model.ExtractionAnswer) []model.ExtractionAnswer {
 	best := make(map[string]model.ExtractionAnswer)
 
@@ -29,6 +33,29 @@ func MergeAnswers(t1, t2, t3 []model.ExtractionAnswer) []model.ExtractionAnswer 
 			if !ok {
 				best[a.FieldKey] = a
 				continue
+			}
+
+			// Check for contradiction: different tiers, both with moderate+
+			// confidence, and different values.
+			if a.Tier != existing.Tier &&
+				a.Confidence >= contradictionThreshold &&
+				existing.Confidence >= contradictionThreshold &&
+				fmt.Sprintf("%v", a.Value) != fmt.Sprintf("%v", existing.Value) {
+				zap.L().Warn("aggregate: tier contradiction detected",
+					zap.String("field", a.FieldKey),
+					zap.Int("tier_a", existing.Tier),
+					zap.Any("value_a", existing.Value),
+					zap.Float64("conf_a", existing.Confidence),
+					zap.Int("tier_b", a.Tier),
+					zap.Any("value_b", a.Value),
+					zap.Float64("conf_b", a.Confidence),
+				)
+				// Attach contradiction metadata to the winner.
+				a.Contradiction = &model.Contradiction{
+					OtherTier:       existing.Tier,
+					OtherValue:      existing.Value,
+					OtherConfidence: existing.Confidence,
+				}
 			}
 
 			// Higher tier always wins if existing is null or new has reasonable confidence.
@@ -71,7 +98,7 @@ func ValidateField(answer model.ExtractionAnswer, field *model.FieldMapping) *mo
 		if field.MaxLength > 0 && len(s) > field.MaxLength {
 			s = s[:field.MaxLength]
 		}
-		if field.Validation != "" && !matchesValidation(s, field.Validation) {
+		if field.ValidationRegex != nil && !field.ValidationRegex.MatchString(s) {
 			zap.L().Warn("aggregate: validation failed",
 				zap.String("field", field.Key),
 				zap.String("raw_value", s),
@@ -182,14 +209,6 @@ func BuildFieldValues(answers []model.ExtractionAnswer, fields *model.FieldRegis
 	}
 
 	return result
-}
-
-func matchesValidation(s, pattern string) bool {
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return true // Invalid pattern: skip validation.
-	}
-	return re.MatchString(s)
 }
 
 func toNumber(v any) (int, bool) {

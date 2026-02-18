@@ -17,9 +17,10 @@ func TestClassifyPhase_DirectMode(t *testing.T) {
 	ctx := context.Background()
 
 	// Use URLs that don't match URL-based patterns so LLM classification triggers.
+	// Content must be >= 100 chars to bypass the tiny page filter.
 	pages := []model.CrawledPage{
-		{URL: "https://acme.com/our-company-overview", Title: "Overview", Markdown: "Welcome to Acme"},
-		{URL: "https://acme.com/what-we-believe", Title: "Values", Markdown: "About Acme Corp values"},
+		{URL: "https://acme.com/our-company-overview", Title: "Overview", Markdown: testPageContent(0)},
+		{URL: "https://acme.com/what-we-believe", Title: "Values", Markdown: testPageContent(1)},
 	}
 
 	aiClient := anthropicmocks.NewMockClient(t)

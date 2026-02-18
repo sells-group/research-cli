@@ -11,6 +11,7 @@ import (
 	"github.com/jomei/notionapi"
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
@@ -38,51 +39,62 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 		Passed: score >= threshold,
 	}
 
-	if gate.Passed {
-		// Update Salesforce.
-		if result.Company.SalesforceID != "" {
-			sfFields := buildSFFields(result.FieldValues)
-			// Include the enrichment report in Salesforce.
-			if result.Report != "" {
-				sfFields["Enrichment_Report__c"] = result.Report
+	// Run SF/ToolJet and Notion updates concurrently — they are independent.
+	g, gCtx := errgroup.WithContext(ctx)
+
+	// SF or ToolJet update.
+	g.Go(func() error {
+		if gate.Passed {
+			if result.Company.SalesforceID != "" {
+				sfFields := buildSFFields(result.FieldValues)
+				if result.Report != "" {
+					sfFields["Enrichment_Report__c"] = result.Report
+				}
+				if len(sfFields) > 0 {
+					if err := salesforce.UpdateAccount(gCtx, sfClient, result.Company.SalesforceID, sfFields); err != nil {
+						zap.L().Error("gate: salesforce update failed",
+							zap.String("company", result.Company.Name),
+							zap.Error(err),
+						)
+						return eris.Wrap(err, "gate: sf update")
+					}
+					gate.SFUpdated = true
+				}
 			}
-			if len(sfFields) > 0 {
-				if err := salesforce.UpdateAccount(ctx, sfClient, result.Company.SalesforceID, sfFields); err != nil {
-					zap.L().Error("gate: salesforce update failed",
+		} else {
+			if cfg.ToolJet.WebhookURL != "" {
+				if err := sendToToolJet(gCtx, result, cfg.ToolJet.WebhookURL); err != nil {
+					zap.L().Warn("gate: tooljet webhook failed",
 						zap.String("company", result.Company.Name),
 						zap.Error(err),
 					)
-					return gate, eris.Wrap(err, "gate: sf update")
+				} else {
+					gate.ManualReview = true
 				}
-				gate.SFUpdated = true
 			}
 		}
-	} else {
-		// Send to ToolJet for manual review.
-		if cfg.ToolJet.WebhookURL != "" {
-			if err := sendToToolJet(ctx, result, cfg.ToolJet.WebhookURL); err != nil {
-				zap.L().Warn("gate: tooljet webhook failed",
+		return nil
+	})
+
+	// Notion update.
+	g.Go(func() error {
+		if result.Company.NotionPageID != "" {
+			status := "Enriched"
+			if !gate.Passed {
+				status = "Manual Review"
+			}
+			if err := updateNotionStatus(gCtx, notionClient, result.Company.NotionPageID, status, result); err != nil {
+				zap.L().Warn("gate: notion update failed",
 					zap.String("company", result.Company.Name),
 					zap.Error(err),
 				)
-			} else {
-				gate.ManualReview = true
 			}
 		}
-	}
+		return nil
+	})
 
-	// Update Notion lead status.
-	if result.Company.NotionPageID != "" {
-		status := "Enriched"
-		if !gate.Passed {
-			status = "Manual Review"
-		}
-		if err := updateNotionStatus(ctx, notionClient, result.Company.NotionPageID, status, result); err != nil {
-			zap.L().Warn("gate: notion update failed",
-				zap.String("company", result.Company.Name),
-				zap.Error(err),
-			)
-		}
+	if err := g.Wait(); err != nil {
+		return gate, err
 	}
 
 	return gate, nil

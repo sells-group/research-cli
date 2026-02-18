@@ -34,11 +34,11 @@ func TestQualityGate_PassesAndUpdatesSF(t *testing.T) {
 	}
 
 	sfClient := salesforcemocks.NewMockClient(t)
-	sfClient.On("UpdateOne", ctx, "Account", "001ABC", mock.AnythingOfType("map[string]interface {}")).
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001ABC", mock.AnythingOfType("map[string]interface {}")).
 		Return(nil)
 
 	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", ctx, "page-123", mock.Anything).
+	notionClient.On("UpdatePage", mock.Anything, "page-123", mock.Anything).
 		Return(nil, nil)
 
 	cfg := &config.Config{
@@ -83,7 +83,7 @@ func TestQualityGate_FailsSendsToManualReview(t *testing.T) {
 
 	sfClient := salesforcemocks.NewMockClient(t)
 	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", ctx, "page-456", mock.Anything).
+	notionClient.On("UpdatePage", mock.Anything, "page-456", mock.Anything).
 		Return(nil, nil)
 
 	cfg := &config.Config{
@@ -124,7 +124,7 @@ func TestQualityGate_NoSalesforceID(t *testing.T) {
 
 	sfClient := salesforcemocks.NewMockClient(t)
 	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", ctx, "page-789", mock.Anything).
+	notionClient.On("UpdatePage", mock.Anything, "page-789", mock.Anything).
 		Return(nil, nil)
 
 	cfg := &config.Config{

@@ -386,7 +386,7 @@ func executeBatch(ctx context.Context, items []anthropic.BatchRequestItem, route
 
 	threshold := aiCfg.SmallBatchThreshold
 	if threshold <= 0 {
-		threshold = 3 // fallback default
+		threshold = 8 // fallback default: batch API overhead exceeds direct calls for <8 items
 	}
 	if aiCfg.NoBatch || len(items) <= threshold {
 		// Concurrent direct execution.

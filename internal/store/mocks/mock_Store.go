@@ -662,6 +662,114 @@ func (_c *MockStore_UpdateRunStatus_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// GetCachedLinkedIn provides a mock function with given fields: ctx, domain
+func (_m *MockStore) GetCachedLinkedIn(ctx context.Context, domain string) ([]byte, error) {
+	ret := _m.Called(ctx, domain)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCachedLinkedIn")
+	}
+
+	var r0 []byte
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]byte, error)); ok {
+		return rf(ctx, domain)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) []byte); ok {
+		r0 = rf(ctx, domain)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]byte)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, domain)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStore_GetCachedLinkedIn_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCachedLinkedIn'
+type MockStore_GetCachedLinkedIn_Call struct {
+	*mock.Call
+}
+
+// GetCachedLinkedIn is a helper method to define mock.On call
+//   - ctx context.Context
+//   - domain string
+func (_e *MockStore_Expecter) GetCachedLinkedIn(ctx interface{}, domain interface{}) *MockStore_GetCachedLinkedIn_Call {
+	return &MockStore_GetCachedLinkedIn_Call{Call: _e.mock.On("GetCachedLinkedIn", ctx, domain)}
+}
+
+func (_c *MockStore_GetCachedLinkedIn_Call) Run(run func(ctx context.Context, domain string)) *MockStore_GetCachedLinkedIn_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStore_GetCachedLinkedIn_Call) Return(_a0 []byte, _a1 error) *MockStore_GetCachedLinkedIn_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStore_GetCachedLinkedIn_Call) RunAndReturn(run func(context.Context, string) ([]byte, error)) *MockStore_GetCachedLinkedIn_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetCachedLinkedIn provides a mock function with given fields: ctx, domain, data, ttl
+func (_m *MockStore) SetCachedLinkedIn(ctx context.Context, domain string, data []byte, ttl time.Duration) error {
+	ret := _m.Called(ctx, domain, data, ttl)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetCachedLinkedIn")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, []byte, time.Duration) error); ok {
+		r0 = rf(ctx, domain, data, ttl)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStore_SetCachedLinkedIn_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetCachedLinkedIn'
+type MockStore_SetCachedLinkedIn_Call struct {
+	*mock.Call
+}
+
+// SetCachedLinkedIn is a helper method to define mock.On call
+//   - ctx context.Context
+//   - domain string
+//   - data []byte
+//   - ttl time.Duration
+func (_e *MockStore_Expecter) SetCachedLinkedIn(ctx interface{}, domain interface{}, data interface{}, ttl interface{}) *MockStore_SetCachedLinkedIn_Call {
+	return &MockStore_SetCachedLinkedIn_Call{Call: _e.mock.On("SetCachedLinkedIn", ctx, domain, data, ttl)}
+}
+
+func (_c *MockStore_SetCachedLinkedIn_Call) Run(run func(ctx context.Context, domain string, data []byte, ttl time.Duration)) *MockStore_SetCachedLinkedIn_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].([]byte), args[3].(time.Duration))
+	})
+	return _c
+}
+
+func (_c *MockStore_SetCachedLinkedIn_Call) Return(_a0 error) *MockStore_SetCachedLinkedIn_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStore_SetCachedLinkedIn_Call) RunAndReturn(run func(context.Context, string, []byte, time.Duration) error) *MockStore_SetCachedLinkedIn_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockStore creates a new instance of MockStore. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockStore(t interface {

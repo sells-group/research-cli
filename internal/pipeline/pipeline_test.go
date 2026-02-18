@@ -85,6 +85,8 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 		ExpiresAt: time.Now().Add(24 * time.Hour),
 	}, nil)
 	st.On("UpdateRunResult", mock.Anything, "run-001", mock.AnythingOfType("*model.RunResult")).Return(nil)
+	st.On("GetCachedLinkedIn", mock.Anything, "acme.com").Return(nil, nil)
+	st.On("SetCachedLinkedIn", mock.Anything, "acme.com", mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	// Scrape chain — for scrape phase (external sources) and LinkedIn.
 	s := scrapemocks.NewMockScraper(t)

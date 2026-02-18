@@ -180,7 +180,8 @@ func TestNewClient_Defaults(t *testing.T) {
 	assert.Equal(t, "my-key", hc.apiKey)
 	assert.Equal(t, defaultBaseURL, hc.baseURL)
 	assert.Equal(t, defaultModel, hc.model)
-	assert.Equal(t, http.DefaultClient, hc.http)
+	assert.NotNil(t, hc.http)
+	assert.NotNil(t, hc.http.Transport)
 }
 
 func TestErrorResponseIncludesBody(t *testing.T) {

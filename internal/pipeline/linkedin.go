@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
@@ -12,6 +14,7 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/scrape"
+	"github.com/sells-group/research-cli/internal/store"
 	"github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/perplexity"
 )
@@ -53,10 +56,39 @@ If a field cannot be determined, use an empty string.
 Research data:
 %s`
 
+// linkedInCacheTTL is the default TTL for cached LinkedIn data.
+const linkedInCacheTTL = 7 * 24 * time.Hour // 7 days
+
+// extractDomain returns the bare domain from a company URL for cache keying.
+func extractDomain(companyURL string) string {
+	u, err := url.Parse(companyURL)
+	if err != nil || u.Host == "" {
+		return companyURL
+	}
+	return strings.TrimPrefix(u.Host, "www.")
+}
+
 // LinkedInPhase implements Phase 1C: chain-first LinkedIn lookup with Perplexity fallback.
-func LinkedInPhase(ctx context.Context, company model.Company, chain *scrape.Chain, pplxClient perplexity.Client, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*LinkedInData, *model.TokenUsage, error) {
+// Results are cached by domain with a 7-day TTL to avoid redundant API calls on re-runs.
+func LinkedInPhase(ctx context.Context, company model.Company, chain *scrape.Chain, pplxClient perplexity.Client, aiClient anthropic.Client, aiCfg config.AnthropicConfig, st store.Store) (*LinkedInData, *model.TokenUsage, error) {
 	log := zap.L().With(zap.String("company", company.Name), zap.String("phase", "1c_linkedin"))
 	usage := &model.TokenUsage{}
+
+	// Check cache first.
+	domain := extractDomain(company.URL)
+	if st != nil {
+		cached, cacheErr := st.GetCachedLinkedIn(ctx, domain)
+		if cacheErr != nil {
+			log.Debug("linkedin: cache lookup failed", zap.Error(cacheErr))
+		}
+		if cached != nil {
+			var data LinkedInData
+			if err := json.Unmarshal(cached, &data); err == nil {
+				log.Info("linkedin: using cached result", zap.String("domain", domain))
+				return &data, usage, nil
+			}
+		}
+	}
 
 	// Step 1: Try scrape chain for LinkedIn page.
 	linkedInURL := buildLinkedInURL(company.Name)
@@ -129,6 +161,15 @@ func LinkedInPhase(ctx context.Context, company model.Company, chain *scrape.Cha
 	// Fill in LinkedIn URL if not extracted.
 	if data.LinkedInURL == "" {
 		data.LinkedInURL = linkedInURL
+	}
+
+	// Cache the result.
+	if st != nil {
+		if cacheData, marshalErr := json.Marshal(&data); marshalErr == nil {
+			if cacheErr := st.SetCachedLinkedIn(ctx, domain, cacheData, linkedInCacheTTL); cacheErr != nil {
+				log.Debug("linkedin: failed to cache result", zap.Error(cacheErr))
+			}
+		}
 	}
 
 	return &data, usage, nil

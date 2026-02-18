@@ -17,17 +17,13 @@ import (
 	"github.com/sells-group/research-cli/pkg/anthropic"
 )
 
-const classifyPrompt = `Classify the following web page into exactly one of these categories:
-homepage, about, services, products, pricing, careers, contact, team, blog, news, faq, testimonials, case_studies, partners, legal, investors, other
+const classifySystemPrompt = `Classify web pages into exactly one of these categories: homepage, about, services, products, pricing, careers, contact, team, blog, news, faq, testimonials, case_studies, partners, legal, investors, other. Respond with a valid JSON object: {"page_type": "<category>", "confidence": <0.0-1.0>}`
 
-URL: %s
+const classifyUserPrompt = `URL: %s
 Title: %s
 
 Page content (first 2000 chars):
-%s
-
-Respond with a valid JSON object:
-{"page_type": "<category>", "confidence": <0.0-1.0>}`
+%s`
 
 // externalPrefixToPageType maps title prefixes from scrape.go to page types.
 // Pages with these prefixes are auto-classified without an LLM call.
@@ -163,6 +159,24 @@ func ClassifyPhase(ctx context.Context, pages []model.CrawledPage, aiClient anth
 			continue
 		}
 
+		// 3. Tiny page filter: pages with <100 chars content (error pages,
+		// redirects, empty stubs) waste classification tokens and add noise.
+		if len(strings.TrimSpace(page.Markdown)) < 100 {
+			cp := model.ClassifiedPage{
+				CrawledPage: page,
+				Classification: model.PageClassification{
+					PageType:   model.PageTypeOther,
+					Confidence: 1.0,
+				},
+			}
+			index[model.PageTypeOther] = append(index[model.PageTypeOther], cp)
+			zap.L().Debug("classify: auto-classified tiny page as other",
+				zap.String("url", page.URL),
+				zap.Int("content_len", len(page.Markdown)),
+			)
+			continue
+		}
+
 		llmPages = append(llmPages, page)
 	}
 
@@ -170,7 +184,12 @@ func ClassifyPhase(ctx context.Context, pages []model.CrawledPage, aiClient anth
 		return index, totalUsage, nil
 	}
 
+	// Deduplicate pages with identical content (different URLs, same body).
+	// Keeps the first URL encountered; duplicates inherit the winner's classification.
+	llmPages, dupes := deduplicatePages(llmPages)
+
 	// Build batch request items for LLM classification.
+	systemBlocks := anthropic.BuildCachedSystemBlocks(classifySystemPrompt)
 	var batchItems []anthropic.BatchRequestItem
 	for i, page := range llmPages {
 		content := page.Markdown
@@ -178,12 +197,13 @@ func ClassifyPhase(ctx context.Context, pages []model.CrawledPage, aiClient anth
 			content = content[:2000]
 		}
 
-		prompt := fmt.Sprintf(classifyPrompt, page.URL, page.Title, content)
+		prompt := fmt.Sprintf(classifyUserPrompt, page.URL, page.Title, content)
 		batchItems = append(batchItems, anthropic.BatchRequestItem{
 			CustomID: fmt.Sprintf("classify-%d", i),
 			Params: anthropic.MessageRequest{
 				Model:     aiCfg.HaikuModel,
 				MaxTokens: 128,
+				System:    systemBlocks,
 				Messages: []anthropic.Message{
 					{Role: "user", Content: prompt},
 				},
@@ -197,7 +217,7 @@ func ClassifyPhase(ctx context.Context, pages []model.CrawledPage, aiClient anth
 	var err error
 	threshold := aiCfg.SmallBatchThreshold
 	if threshold <= 0 {
-		threshold = 3
+		threshold = 8
 	}
 	if aiCfg.NoBatch || len(batchItems) <= threshold {
 		llmIndex, llmUsage, err = classifyDirect(ctx, llmPages, batchItems, aiClient, totalUsage)
@@ -214,6 +234,28 @@ func ClassifyPhase(ctx context.Context, pages []model.CrawledPage, aiClient anth
 	}
 	if llmUsage != nil {
 		totalUsage = llmUsage
+	}
+
+	// Re-attach deduplicated pages: give them the same classification as
+	// their content twin (looked up by URL in the merged index).
+	if len(dupes) > 0 {
+		urlToClassification := make(map[string]model.PageClassification)
+		for _, classified := range llmIndex {
+			for _, cp := range classified {
+				urlToClassification[cp.URL] = cp.Classification
+			}
+		}
+		for originalURL, dupPages := range dupes {
+			if cls, ok := urlToClassification[originalURL]; ok {
+				for _, dp := range dupPages {
+					cp := model.ClassifiedPage{
+						CrawledPage:    dp,
+						Classification: cls,
+					}
+					index[cls.PageType] = append(index[cls.PageType], cp)
+				}
+			}
+		}
 	}
 
 	return index, totalUsage, nil
@@ -374,4 +416,38 @@ func parseClassification(text string) model.PageClassification {
 		PageType:   pt,
 		Confidence: result.Confidence,
 	}
+}
+
+// deduplicatePages removes pages with identical markdown content (by hash),
+// keeping the first occurrence. Returns the unique pages and a map from the
+// kept page's URL to the list of duplicate CrawledPages (which should inherit
+// the same classification later).
+func deduplicatePages(pages []model.CrawledPage) ([]model.CrawledPage, map[string][]model.CrawledPage) {
+	seen := make(map[string]string) // hash → first URL
+	dupes := make(map[string][]model.CrawledPage)
+	var unique []model.CrawledPage
+
+	for _, p := range pages {
+		h := contentHash(p.Markdown)
+		if firstURL, ok := seen[h]; ok {
+			dupes[firstURL] = append(dupes[firstURL], p)
+			zap.L().Debug("classify: deduplicated page",
+				zap.String("url", p.URL),
+				zap.String("duplicate_of", firstURL),
+			)
+			continue
+		}
+		seen[h] = p.URL
+		unique = append(unique, p)
+	}
+
+	if removed := len(pages) - len(unique); removed > 0 {
+		zap.L().Info("classify: deduplicated pages before classification",
+			zap.Int("original", len(pages)),
+			zap.Int("unique", len(unique)),
+			zap.Int("duplicates_removed", removed),
+		)
+	}
+
+	return unique, dupes
 }

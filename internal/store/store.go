@@ -33,6 +33,10 @@ type Store interface {
 	SetCachedCrawl(ctx context.Context, companyURL string, pages []model.CrawledPage, ttl time.Duration) error
 	DeleteExpiredCrawls(ctx context.Context) (int, error)
 
+	// LinkedIn cache
+	GetCachedLinkedIn(ctx context.Context, domain string) ([]byte, error)
+	SetCachedLinkedIn(ctx context.Context, domain string, data []byte, ttl time.Duration) error
+
 	// Lifecycle
 	Migrate(ctx context.Context) error
 	Close() error

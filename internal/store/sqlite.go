@@ -24,9 +24,10 @@ func NewSQLite(dsn string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, eris.Wrap(err, "sqlite: open")
 	}
-	// Serialize all access through a single connection to prevent SQLITE_BUSY
-	// errors during concurrent Phase 1 fan-out (1A/1B/1C/1D errgroup).
-	db.SetMaxOpenConns(1)
+	// WAL mode supports concurrent readers with a single writer.
+	// Allow multiple connections for parallel Phase 1 fan-out (1A/1B/1C/1D).
+	// busy_timeout handles writer contention.
+	db.SetMaxOpenConns(4)
 
 	for _, pragma := range []string{
 		"PRAGMA journal_mode=WAL",
@@ -73,6 +74,17 @@ CREATE INDEX IF NOT EXISTS idx_runs_company ON runs(company);
 CREATE INDEX IF NOT EXISTS idx_run_phases_run_id ON run_phases(run_id);
 CREATE INDEX IF NOT EXISTS idx_crawl_cache_company_url ON crawl_cache(company_url);
 CREATE INDEX IF NOT EXISTS idx_crawl_cache_expires_at ON crawl_cache(expires_at);
+
+CREATE TABLE IF NOT EXISTS linkedin_cache (
+	id         TEXT PRIMARY KEY,
+	domain     TEXT NOT NULL,
+	data       TEXT NOT NULL,
+	cached_at  DATETIME NOT NULL DEFAULT (datetime('now')),
+	expires_at DATETIME NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_linkedin_cache_domain ON linkedin_cache(domain);
+CREATE INDEX IF NOT EXISTS idx_linkedin_cache_expires_at ON linkedin_cache(expires_at);
 `
 
 func (s *SQLiteStore) Migrate(ctx context.Context) error {
@@ -263,6 +275,36 @@ func (s *SQLiteStore) SetCachedCrawl(ctx context.Context, companyURL string, pag
 		id, companyURL, string(pagesJSON), now, expiresAt,
 	)
 	return eris.Wrap(err, "sqlite: set cached crawl")
+}
+
+func (s *SQLiteStore) GetCachedLinkedIn(ctx context.Context, domain string) ([]byte, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT data FROM linkedin_cache
+		 WHERE domain = ? AND expires_at > datetime('now')
+		 ORDER BY cached_at DESC LIMIT 1`,
+		domain,
+	)
+	var data string
+	err := row.Scan(&data)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, eris.Wrap(err, "sqlite: get cached linkedin")
+	}
+	return []byte(data), nil
+}
+
+func (s *SQLiteStore) SetCachedLinkedIn(ctx context.Context, domain string, data []byte, ttl time.Duration) error {
+	id := uuid.New().String()
+	now := time.Now().UTC()
+	expiresAt := now.Add(ttl)
+
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO linkedin_cache (id, domain, data, cached_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
+		id, domain, string(data), now, expiresAt,
+	)
+	return eris.Wrap(err, "sqlite: set cached linkedin")
 }
 
 func (s *SQLiteStore) DeleteExpiredCrawls(ctx context.Context) (int, error) {

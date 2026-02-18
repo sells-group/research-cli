@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/rotisserie/eris"
 )
@@ -121,7 +122,13 @@ func NewClient(apiKey string, opts ...Option) Client {
 	c := &httpClient{
 		apiKey:  apiKey,
 		baseURL: defaultBaseURL,
-		http:    http.DefaultClient,
+		http: &http.Client{
+			Timeout: 60 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConnsPerHost: 20,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
 	}
 	for _, opt := range opts {
 		opt(c)

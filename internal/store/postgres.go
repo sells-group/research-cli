@@ -64,6 +64,17 @@ CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 CREATE INDEX IF NOT EXISTS idx_run_phases_run_id ON run_phases(run_id);
 CREATE INDEX IF NOT EXISTS idx_crawl_cache_company_url ON crawl_cache(company_url);
 CREATE INDEX IF NOT EXISTS idx_crawl_cache_expires_at ON crawl_cache(expires_at);
+
+CREATE TABLE IF NOT EXISTS linkedin_cache (
+	id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+	domain     TEXT NOT NULL,
+	data       JSONB NOT NULL,
+	cached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+	expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_linkedin_cache_domain ON linkedin_cache(domain);
+CREATE INDEX IF NOT EXISTS idx_linkedin_cache_expires_at ON linkedin_cache(expires_at);
 `
 
 func (s *PostgresStore) Migrate(ctx context.Context) error {
@@ -299,6 +310,35 @@ func (s *PostgresStore) SetCachedCrawl(ctx context.Context, companyURL string, p
 		id, companyURL, pagesJSON, now, expiresAt,
 	)
 	return eris.Wrap(err, "postgres: set cached crawl")
+}
+
+func (s *PostgresStore) GetCachedLinkedIn(ctx context.Context, domain string) ([]byte, error) {
+	var data []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT data FROM linkedin_cache
+		 WHERE domain = $1 AND expires_at > now()
+		 ORDER BY cached_at DESC LIMIT 1`,
+		domain,
+	).Scan(&data)
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return nil, nil
+		}
+		return nil, eris.Wrap(err, "postgres: get cached linkedin")
+	}
+	return data, nil
+}
+
+func (s *PostgresStore) SetCachedLinkedIn(ctx context.Context, domain string, data []byte, ttl time.Duration) error {
+	id := uuid.New().String()
+	now := time.Now().UTC()
+	expiresAt := now.Add(ttl)
+
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO linkedin_cache (id, domain, data, cached_at, expires_at) VALUES ($1, $2, $3, $4, $5)`,
+		id, domain, data, now, expiresAt,
+	)
+	return eris.Wrap(err, "postgres: set cached linkedin")
 }
 
 func (s *PostgresStore) DeleteExpiredCrawls(ctx context.Context) (int, error) {
