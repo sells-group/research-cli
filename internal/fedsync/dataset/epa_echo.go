@@ -3,6 +3,7 @@ package dataset
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rotisserie/eris"
@@ -12,7 +13,7 @@ import (
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
-const epaEchoURL = "https://echo.epa.gov/files/echodownloads/frs_downloads/NATIONAL_FACILITY_FILE.CSV.zip"
+const epaEchoURL = "https://ordsext.epa.gov/FLA/www3/state_files/national_single.zip"
 
 // EPAECHO syncs EPA ECHO facility data.
 type EPAECHO struct{}
@@ -35,35 +36,65 @@ func (d *EPAECHO) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tem
 		return nil, eris.Wrap(err, "epa_echo: download")
 	}
 
-	extractedPath, err := fetcher.ExtractZIPSingle(zipPath, tempDir)
+	extractDir := filepath.Join(tempDir, "epa_extract")
+	files, err := fetcher.ExtractZIP(zipPath, extractDir)
 	if err != nil {
 		return nil, eris.Wrap(err, "epa_echo: extract zip")
 	}
 
-	csvFile, err := openFileForRead(extractedPath)
+	// Find the first CSV file in the extracted contents
+	var csvPath string
+	for _, fp := range files {
+		if strings.HasSuffix(strings.ToLower(fp), ".csv") {
+			csvPath = fp
+			break
+		}
+	}
+	if csvPath == "" {
+		return nil, eris.New("epa_echo: no CSV found in ZIP")
+	}
+
+	csvFile, err := openFileForRead(csvPath)
 	if err != nil {
 		return nil, eris.Wrap(err, "epa_echo: open csv")
 	}
 	defer csvFile.Close()
 
-	rowCh, errCh := fetcher.StreamCSV(ctx, csvFile, fetcher.CSVOptions{HasHeader: true})
+	rowCh, errCh := fetcher.StreamCSV(ctx, csvFile, fetcher.CSVOptions{HasHeader: false})
 
 	var rows [][]any
 	const batchSize = 5000
 	var totalRows int64
 
+	// Read the header row to build column index (case-insensitive via mapColumns)
+	var colIdx map[string]int
+	firstRow := true
+
 	for row := range rowCh {
-		if len(row) < 9 {
+		if firstRow {
+			// Strip quotes from header fields before mapping
+			cleaned := make([]string, len(row))
+			for i, col := range row {
+				cleaned[i] = trimQuotes(col)
+			}
+			colIdx = mapColumns(cleaned)
+			firstRow = false
 			continue
 		}
+
+		regID := trimQuotes(getCol(row, colIdx, "registry_id"))
+		if regID == "" {
+			continue
+		}
+
 		rows = append(rows, []any{
-			trimQuotes(row[0]),        // registry_id
-			trimQuotes(row[1]),        // fac_name
-			trimQuotes(row[2]),        // fac_city
-			trimQuotes(row[3]),        // fac_state
-			trimQuotes(row[4]),        // fac_zip
-			parseFloat64Or(row[7], 0), // fac_lat
-			parseFloat64Or(row[8], 0), // fac_long
+			regID,
+			trimQuotes(getCol(row, colIdx, "primary_name")),
+			trimQuotes(getCol(row, colIdx, "city_name")),
+			trimQuotes(getCol(row, colIdx, "state_code")),
+			trimQuotes(getCol(row, colIdx, "postal_code")),
+			parseFloat64Or(getCol(row, colIdx, "latitude83"), 0),
+			parseFloat64Or(getCol(row, colIdx, "longitude83"), 0),
 		})
 
 		if len(rows) >= batchSize {
@@ -96,5 +127,6 @@ func (d *EPAECHO) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tem
 		totalRows += n
 	}
 
+	log.Info("epa_echo sync complete", zap.Int64("rows", totalRows))
 	return &SyncResult{RowsSynced: totalRows}, nil
 }

@@ -2,9 +2,11 @@ package dataset
 
 import (
 	"context"
-	"fmt"
+	"encoding/csv"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rotisserie/eris"
@@ -16,9 +18,14 @@ import (
 	"github.com/sells-group/research-cli/internal/ocr"
 )
 
-const advPart2BatchSize = 100
+const (
+	advPart2BatchSize = 100
+	advPart2FirmLimit = 500
+)
 
 // ADVPart2 syncs SEC ADV Part 2 brochure PDFs → OCR → text.
+// Downloads the monthly bulk brochure ZIP, extracts mapping CSV + PDFs,
+// OCRs each PDF and upserts into adv_brochures.
 type ADVPart2 struct {
 	cfg *config.Config
 }
@@ -40,29 +47,60 @@ func (d *ADVPart2) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, te
 		return nil, eris.Wrap(err, "adv_part2: create OCR extractor")
 	}
 
-	// Query adv_firms for CRD numbers that need brochure updates.
-	rows, err := pool.Query(ctx,
-		`SELECT crd_number FROM fed_data.adv_firms
-		 WHERE crd_number NOT IN (SELECT crd_number FROM fed_data.adv_brochures)
-		 ORDER BY crd_number LIMIT 500`)
+	// Fetch IAPD reports metadata to find the latest brochure ZIP URL.
+	meta, err := fetchFOIAMetadata(ctx, f)
 	if err != nil {
-		return nil, eris.Wrap(err, "adv_part2: query adv_firms")
+		return nil, eris.Wrap(err, "adv_part2: fetch FOIA metadata")
 	}
-	defer rows.Close()
 
-	var crdNumbers []int
-	for rows.Next() {
-		var crd int
-		if err := rows.Scan(&crd); err != nil {
-			return nil, eris.Wrap(err, "adv_part2: scan crd_number")
+	url, err := latestFileURL(meta.ADVBrochures, "advBrochures")
+	if err != nil {
+		return nil, eris.Wrap(err, "adv_part2: resolve brochure URL")
+	}
+	log.Info("downloading brochure ZIP", zap.String("url", url))
+
+	zipPath := filepath.Join(tempDir, "adv_brochures.zip")
+	if _, err := f.DownloadToFile(ctx, url, zipPath); err != nil {
+		return nil, eris.Wrap(err, "adv_part2: download brochure ZIP")
+	}
+	defer os.Remove(zipPath)
+
+	// Extract ZIP to temp dir.
+	extractDir := filepath.Join(tempDir, "adv_brochures_extract")
+	if err := os.MkdirAll(extractDir, 0o755); err != nil {
+		return nil, eris.Wrap(err, "adv_part2: create extract dir")
+	}
+	defer os.RemoveAll(extractDir)
+
+	extractedFiles, err := fetcher.ExtractZIP(zipPath, extractDir)
+	if err != nil {
+		return nil, eris.Wrap(err, "adv_part2: extract brochure ZIP")
+	}
+
+	// Find mapping CSV.
+	var mappingPath string
+	for _, fp := range extractedFiles {
+		base := strings.ToLower(filepath.Base(fp))
+		if strings.Contains(base, "mapping") && strings.HasSuffix(base, ".csv") {
+			mappingPath = fp
+			break
 		}
-		crdNumbers = append(crdNumbers, crd)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, eris.Wrap(err, "adv_part2: iterate crd_numbers")
+	if mappingPath == "" {
+		return nil, eris.New("adv_part2: mapping CSV not found in brochure ZIP")
 	}
 
-	log.Info("processing ADV Part 2 brochures", zap.Int("firms", len(crdNumbers)))
+	// Parse mapping CSV.
+	mappings, err := parseBrochureMapping(mappingPath)
+	if err != nil {
+		return nil, eris.Wrap(err, "adv_part2: parse mapping CSV")
+	}
+	log.Info("parsed brochure mapping", zap.Int("entries", len(mappings)))
+
+	// Limit to first N firms to avoid extremely long OCR runs.
+	if len(mappings) > advPart2FirmLimit {
+		mappings = mappings[:advPart2FirmLimit]
+	}
 
 	columns := []string{"crd_number", "brochure_id", "filing_date", "text_content", "extracted_at"}
 	conflictKeys := []string{"crd_number", "brochure_id"}
@@ -70,33 +108,28 @@ func (d *ADVPart2) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, te
 	var batch [][]any
 	var totalRows int64
 
-	for _, crd := range crdNumbers {
+	for _, m := range mappings {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
 
-		// SEC ADV brochure URL pattern from IAPD system.
-		brochureURL := fmt.Sprintf("https://advfm.sec.gov/IAPD/Content/Common/crd_ia_doc.aspx?ESSION=brochure&ESSION_CRD=%d", crd)
-		brochureID := fmt.Sprintf("brochure_%d", crd)
-
-		pdfPath := filepath.Join(tempDir, fmt.Sprintf("adv_part2_%d.pdf", crd))
-		if _, err := f.DownloadToFile(ctx, brochureURL, pdfPath); err != nil {
-			log.Debug("skipping brochure download", zap.Int("crd", crd), zap.Error(err))
+		// Find the PDF file in the extracted directory.
+		pdfPath := findPDFInExtracted(extractDir, m.PDFFileName)
+		if pdfPath == "" {
+			log.Debug("PDF not found in extract", zap.String("pdf", m.PDFFileName), zap.Int("crd", m.CRDNumber))
 			continue
 		}
 
 		text, err := ext.ExtractText(ctx, pdfPath)
 		if err != nil {
-			log.Debug("skipping brochure OCR", zap.Int("crd", crd), zap.Error(err))
-			_ = os.Remove(pdfPath)
+			log.Debug("skipping brochure OCR", zap.Int("crd", m.CRDNumber), zap.Error(err))
 			continue
 		}
-		_ = os.Remove(pdfPath)
 
 		now := time.Now()
-		batch = append(batch, []any{crd, brochureID, now.Format("2006-01-02"), text, now})
+		batch = append(batch, []any{m.CRDNumber, m.BrochureID, m.DateFiled, text, now})
 
 		if len(batch) >= advPart2BatchSize {
 			n, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{
@@ -126,6 +159,101 @@ func (d *ADVPart2) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, te
 
 	return &SyncResult{
 		RowsSynced: totalRows,
-		Metadata:   map[string]any{"firms_processed": len(crdNumbers)},
+		Metadata:   map[string]any{"brochures_processed": len(mappings)},
 	}, nil
 }
+
+// brochureMapping represents one row from the brochure mapping CSV.
+type brochureMapping struct {
+	CRDNumber   int
+	BrochureID  string
+	DateFiled   string
+	PDFFileName string
+}
+
+// parseBrochureMapping reads the mapping CSV from the brochure ZIP.
+func parseBrochureMapping(path string) ([]brochureMapping, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, eris.Wrap(err, "open mapping CSV")
+	}
+	defer f.Close()
+
+	reader := csv.NewReader(f)
+	reader.LazyQuotes = true
+	reader.TrimLeadingSpace = true
+	reader.FieldsPerRecord = -1
+
+	header, err := reader.Read()
+	if err != nil {
+		return nil, eris.Wrap(err, "read mapping header")
+	}
+	colIdx := mapColumns(header)
+
+	var result []brochureMapping
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			continue
+		}
+
+		crd := parseIntOr(trimQuotes(getCol(record, colIdx, "crdnumber")), 0)
+		if crd == 0 {
+			continue
+		}
+
+		brochureID := trimQuotes(getCol(record, colIdx, "brochureid"))
+		if brochureID == "" {
+			continue
+		}
+
+		pdfFileName := trimQuotes(getCol(record, colIdx, "pdffilename"))
+		if pdfFileName == "" {
+			continue
+		}
+
+		dateFiled := trimQuotes(getCol(record, colIdx, "datefiled"))
+
+		result = append(result, brochureMapping{
+			CRDNumber:   crd,
+			BrochureID:  brochureID,
+			DateFiled:   dateFiled,
+			PDFFileName: pdfFileName,
+		})
+	}
+
+	return result, nil
+}
+
+// findPDFInExtracted searches for a PDF file in the extracted directory tree.
+func findPDFInExtracted(dir, pdfName string) string {
+	if pdfName == "" {
+		return ""
+	}
+
+	// Try direct path first.
+	direct := filepath.Join(dir, pdfName)
+	if _, err := os.Stat(direct); err == nil {
+		return direct
+	}
+
+	// Walk directory to find the file by base name.
+	target := strings.ToLower(filepath.Base(pdfName))
+	var found string
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if strings.ToLower(filepath.Base(path)) == target {
+			found = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+
+	return found
+}
+

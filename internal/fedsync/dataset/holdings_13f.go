@@ -2,6 +2,7 @@ package dataset
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -67,7 +68,7 @@ type f13Holding struct {
 // eftsSearchResult is the response from the EDGAR full-text search API.
 type eftsSearchResult struct {
 	Hits struct {
-		Total int `json:"total"`
+		Total eftsTotal `json:"total"`
 		Hits  []struct {
 			Source struct {
 				CIK             string `json:"entity_cik"`
@@ -79,6 +80,24 @@ type eftsSearchResult struct {
 			} `json:"_source"`
 		} `json:"hits"`
 	} `json:"hits"`
+}
+
+// eftsTotal handles Elasticsearch 7+ total format: {"value": N, "relation": "eq"}.
+type eftsTotal struct {
+	Value int `json:"value"`
+}
+
+func (t *eftsTotal) UnmarshalJSON(data []byte) error {
+	// Try object format first: {"value": N, "relation": "..."}
+	var obj struct {
+		Value int `json:"value"`
+	}
+	if err := json.Unmarshal(data, &obj); err == nil {
+		t.Value = obj.Value
+		return nil
+	}
+	// Fall back to plain int
+	return json.Unmarshal(data, &t.Value)
 }
 
 func (d *Holdings13F) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
@@ -114,7 +133,7 @@ func (d *Holdings13F) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher,
 		return nil, eris.Wrap(err, "holdings_13f: decode search results")
 	}
 
-	log.Info("found 13F filings", zap.Int("total", searchResult.Hits.Total))
+	log.Info("found 13F filings", zap.Int("total", searchResult.Hits.Total.Value))
 
 	var totalRows int64
 
@@ -176,7 +195,7 @@ func (d *Holdings13F) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher,
 		RowsSynced: totalRows,
 		Metadata: map[string]any{
 			"period":        period,
-			"filings_found": searchResult.Hits.Total,
+			"filings_found": searchResult.Hits.Total.Value,
 		},
 	}, nil
 }

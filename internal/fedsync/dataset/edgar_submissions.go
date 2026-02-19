@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	submissionsZipURL    = "https://data.sec.gov/submissions/submissions.zip"
+	submissionsZipURL    = "https://www.sec.gov/Archives/edgar/daily-index/bulkdata/submissions.zip"
 	submissionsBatchSize = 10000
 )
 
@@ -43,17 +43,25 @@ func (d *EDGARSubmissions) ShouldRun(now time.Time, lastSync *time.Time) bool {
 
 // submissionJSON represents a single company submission JSON file from the bulk download.
 type submissionJSON struct {
-	CIK             json.Number   `json:"cik"`
-	EntityType      string        `json:"entityType"`
-	SIC             string        `json:"sic"`
-	SICDescription  string        `json:"sicDescription"`
-	Name            string        `json:"name"`
-	StateOfInc      string        `json:"stateOfIncorporation"`
-	StateOfBusiness string        `json:"addresses,omitempty"`
-	EIN             string        `json:"ein"`
-	Tickers         []string      `json:"tickers"`
-	Exchanges       []string      `json:"exchanges"`
-	RecentFilings   recentFilings `json:"filings"`
+	CIK            string           `json:"cik"`
+	EntityType     string           `json:"entityType"`
+	SIC            string           `json:"sic"`
+	SICDescription string           `json:"sicDescription"`
+	Name           string           `json:"name"`
+	StateOfInc     string           `json:"stateOfIncorporation"`
+	Addresses      submissionAddrs  `json:"addresses"`
+	EIN            string           `json:"ein"`
+	Tickers        []string         `json:"tickers"`
+	Exchanges      []string         `json:"exchanges"`
+	RecentFilings  recentFilings    `json:"filings"`
+}
+
+type submissionAddrs struct {
+	Business submissionAddr `json:"business"`
+}
+
+type submissionAddr struct {
+	StateOrCountry string `json:"stateOrCountry"`
 }
 
 type recentFilings struct {
@@ -140,7 +148,7 @@ func (d *EDGARSubmissions) Sync(ctx context.Context, pool db.Pool, f fetcher.Fet
 				return nil
 			}
 
-			cik := strings.TrimLeft(sub.CIK.String(), "0")
+			cik := strings.TrimLeft(sub.CIK, "0")
 			if cik == "" || sub.Name == "" {
 				return nil
 			}
@@ -150,11 +158,9 @@ func (d *EDGARSubmissions) Sync(ctx context.Context, pool db.Pool, f fetcher.Fet
 				cik = cik[:10]
 			}
 
-			stateOfBusiness := ""
-
 			entityRow := []any{
 				cik, sub.Name, sub.EntityType, sub.SIC, sub.SICDescription,
-				sub.StateOfInc, stateOfBusiness, sub.EIN, sub.Tickers, sub.Exchanges,
+				sub.StateOfInc, sub.Addresses.Business.StateOrCountry, sub.EIN, sub.Tickers, sub.Exchanges,
 			}
 
 			var filingRows [][]any
@@ -206,6 +212,19 @@ func (d *EDGARSubmissions) Sync(ctx context.Context, pool db.Pool, f fetcher.Fet
 		}
 		totalEntities += n
 	}
+
+	// Deduplicate filings by accession number (multiple companies can reference the same filing).
+	seen := make(map[string]struct{}, len(filingBatch))
+	deduped := make([][]any, 0, len(filingBatch))
+	for _, row := range filingBatch {
+		acc := row[0].(string)
+		if _, ok := seen[acc]; ok {
+			continue
+		}
+		seen[acc] = struct{}{}
+		deduped = append(deduped, row)
+	}
+	filingBatch = deduped
 
 	// Upsert all collected filings in batches.
 	for i := 0; i < len(filingBatch); i += submissionsBatchSize {

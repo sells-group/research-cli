@@ -39,58 +39,123 @@ func createMultiZIP(t *testing.T, zipPath string, files map[string][]byte) {
 }
 
 // --------------------------------------------------------------------------
-// ADV Part 1 - additional Sync coverage
+// ADV Part 1 - Sync coverage (weekly FOIA)
 // --------------------------------------------------------------------------
 
-func TestADVPart1_Sync_DownloadError(t *testing.T) {
+func TestADVPart1_Sync_MetadataFetchFails(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		Return(int64(0), errors.New("network error"))
+	// Metadata fetch fails.
+	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "reports_metadata.json")
+	})).Return(nil, errors.New("connection refused"))
 
 	ds := &ADVPart1{}
 	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "download CSV")
+	assert.Contains(t, err.Error(), "FOIA metadata")
 }
 
-func TestADVPart1_Sync_AllSubtables(t *testing.T) {
-	// Tests a record with all sub-tables populated: fund, aum, owner.
+func TestADVPart1_Sync_DownloadFails(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	f := fetchermocks.NewMockFetcher(t)
+	// Metadata fetch succeeds.
+	meta := foiaReportsMetadata{
+		ADVFilingData: []foiaFileEntry{
+			{FileName: "ADV_Filing_Data_20260101_20260131.zip", Year: "2026", UploadedOn: "2026-02-02 14:00:00"},
+		},
+	}
+	f.EXPECT().Download(mock.Anything, mock.Anything).Return(foiaMetadataBody(t, meta), nil)
+	// ZIP download fails.
+	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
+		Return(int64(0), errors.New("404 not found"))
+
+	ds := &ADVPart1{}
+	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "download")
+}
+
+func TestADVPart1_Sync_WithFOIAZip(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
 
-	csvContent := "crd_number,firm_name,sec_number,city,state,country,website,aum,num_accounts,num_employees,filing_date,report_date,raum,fund_id,fund_name,fund_type,gross_asset_value,net_asset_value,owner_name,owner_type,ownership_pct,is_control\n" +
-		"12345,Acme Advisors,801-12345,New York,NY,US,https://acme.com,5000000,100,25,2024-06-01,2024-03-31,4500000,FUND001,Acme Growth,Hedge Fund,10000000,9500000,John Smith,INDIVIDUAL,75.5,Y\n"
+	// Historical filing-level format (ERA_ADV_Base) — columns: FilingID, 1A, 1D, 1E1, 1F1-City, 1F1-State, 1F1-Country, DateSubmitted.
+	csvContent := "FilingID,1A,1D,1E1,1F1-City,1F1-State,1F1-Country,5F2C,5F2F,5H,DateSubmitted\n" +
+		"2041401,Acme Advisors,801-12345,12345,New York,NY,United States,5000000,100,11-25,03/15/2025\n"
 
+	// Metadata fetch succeeds.
+	meta := foiaReportsMetadata{
+		ADVFilingData: []foiaFileEntry{
+			{FileName: "ADV_Filing_Data_20250301_20250331.zip", Year: "2025", UploadedOn: "2025-04-02 10:00:00"},
+		},
+	}
+	f.EXPECT().Download(mock.Anything, mock.Anything).Return(foiaMetadataBody(t, meta), nil)
+
+	// ZIP download succeeds — file must be named ERA_ADV_Base_*.csv.
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, _ string, path string) (int64, error) {
-			return int64(len(csvContent)), os.WriteFile(path, []byte(csvContent), 0o644)
-		})
+		RunAndReturn(mockDownloadToFileZIP(t, "ERA_ADV_Base_20250301_20250331.csv", csvContent)).Once()
 
-	firmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website", "aum", "num_accounts", "num_employees", "filing_date"}
-	aumCols := []string{"crd_number", "report_date", "aum", "raum", "num_accounts"}
-	fundCols := []string{"crd_number", "fund_id", "fund_name", "fund_type", "gross_asset_value", "net_asset_value"}
-	ownerCols := []string{"crd_number", "owner_name", "owner_type", "ownership_pct", "is_control"}
+	firmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website"}
 
 	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 1)
-	expectBulkUpsert(pool, "fed_data.adv_aum", aumCols, 1)
-	expectBulkUpsert(pool, "fed_data.adv_private_funds", fundCols, 1)
-	expectBulkUpsert(pool, "fed_data.adv_owners", ownerCols, 1)
+	expectBulkUpsert(pool, "fed_data.adv_filings", advFilingCols, 1)
 
 	ds := &ADVPart1{}
 	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), result.RowsSynced)
-	assert.Equal(t, int64(1), result.Metadata["aum_records"])
-	assert.Equal(t, int64(1), result.Metadata["funds"])
-	assert.Equal(t, int64(1), result.Metadata["owners"])
+	assert.Equal(t, int64(1), result.Metadata["firms"])
 	assert.NoError(t, pool.ExpectationsWereMet())
+}
+
+func TestADVPart1_Sync_EmptyMetadata(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	f := fetchermocks.NewMockFetcher(t)
+
+	// Metadata returns empty ADVFilingData array.
+	meta := foiaReportsMetadata{ADVFilingData: []foiaFileEntry{}}
+	f.EXPECT().Download(mock.Anything, mock.Anything).Return(foiaMetadataBody(t, meta), nil)
+
+	ds := &ADVPart1{}
+	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no advFilingData entries")
+}
+
+func TestADVPart1_SyncFull_HistoricalFailsContinuesToFOIA(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	f := fetchermocks.NewMockFetcher(t)
+	// Historical Part 1 download fails → SyncFull logs and continues to FOIA months.
+	f.EXPECT().DownloadToFile(mock.Anything, mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "part1.zip")
+	}), mock.Anything).Return(int64(0), errors.New("download failed"))
+
+	// FOIA metadata fetch returns empty → 0 months to process.
+	meta := foiaReportsMetadata{ADVFilingData: []foiaFileEntry{}}
+	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "reports_metadata.json")
+	})).Return(foiaMetadataBody(t, meta), nil)
+
+	ds := &ADVPart1{}
+	result, err := ds.SyncFull(context.Background(), pool, f, t.TempDir())
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.RowsSynced)
 }
 
 // --------------------------------------------------------------------------
@@ -222,7 +287,7 @@ func TestEDGARSubmissions_ParseSubmissionFile_Success(t *testing.T) {
 	sub, err := ds.parseSubmissionFile(jsonPath)
 	require.NoError(t, err)
 	assert.Equal(t, "Test Corp", sub.Name)
-	assert.Equal(t, "9999999", sub.CIK.String())
+	assert.Equal(t, "9999999", sub.CIK)
 }
 
 func TestEDGARSubmissions_ParseSubmissionFile_NotFound(t *testing.T) {
@@ -546,60 +611,58 @@ func TestFormD_Sync_EmptySearchResults(t *testing.T) {
 // IA Compilation - additional Sync coverage
 // --------------------------------------------------------------------------
 
-func TestIACompilation_Sync_DownloadError(t *testing.T) {
+func TestIACompilation_Sync_ManifestUnavailable(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		Return(int64(0), errors.New("network error"))
+
+	// Manifest fetch fails → returns 0 rows with no error.
+	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
+		return strings.Contains(url, "CompilationReports.manifest.json")
+	})).Return(nil, errors.New("connection refused"))
 
 	ds := &IACompilation{cfg: &config.Config{}}
-	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "download XML")
+	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), result.RowsSynced)
+	assert.Equal(t, "manifest_unavailable", result.Metadata["status"])
 }
 
 // --------------------------------------------------------------------------
 // IA Compilation - full Sync flow
 // --------------------------------------------------------------------------
 
-func TestIACompilation_Sync_Success(t *testing.T) {
+func TestIACompilation_ParseAndLoad_XMLParsing(t *testing.T) {
+	// Test the parseAndLoad method directly (Sync is now short-circuited).
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
 
-	f := fetchermocks.NewMockFetcher(t)
-
 	xmlContent := `<?xml version="1.0"?>
-<IaCompilation>
-  <Firm>
-    <CrdNb>12345</CrdNb>
-    <FirmName>Acme Advisors</FirmName>
-    <SecNb>801-12345</SecNb>
-    <MainAddr>
-      <City>New York</City>
-      <StateOrCountry>NY</StateOrCountry>
-      <Country>US</Country>
-    </MainAddr>
-    <WebAddr>https://acme.com</WebAddr>
-    <TotalGrossAssetAmt>5000000</TotalGrossAssetAmt>
-    <TotalNumberOfAccounts>100</TotalNumberOfAccounts>
-    <MostRecentFilingDate>2024-06-01</MostRecentFilingDate>
-  </Firm>
-</IaCompilation>`
+<IAPDFirmSECReport GenOn="2024-06-01">
+  <Firms>
+    <Firm>
+      <Info FirmCrdNb="12345" SECNb="801-12345" BusNm="Acme Advisors"/>
+      <MainAddr City="New York" State="NY" Cntry="US"/>
+      <Filing Dt="2024-06-01"/>
+      <FormInfo><Part1A>
+        <Item1><WebAddrs><WebAddr>https://acme.com</WebAddr></WebAddrs></Item1>
+        <Item5A TtlEmp="0"/>
+        <Item5F Q5F2C="5000000" Q5F2F="100"/>
+      </Part1A></FormInfo>
+    </Firm>
+  </Firms>
+</IAPDFirmSECReport>`
 
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, _ string, path string) (int64, error) {
-			return int64(len(xmlContent)), os.WriteFile(path, []byte(xmlContent), 0o644)
-		})
-
-	iaCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website", "aum", "num_accounts", "filing_date"}
-	expectBulkUpsert(pool, "fed_data.adv_firms", iaCols, 1)
+	iaFirmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website"}
+	iaFilingCols := []string{"crd_number", "filing_date", "aum", "num_accounts", "legal_name", "num_employees", "total_employees", "sec_registered"}
+	expectBulkUpsert(pool, "fed_data.adv_firms", iaFirmCols, 1)
+	expectBulkUpsert(pool, "fed_data.adv_filings", iaFilingCols, 1)
 
 	ds := &IACompilation{cfg: &config.Config{}}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
+	result, err := ds.parseAndLoad(context.Background(), pool, strings.NewReader(xmlContent), nopLog())
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), result.RowsSynced)
 	assert.NoError(t, pool.ExpectationsWereMet())
@@ -793,7 +856,7 @@ func TestEPAECHO_Sync_Success(t *testing.T) {
 
 	f := fetchermocks.NewMockFetcher(t)
 
-	csvContent := "registry_id,fac_name,fac_city,fac_state,fac_zip,col5,col6,fac_lat,fac_long\n110000001,Acme Plant,Springfield,IL,62701,x,y,39.7817,-89.6501\n110000002,Beta Factory,Austin,TX,78701,a,b,30.2672,-97.7431\n"
+	csvContent := "REGISTRY_ID,PRIMARY_NAME,CITY_NAME,STATE_CODE,POSTAL_CODE,col5,col6,LATITUDE83,LONGITUDE83\n110000001,Acme Plant,Springfield,IL,62701,x,y,39.7817,-89.6501\n110000002,Beta Factory,Austin,TX,78701,a,b,30.2672,-97.7431\n"
 
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(mockDownloadToFileZIP(t, "NATIONAL_FACILITY_FILE.CSV", csvContent))
@@ -830,7 +893,7 @@ func TestEPAECHO_Sync_SkipShortRows(t *testing.T) {
 
 	f := fetchermocks.NewMockFetcher(t)
 
-	csvContent := "a,b,c,d,e,f,g,h,i\n11000,Short,City\n"
+	csvContent := "REGISTRY_ID,PRIMARY_NAME,CITY_NAME,STATE_CODE,POSTAL_CODE,col5,col6,LATITUDE83,LONGITUDE83\n"
 
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(mockDownloadToFileZIP(t, "NATIONAL_FACILITY_FILE.CSV", csvContent))
@@ -842,41 +905,8 @@ func TestEPAECHO_Sync_SkipShortRows(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// ADV Part 2 - Sync (OCR-dependent)
+// ADV Part 2 - Sync (bulk brochure ZIP)
 // --------------------------------------------------------------------------
-
-func TestADVPart2_Sync_NoCRDs(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	crdRows := pgxmock.NewRows([]string{"crd_number"})
-	pool.ExpectQuery("SELECT crd_number FROM fed_data.adv_firms").WillReturnRows(crdRows)
-
-	ds := &ADVPart2{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "local"}}}}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
-	assert.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestADVPart2_Sync_QueryError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	pool.ExpectQuery("SELECT crd_number FROM fed_data.adv_firms").
-		WillReturnError(errors.New("db connection lost"))
-
-	ds := &ADVPart2{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "local"}}}}
-	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "query adv_firms")
-}
 
 func TestADVPart2_Sync_BadOCRProvider(t *testing.T) {
 	pool, err := pgxmock.NewPool()
@@ -891,84 +921,48 @@ func TestADVPart2_Sync_BadOCRProvider(t *testing.T) {
 	assert.Contains(t, err.Error(), "OCR extractor")
 }
 
+func TestADVPart2_Sync_MetadataFetchFails(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	f := fetchermocks.NewMockFetcher(t)
+	// Metadata fetch fails.
+	f.EXPECT().Download(mock.Anything, mock.Anything).
+		Return(nil, errors.New("connection refused"))
+
+	ds := &ADVPart2{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "local"}}}}
+	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "FOIA metadata")
+}
+
 func TestADVPart2_Sync_DownloadFails(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
-
-	crdRows := pgxmock.NewRows([]string{"crd_number"}).AddRow(12345)
-	pool.ExpectQuery("SELECT crd_number FROM fed_data.adv_firms").WillReturnRows(crdRows)
-
+	// Metadata succeeds.
+	meta := foiaReportsMetadata{
+		ADVBrochures: []foiaFileEntry{
+			{FileName: "ADV_Brochures_2026_January.zip", Year: "2026", UploadedOn: "2026-02-01 10:00:00"},
+		},
+	}
+	f.EXPECT().Download(mock.Anything, mock.Anything).Return(foiaMetadataBody(t, meta), nil)
+	// ZIP download fails.
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		Return(int64(0), errors.New("download error"))
+		Return(int64(0), errors.New("404 not found"))
 
 	ds := &ADVPart2{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "local"}}}}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
-	assert.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestADVPart2_Sync_OCRFails(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	crdRows := pgxmock.NewRows([]string{"crd_number"}).AddRow(12345)
-	pool.ExpectQuery("SELECT crd_number FROM fed_data.adv_firms").WillReturnRows(crdRows)
-
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, _ string, path string) (int64, error) {
-			return int64(9), os.WriteFile(path, []byte("not a pdf"), 0o644)
-		})
-
-	ds := &ADVPart2{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "local"}}}}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
-	assert.NoError(t, pool.ExpectationsWereMet())
-}
-
-// --------------------------------------------------------------------------
-// ADV Part 3 - Sync (OCR-dependent)
-// --------------------------------------------------------------------------
-
-func TestADVPart3_Sync_NoCRDs(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	crdRows := pgxmock.NewRows([]string{"crd_number"})
-	pool.ExpectQuery("SELECT crd_number FROM fed_data.adv_firms").WillReturnRows(crdRows)
-
-	ds := &ADVPart3{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "local"}}}}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
-	assert.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestADVPart3_Sync_QueryError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	pool.ExpectQuery("SELECT crd_number FROM fed_data.adv_firms").
-		WillReturnError(errors.New("db connection lost"))
-
-	ds := &ADVPart3{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "local"}}}}
 	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "query adv_firms")
+	assert.Contains(t, err.Error(), "download brochure ZIP")
 }
+
+// --------------------------------------------------------------------------
+// ADV Part 3 - Sync (bulk CRS ZIP via FOIA metadata)
+// --------------------------------------------------------------------------
 
 func TestADVPart3_Sync_BadOCRProvider(t *testing.T) {
 	pool, err := pgxmock.NewPool()
@@ -983,46 +977,43 @@ func TestADVPart3_Sync_BadOCRProvider(t *testing.T) {
 	assert.Contains(t, err.Error(), "OCR extractor")
 }
 
+func TestADVPart3_Sync_MetadataFetchFails(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	f := fetchermocks.NewMockFetcher(t)
+	// Metadata fetch fails.
+	f.EXPECT().Download(mock.Anything, mock.Anything).
+		Return(nil, errors.New("connection refused"))
+
+	ds := &ADVPart3{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "local"}}}}
+	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "FOIA metadata")
+}
+
 func TestADVPart3_Sync_DownloadFails(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
-
-	crdRows := pgxmock.NewRows([]string{"crd_number"}).AddRow(99999)
-	pool.ExpectQuery("SELECT crd_number FROM fed_data.adv_firms").WillReturnRows(crdRows)
-
+	// Metadata succeeds.
+	meta := foiaReportsMetadata{
+		ADVFirmCRSDocs: []foiaFileEntry{
+			{FileName: "FIRM_CRS_DOCS_MONTHLY_20260131_558.zip", Year: "2026", UploadedOn: "2026-02-01 10:00:00"},
+		},
+	}
+	f.EXPECT().Download(mock.Anything, mock.Anything).Return(foiaMetadataBody(t, meta), nil)
+	// ZIP download fails.
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		Return(int64(0), errors.New("download error"))
+		Return(int64(0), errors.New("404 not found"))
 
 	ds := &ADVPart3{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "local"}}}}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
-	assert.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestADVPart3_Sync_OCRFails(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	crdRows := pgxmock.NewRows([]string{"crd_number"}).AddRow(99999)
-	pool.ExpectQuery("SELECT crd_number FROM fed_data.adv_firms").WillReturnRows(crdRows)
-
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, _ string, path string) (int64, error) {
-			return int64(9), os.WriteFile(path, []byte("not a pdf"), 0o644)
-		})
-
-	ds := &ADVPart3{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "local"}}}}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
-	assert.NoError(t, pool.ExpectationsWereMet())
+	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "download CRS ZIP")
 }
 
 // --------------------------------------------------------------------------

@@ -41,7 +41,7 @@ func (d *FormD) ShouldRun(now time.Time, lastSync *time.Time) bool {
 // formDSearchResult is the response from the EDGAR EFTS search for Form D filings.
 type formDSearchResult struct {
 	Hits struct {
-		Total int `json:"total"`
+		Total eftsTotal `json:"total"`
 		Hits  []struct {
 			Source struct {
 				CIK             string `json:"entity_cik"`
@@ -106,7 +106,7 @@ func (d *FormD) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempD
 		return nil, eris.Wrap(err, "form_d: decode search results")
 	}
 
-	log.Info("found Form D filings", zap.Int("total", result.Hits.Total))
+	log.Info("found Form D filings", zap.Int("total", result.Hits.Total.Value))
 
 	columns := []string{"accession_number", "cik", "entity_name", "entity_type", "year_of_inc", "state_of_inc", "industry_group", "revenue_range", "total_offering", "total_sold", "filing_date"}
 	conflictKeys := []string{"accession_number"}
@@ -186,7 +186,7 @@ func (d *FormD) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempD
 	return &SyncResult{
 		RowsSynced: totalRows,
 		Metadata: map[string]any{
-			"filings_found": result.Hits.Total,
+			"filings_found": result.Hits.Total.Value,
 		},
 	}, nil
 }

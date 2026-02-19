@@ -64,6 +64,18 @@ func createTestZipMulti(t *testing.T, dir, zipName string, files map[string]stri
 	return zipPath
 }
 
+// mockDownloadToCSV sets up a DownloadToFile mock that writes CSV content
+// directly to whatever destination path the caller requests.
+func mockDownloadToCSV(f *fetchermocks.MockFetcher, csvContent string) *fetchermocks.MockFetcher_DownloadToFile_Call {
+	return f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, _ string, destPath string) {
+			if err := os.WriteFile(destPath, []byte(csvContent), 0644); err != nil {
+				panic(fmt.Sprintf("mockDownloadToCSV: WriteFile %s: %v", destPath, err))
+			}
+		}).
+		Return(int64(len(csvContent)), nil)
+}
+
 // mockDownloadToFile sets up a DownloadToFile mock that copies a pre-built ZIP
 // to whatever destination path the caller requests. Matches any URL.
 func mockDownloadToFile(f *fetchermocks.MockFetcher, zipPath string) *fetchermocks.MockFetcher_DownloadToFile_Call {
@@ -81,12 +93,13 @@ func mockDownloadToFile(f *fetchermocks.MockFetcher, zipPath string) *fetchermoc
 }
 
 // expectBulkUpsertZip sets up pgxmock expectations for one db.BulkUpsert call.
-// BulkUpsert does: Begin -> CREATE TEMP TABLE -> CopyFrom -> INSERT ON CONFLICT -> Commit.
+// BulkUpsert does: Begin -> CREATE TEMP TABLE -> CopyFrom -> DELETE (dedup) -> INSERT ON CONFLICT -> Commit.
 func expectBulkUpsertZip(m pgxmock.PgxPoolIface, table string, cols []string, n int64) {
 	tempTable := fmt.Sprintf("_tmp_upsert_%s", replaceDotsUnderscore(table))
 	m.ExpectBegin()
 	m.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	m.ExpectCopyFrom(pgx.Identifier{tempTable}, cols).WillReturnResult(n)
+	m.ExpectExec("DELETE FROM").WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	m.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", n))
 	m.ExpectCommit()
 }
@@ -133,20 +146,20 @@ func TestCBP_Sync_Success(t *testing.T) {
 
 	f := fetchermocks.NewMockFetcher(t)
 
-	// The CBP Sync loop calls DownloadToFile once per year.
-	// Each year produces 2 rows -> one BulkUpsert per year.
+	// CBP Sync downloads both county + state files per year.
+	// Each file produces 2 rows -> two BulkUpserts per year.
 	numYears := currentDataYear() - cbpStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToFile(f, zipPath).Times(numYears * 2) // county + state per year
 
-	for i := 0; i < numYears; i++ {
+	for i := 0; i < numYears*2; i++ {
 		expectBulkUpsertZip(pool, "fed_data.cbp_data", cbpCols, 2)
 	}
 
 	ds := &CBP{}
 	result, err := ds.Sync(context.Background(), pool, f, dir)
 	require.NoError(t, err)
-	assert.Equal(t, int64(2)*int64(numYears), result.RowsSynced)
+	assert.Equal(t, int64(2)*int64(numYears)*2, result.RowsSynced)
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
@@ -165,11 +178,10 @@ func TestCBP_Sync_DownloadError(t *testing.T) {
 	assert.Contains(t, err.Error(), "download")
 }
 
-func TestCBP_Sync_FiltersIrrelevantNAICS(t *testing.T) {
+func TestCBP_Sync_AllNAICSAccepted(t *testing.T) {
 	dir := t.TempDir()
 
-	// NAICS 311 (food mfg) is NOT in the relevant list -> should be filtered out.
-	// NAICS 523110 (securities) IS relevant.
+	// All NAICS codes are accepted (no filtering).
 	csvContent := cbpCSVHeader +
 		"36,001,311110,500,,10000,,50000,,20\n" +
 		"36,001,523110,150,,5000,,20000,,10\n"
@@ -185,17 +197,17 @@ func TestCBP_Sync_FiltersIrrelevantNAICS(t *testing.T) {
 
 	numYears := currentDataYear() - cbpStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToFile(f, zipPath).Times(numYears * 2) // county + state per year
 
-	// Only 1 row passes the NAICS filter per year.
-	for i := 0; i < numYears; i++ {
-		expectBulkUpsertZip(pool, "fed_data.cbp_data", cbpCols, 1)
+	// Both rows pass per file.
+	for i := 0; i < numYears*2; i++ {
+		expectBulkUpsertZip(pool, "fed_data.cbp_data", cbpCols, 2)
 	}
 
 	ds := &CBP{}
 	result, err := ds.Sync(context.Background(), pool, f, dir)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1)*int64(numYears), result.RowsSynced)
+	assert.Equal(t, int64(2)*int64(numYears)*2, result.RowsSynced)
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
@@ -229,16 +241,14 @@ func TestCBP_ProcessZip_NoCSV(t *testing.T) {
 
 var susbCols = []string{"year", "fips_state", "naics", "entrsizedscr", "firm", "estb", "empl", "payr"}
 
-const susbCSVHeader = "statefips,naics,entrsizedscr,firm,estb,empl,payr\n"
+const susbCSVHeader = "STATE,NAICS,ENTRSIZEDSCR,FIRM,ESTB,EMPL,PAYR\n"
 
 func TestSUSB_Sync_Success(t *testing.T) {
 	dir := t.TempDir()
 
 	csvContent := susbCSVHeader +
-		"06,523110,1: Total,100,120,5000,250000\n" +
-		"36,541110,2: <5,50,50,200,100000\n"
-
-	zipPath := createTestZip(t, dir, "susb.zip", "us_state_totals.csv", csvContent)
+		"01,523110,1: Total,100,120,5000,250000\n" +
+		"06,541110,2: <5,50,50,200,100000\n"
 
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
@@ -248,7 +258,7 @@ func TestSUSB_Sync_Success(t *testing.T) {
 
 	numYears := currentDataYear() - susbStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToCSV(f, csvContent).Times(numYears)
 
 	for i := 0; i < numYears; i++ {
 		expectBulkUpsertZip(pool, "fed_data.susb_data", susbCols, 2)
@@ -276,15 +286,13 @@ func TestSUSB_Sync_DownloadError(t *testing.T) {
 	assert.Contains(t, err.Error(), "download")
 }
 
-func TestSUSB_Sync_FiltersIrrelevantNAICS(t *testing.T) {
+func TestSUSB_Sync_AllNAICSAccepted(t *testing.T) {
 	dir := t.TempDir()
 
-	// NAICS 311 = food mfg -> irrelevant. NAICS 523 = securities -> relevant.
+	// All NAICS codes are accepted (no filtering).
 	csvContent := susbCSVHeader +
-		"06,311110,1: Total,100,120,5000,250000\n" +
+		"36,311110,1: Total,100,120,5000,250000\n" +
 		"06,523110,1: Total,50,60,2000,100000\n"
-
-	zipPath := createTestZip(t, dir, "susb.zip", "us_state_totals.csv", csvContent)
 
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
@@ -294,40 +302,36 @@ func TestSUSB_Sync_FiltersIrrelevantNAICS(t *testing.T) {
 
 	numYears := currentDataYear() - susbStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToCSV(f, csvContent).Times(numYears)
 
 	for i := 0; i < numYears; i++ {
-		expectBulkUpsertZip(pool, "fed_data.susb_data", susbCols, 1)
+		expectBulkUpsertZip(pool, "fed_data.susb_data", susbCols, 2)
 	}
 
 	ds := &SUSB{}
 	result, err := ds.Sync(context.Background(), pool, f, dir)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1)*int64(numYears), result.RowsSynced)
+	assert.Equal(t, int64(2)*int64(numYears), result.RowsSynced)
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
-func TestSUSB_ProcessZip_NoCSV(t *testing.T) {
+func TestSUSB_Sync_EmptyCSV(t *testing.T) {
 	dir := t.TempDir()
-
-	zipPath := filepath.Join(dir, "empty.zip")
-	zf, err := os.Create(zipPath)
-	require.NoError(t, err)
-	w := zip.NewWriter(zf)
-	f, err := w.Create("metadata.json")
-	require.NoError(t, err)
-	_, _ = f.Write([]byte("{}"))
-	require.NoError(t, w.Close())
-	require.NoError(t, zf.Close())
 
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
 
+	f := fetchermocks.NewMockFetcher(t)
+
+	numYears := currentDataYear() - susbStartYear + 1
+	mockDownloadToCSV(f, susbCSVHeader).Times(numYears)
+
 	ds := &SUSB{}
-	_, err = ds.processZip(context.Background(), pool, zipPath, 2023)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no CSV found")
+	result, err := ds.Sync(context.Background(), pool, f, dir)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.RowsSynced)
+	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
 // ===========================================================================
@@ -385,10 +389,10 @@ func TestOEWS_Sync_DownloadError(t *testing.T) {
 	assert.Contains(t, err.Error(), "download")
 }
 
-func TestOEWS_Sync_FiltersIrrelevantNAICS(t *testing.T) {
+func TestOEWS_Sync_AllNAICSAccepted(t *testing.T) {
 	dir := t.TempDir()
 
-	// NAICS 311 -> irrelevant, 523110 -> relevant
+	// All NAICS codes are accepted (no filtering).
 	csvContent := oewsCSVHeader +
 		"99000,1,311110,13-2051,1200,45.50,94640,42.00,87360\n" +
 		"99000,1,523110,13-2051,800,55.25,114920,50.10,104210\n"
@@ -406,13 +410,13 @@ func TestOEWS_Sync_FiltersIrrelevantNAICS(t *testing.T) {
 	mockDownloadToFile(f, zipPath).Times(numYears)
 
 	for i := 0; i < numYears; i++ {
-		expectBulkUpsertZip(pool, "fed_data.oews_data", oewsCols, 1)
+		expectBulkUpsertZip(pool, "fed_data.oews_data", oewsCols, 2)
 	}
 
 	ds := &OEWS{}
 	result, err := ds.Sync(context.Background(), pool, f, dir)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1)*int64(numYears), result.RowsSynced)
+	assert.Equal(t, int64(2)*int64(numYears), result.RowsSynced)
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
@@ -467,7 +471,7 @@ func TestOEWS_ProcessZip_NoCSV(t *testing.T) {
 	ds := &OEWS{}
 	_, err = ds.processZip(context.Background(), pool, zipPath, 2023)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no CSV found")
+	assert.Contains(t, err.Error(), "no CSV or XLSX found")
 }
 
 // ===========================================================================
@@ -568,20 +572,19 @@ func TestQCEW_Sync_SkipsAnnualAggregate(t *testing.T) {
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
-func TestQCEW_Sync_SkipsIrrelevantFiles(t *testing.T) {
+func TestQCEW_Sync_ProcessesAllRelevantFiles(t *testing.T) {
 	dir := t.TempDir()
 
-	// The "31 NAICS 31.csv" file is NOT relevant (food mfg).
-	// The "52 NAICS 52.csv" IS relevant (finance).
-	relevantCSV := qcewCSVHeader +
+	// Both "31 NAICS 31.csv" and "52 NAICS 52.csv" are relevant.
+	csv52 := qcewCSVHeader +
 		"36000,5,523110,70,0,2023,1,1500,1550,1600,75000000,3800,120\n"
 
-	irrelevantCSV := qcewCSVHeader +
+	csv31 := qcewCSVHeader +
 		"36000,5,311110,70,0,2023,1,3000,3100,3200,100000000,2000,500\n"
 
 	files := map[string]string{
-		"2023.q1-q4 31 NAICS 31.csv": irrelevantCSV,
-		"2023.q1-q4 52 NAICS 52.csv": relevantCSV,
+		"2023.q1-q4 31 NAICS 31.csv": csv31,
+		"2023.q1-q4 52 NAICS 52.csv": csv52,
 	}
 
 	zipPath := createTestZipMulti(t, dir, "qcew.zip", files)
@@ -597,16 +600,16 @@ func TestQCEW_Sync_SkipsIrrelevantFiles(t *testing.T) {
 
 	mockDownloadToFile(f, zipPath).Times(numYears)
 
-	// Only the relevant file's rows get upserted. The irrelevant file is
-	// skipped by isRelevantFile, so its NAICS-relevant rows never get parsed.
+	// Both files are relevant, 1 row each -> 2 BulkUpsert calls per year.
 	for i := 0; i < numYears; i++ {
+		expectBulkUpsertZip(pool, "fed_data.qcew_data", qcewCols, 1)
 		expectBulkUpsertZip(pool, "fed_data.qcew_data", qcewCols, 1)
 	}
 
 	ds := &QCEW{}
 	result, err := ds.Sync(context.Background(), pool, f, dir)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1)*int64(numYears), result.RowsSynced)
+	assert.Equal(t, int64(2)*int64(numYears), result.RowsSynced)
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
@@ -650,11 +653,10 @@ func TestQCEW_Sync_MultipleRelevantFiles(t *testing.T) {
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
-func TestQCEW_Sync_FiltersIrrelevantNAICS(t *testing.T) {
+func TestQCEW_Sync_AllNAICSAccepted(t *testing.T) {
 	dir := t.TempDir()
 
-	// The file is relevant (52 NAICS 52.csv), but one row has NAICS 311 which
-	// fails IsRelevantNAICS. Only the 523 row should pass.
+	// All NAICS codes are accepted (no filtering). Both rows pass.
 	csvContent := qcewCSVHeader +
 		"36000,5,311110,70,0,2023,1,3000,3100,3200,100000000,2000,500\n" +
 		"36000,5,523110,70,0,2023,1,1500,1550,1600,75000000,3800,120\n"
@@ -677,12 +679,12 @@ func TestQCEW_Sync_FiltersIrrelevantNAICS(t *testing.T) {
 	mockDownloadToFile(f, zipPath).Times(numYears)
 
 	for i := 0; i < numYears; i++ {
-		expectBulkUpsertZip(pool, "fed_data.qcew_data", qcewCols, 1)
+		expectBulkUpsertZip(pool, "fed_data.qcew_data", qcewCols, 2)
 	}
 
 	ds := &QCEW{}
 	result, err := ds.Sync(context.Background(), pool, f, dir)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1)*int64(numYears), result.RowsSynced)
+	assert.Equal(t, int64(2)*int64(numYears), result.RowsSynced)
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
