@@ -29,6 +29,14 @@ type Config struct {
 	Server     ServerConfig     `yaml:"server" mapstructure:"server"`
 	Log        LogConfig        `yaml:"log" mapstructure:"log"`
 	Fedsync    FedsyncConfig    `yaml:"fedsync" mapstructure:"fedsync"`
+	Waterfall  WaterfallConfig  `yaml:"waterfall" mapstructure:"waterfall"`
+}
+
+// WaterfallConfig configures the per-field waterfall cascade system.
+type WaterfallConfig struct {
+	ConfigPath          string  `yaml:"config_path" mapstructure:"config_path"`
+	ConfidenceThreshold float64 `yaml:"confidence_threshold" mapstructure:"confidence_threshold"`
+	MaxPremiumCostUSD   float64 `yaml:"max_premium_cost_usd" mapstructure:"max_premium_cost_usd"`
 }
 
 // FedsyncConfig configures the federal data sync pipeline.
@@ -307,6 +315,9 @@ func Load() (*Config, error) {
 	v.SetDefault("fedsync.mistral_ocr_model", "pixtral-large-latest")
 	v.SetDefault("fedsync.ocr.provider", "local")
 	v.SetDefault("fedsync.ocr.pdftotext_path", "pdftotext")
+	v.SetDefault("waterfall.config_path", "config/waterfall.yaml")
+	v.SetDefault("waterfall.confidence_threshold", 0.7)
+	v.SetDefault("waterfall.max_premium_cost_usd", 2.00)
 	v.SetDefault("pricing.jina.per_mtok", 0.02)
 	v.SetDefault("pricing.perplexity.per_query", 0.005)
 	v.SetDefault("pricing.firecrawl.plan_monthly", 19.00)

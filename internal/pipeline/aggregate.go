@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 	"net/mail"
 	"net/url"
@@ -9,6 +10,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/sells-group/research-cli/internal/estimate"
+	"github.com/sells-group/research-cli/internal/fedsync/transform"
 	"github.com/sells-group/research-cli/internal/model"
 )
 
@@ -177,6 +180,7 @@ func ValidateField(answer model.ExtractionAnswer, field *model.FieldMapping) *mo
 		Confidence: answer.Confidence,
 		Source:     answer.SourceURL,
 		Tier:       answer.Tier,
+		DataAsOf:   answer.DataAsOf,
 	}
 }
 
@@ -282,4 +286,79 @@ func toBool(v any) (bool, bool) {
 	default:
 		return false, false
 	}
+}
+
+// EnrichWithRevenueEstimate adds a revenue estimate to the merged answers
+// when employee_count and naics_code are present and the estimator is available.
+// It only adds the estimate if no existing revenue_range answer has high confidence.
+func EnrichWithRevenueEstimate(ctx context.Context, answers []model.ExtractionAnswer, company model.Company, estimator *estimate.RevenueEstimator) []model.ExtractionAnswer {
+	if estimator == nil {
+		return answers
+	}
+
+	// Find employee count and NAICS code from existing answers.
+	var empCount int
+	var naicsCode string
+	var hasHighConfRevenue bool
+
+	for _, a := range answers {
+		switch a.FieldKey {
+		case "employee_count", "employee_estimate":
+			if n, ok := toNumber(a.Value); ok && n > 0 {
+				empCount = n
+			}
+		case "naics_code":
+			if s, ok := a.Value.(string); ok && s != "" {
+				naicsCode = s
+			}
+		case "revenue_range":
+			if a.Confidence >= 0.7 {
+				hasHighConfRevenue = true
+			}
+		}
+	}
+
+	if empCount == 0 || naicsCode == "" {
+		return answers
+	}
+	if hasHighConfRevenue {
+		zap.L().Debug("aggregate: skipping revenue estimate, high-confidence revenue_range exists")
+		return answers
+	}
+
+	// Convert state abbreviation to FIPS code.
+	stateFIPS := transform.StateAbbrToFIPS[strings.ToUpper(company.State)]
+
+	est, err := estimator.Estimate(ctx, naicsCode, stateFIPS, empCount)
+	if err != nil {
+		zap.L().Warn("aggregate: revenue estimation failed",
+			zap.String("company", company.Name),
+			zap.Error(err),
+		)
+		return answers
+	}
+
+	answers = append(answers, model.ExtractionAnswer{
+		FieldKey:   "revenue_estimate",
+		Value:      est.Amount,
+		Confidence: est.Confidence,
+		Source:     fmt.Sprintf("CBP %d NAICS %s", est.Year, est.NAICSUsed),
+		Tier:       0,
+	})
+	answers = append(answers, model.ExtractionAnswer{
+		FieldKey:   "revenue_confidence",
+		Value:      est.Confidence,
+		Confidence: est.Confidence,
+		Source:     fmt.Sprintf("CBP %d NAICS %s", est.Year, est.NAICSUsed),
+		Tier:       0,
+	})
+
+	zap.L().Info("aggregate: revenue estimate added",
+		zap.String("company", company.Name),
+		zap.Int64("revenue", est.Amount),
+		zap.Float64("confidence", est.Confidence),
+		zap.String("naics_used", est.NAICSUsed),
+	)
+
+	return answers
 }

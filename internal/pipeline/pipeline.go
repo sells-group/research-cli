@@ -13,9 +13,11 @@ import (
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/cost"
+	"github.com/sells-group/research-cli/internal/estimate"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/scrape"
 	"github.com/sells-group/research-cli/internal/store"
+	"github.com/sells-group/research-cli/internal/waterfall"
 	"github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
 	"github.com/sells-group/research-cli/pkg/jina"
@@ -37,9 +39,11 @@ type Pipeline struct {
 	salesforce salesforce.Client
 	notion     notion.Client
 	ppp        ppp.Querier
-	costCalc   *cost.Calculator
-	questions  []model.Question
-	fields     *model.FieldRegistry
+	costCalc       *cost.Calculator
+	estimator      *estimate.RevenueEstimator
+	waterfallExec  *waterfall.Executor
+	questions      []model.Question
+	fields         *model.FieldRegistry
 }
 
 // New creates a new Pipeline with all dependencies.
@@ -54,6 +58,8 @@ func New(
 	sfClient salesforce.Client,
 	notionClient notion.Client,
 	pppClient ppp.Querier,
+	estimator *estimate.RevenueEstimator,
+	waterfallExec *waterfall.Executor,
 	questions []model.Question,
 	fields *model.FieldRegistry,
 ) *Pipeline {
@@ -74,9 +80,11 @@ func New(
 		salesforce: sfClient,
 		notion:     notionClient,
 		ppp:        pppClient,
-		costCalc:   cost.NewCalculator(rates),
-		questions:  questions,
-		fields:     fields,
+		costCalc:      cost.NewCalculator(rates),
+		estimator:     estimator,
+		waterfallExec: waterfallExec,
+		questions:     questions,
+		fields:        fields,
 	}
 }
 
@@ -619,6 +627,8 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		if len(existingAnswers) > 0 {
 			allAnswers = MergeAnswers(existingAnswers, allAnswers, nil)
 		}
+		// Enrich with CBP-based revenue estimate if available.
+		allAnswers = EnrichWithRevenueEstimate(ctx, allAnswers, company, p.estimator)
 		fieldValues = BuildFieldValues(allAnswers, p.fields)
 		return &model.PhaseResult{
 			Metadata: map[string]any{
@@ -632,6 +642,26 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 
 	result.Answers = allAnswers
 	result.FieldValues = fieldValues
+
+	// ===== Phase 7B: Waterfall Cascade =====
+	if p.waterfallExec != nil {
+		trackPhase("7b_waterfall", func() (*model.PhaseResult, error) {
+			wr, wfErr := p.waterfallExec.Run(ctx, company, fieldValues)
+			if wfErr != nil {
+				return nil, wfErr
+			}
+			// Apply waterfall results back into field values.
+			fieldValues = waterfall.ApplyToFieldValues(fieldValues, wr)
+			result.FieldValues = fieldValues
+			return &model.PhaseResult{
+				Metadata: map[string]any{
+					"fields_resolved":   wr.FieldsResolved,
+					"fields_total":      wr.FieldsTotal,
+					"premium_cost_usd":  wr.TotalPremiumUSD,
+				},
+			}, nil
+		})
+	}
 
 	// ===== Phase 8: Report =====
 	// Set totalUsage.Cost from per-phase costs so the report shows the correct total.

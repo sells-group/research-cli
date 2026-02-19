@@ -103,12 +103,13 @@ type EnrichmentResult struct {
 
 // FieldValue is a resolved value ready for Salesforce.
 type FieldValue struct {
-	FieldKey   string  `json:"field_key"`
-	SFField    string  `json:"sf_field"`
-	Value      any     `json:"value"`
-	Confidence float64 `json:"confidence"`
-	Source     string  `json:"source"`
-	Tier       int     `json:"tier"`
+	FieldKey   string     `json:"field_key"`
+	SFField    string     `json:"sf_field"`
+	Value      any        `json:"value"`
+	Confidence float64    `json:"confidence"`
+	Source     string     `json:"source"`
+	Tier       int        `json:"tier"`
+	DataAsOf   *time.Time `json:"data_as_of,omitempty"`
 }
 
 // Checkpoint stores intermediate pipeline state for resume after failure.

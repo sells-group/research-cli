@@ -28,6 +28,7 @@ var (
 	csvrunDryRun      bool
 	csvrunOffline     bool
 	csvrunOutput      string
+	csvrunFormat      string
 )
 
 var csvrunCmd = &cobra.Command{
@@ -128,6 +129,13 @@ Examples:
 		)
 
 		// Write results.
+		if csvrunFormat == "grata-csv" {
+			outPath := csvrunOutput
+			if outPath == "" {
+				outPath = "enrichment-grata.csv"
+			}
+			return pipeline.ExportGrataCSV(results, outPath)
+		}
 		return writeResults(results)
 	},
 }
@@ -139,6 +147,7 @@ func init() {
 	csvrunCmd.Flags().BoolVar(&csvrunDryRun, "dry-run", false, "parse CSV and print companies, skip pipeline")
 	csvrunCmd.Flags().BoolVar(&csvrunOffline, "offline", false, "use stub clients (no API keys needed)")
 	csvrunCmd.Flags().StringVar(&csvrunOutput, "output", "", "write results JSON to file (default: stdout)")
+	csvrunCmd.Flags().StringVar(&csvrunFormat, "format", "json", "output format: json (default) or grata-csv")
 	_ = csvrunCmd.MarkFlagRequired("csv")
 	rootCmd.AddCommand(csvrunCmd)
 }
@@ -185,7 +194,7 @@ func initOfflinePipeline(ctx context.Context) (*pipelineEnv, error) {
 		scrape.NewJinaAdapter(jinaClient),
 	)
 
-	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, nil, questions, fields)
+	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, nil, nil, nil, questions, fields)
 
 	return &pipelineEnv{
 		Store:     st,

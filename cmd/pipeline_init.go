@@ -3,14 +3,18 @@ package main
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
 
+	"github.com/sells-group/research-cli/internal/estimate"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/pipeline"
 	"github.com/sells-group/research-cli/internal/registry"
 	"github.com/sells-group/research-cli/internal/scrape"
 	"github.com/sells-group/research-cli/internal/store"
+	"github.com/sells-group/research-cli/internal/waterfall"
+	"github.com/sells-group/research-cli/internal/waterfall/provider"
 	anthropicpkg "github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
 	"github.com/sells-group/research-cli/pkg/jina"
@@ -75,6 +79,7 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 
 	var pppClient ppp.Querier
 	if cfg.PPP.URL != "" {
+		// Legacy: dedicated PPP database connection.
 		pppClient, err = ppp.New(ctx, ppp.Config{
 			URL:                 cfg.PPP.URL,
 			SimilarityThreshold: cfg.PPP.SimilarityThreshold,
@@ -83,6 +88,15 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 		if err != nil {
 			zap.L().Warn("ppp client init failed, skipping PPP phase", zap.Error(err))
 			pppClient = nil
+		}
+	} else if ps, ok := st.(*store.PostgresStore); ok {
+		// Use the shared Neon pool for PPP lookups (data in fed_data.ppp_loans).
+		if pgxPool, ok := ps.Pool().(*pgxpool.Pool); ok {
+			pppClient = ppp.NewFromPool(pgxPool, ppp.Config{
+				SimilarityThreshold: cfg.PPP.SimilarityThreshold,
+				MaxCandidates:       cfg.PPP.MaxCandidates,
+			})
+			zap.L().Info("ppp client using shared database pool")
 		}
 	}
 
@@ -138,7 +152,28 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 		scrape.NewFirecrawlAdapter(firecrawlClient),
 	)
 
-	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, pppClient, questions, fields)
+	// Create revenue estimator (nil when using SQLite/offline mode).
+	var revenueEstimator *estimate.RevenueEstimator
+	if ps, ok := st.(*store.PostgresStore); ok {
+		revenueEstimator = estimate.NewRevenueEstimator(ps.Pool())
+		zap.L().Info("revenue estimator enabled")
+	}
+
+	// Create waterfall executor (nil if config file not found).
+	var waterfallExec *waterfall.Executor
+	wfCfg, wfErr := waterfall.LoadConfig(cfg.Waterfall.ConfigPath)
+	if wfErr != nil {
+		zap.L().Warn("waterfall config not loaded, waterfall phase will be skipped", zap.Error(wfErr))
+	} else {
+		providerRegistry := provider.NewRegistry()
+		// Premium providers are registered here as they become available.
+		waterfallExec = waterfall.NewExecutor(wfCfg, providerRegistry)
+		zap.L().Info("waterfall executor enabled",
+			zap.Int("configured_fields", len(wfCfg.Fields)),
+		)
+	}
+
+	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, pppClient, revenueEstimator, waterfallExec, questions, fields)
 
 	return &pipelineEnv{
 		Store:     st,

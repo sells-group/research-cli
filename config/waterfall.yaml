@@ -1,0 +1,184 @@
+waterfall:
+  defaults:
+    confidence_threshold: 0.7
+    time_decay:
+      half_life_days: 365
+      floor: 0.2
+      curve: exponential
+    max_premium_cost_usd: 2.00
+
+  fields:
+    legal_name:
+      confidence_threshold: 0.85
+      time_decay: { half_life_days: 1825, floor: 0.3 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: secretary_of_state, tier: 0 }
+        - { name: fed_data_adv, tier: 0 }
+        - { name: fed_data_edgar, tier: 0 }
+        - { name: bbb, tier: 0 }
+        - { name: grata, tier: 0 }
+        - { name: clearbit, tier: 2 }
+
+    name:
+      confidence_threshold: 0.8
+      time_decay: { half_life_days: 1825, floor: 0.3 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: grata, tier: 0 }
+        - { name: fed_data_adv, tier: 0 }
+        - { name: fed_data_edgar, tier: 0 }
+
+    employee_count:
+      confidence_threshold: 0.65
+      time_decay: { half_life_days: 180, floor: 0.15 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: linkedin, tier: 0 }
+        - { name: fed_data_adv, tier: 0 }
+        - { name: grata, tier: 0 }
+        - { name: ppp, tier: 0 }
+        - { name: zoominfo, tier: 2 }
+
+    employee_estimate:
+      confidence_threshold: 0.6
+      time_decay: { half_life_days: 180, floor: 0.15 }
+      sources:
+        - { name: grata, tier: 0 }
+        - { name: fed_data_cbp_estimate, tier: 0 }
+
+    revenue_range:
+      confidence_threshold: 0.6
+      time_decay: { half_life_days: 365, floor: 0.15 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: fed_data_cbp_estimate, tier: 0 }
+        - { name: grata, tier: 0 }
+        - { name: dnb, tier: 2 }
+
+    revenue_estimate:
+      confidence_threshold: 0.55
+      time_decay: { half_life_days: 365, floor: 0.15 }
+      sources:
+        - { name: fed_data_cbp_estimate, tier: 0 }
+        - { name: grata, tier: 0 }
+
+    phone:
+      confidence_threshold: 0.7
+      time_decay: { half_life_days: 365, floor: 0.2 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: bbb, tier: 0 }
+        - { name: secretary_of_state, tier: 0 }
+        - { name: clearbit, tier: 2 }
+
+    email:
+      confidence_threshold: 0.7
+      time_decay: { half_life_days: 365, floor: 0.2 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: fed_data_adv, tier: 0 }
+        - { name: clearbit, tier: 2 }
+
+    naics_code:
+      confidence_threshold: 0.75
+      time_decay: { half_life_days: 1825, floor: 0.3 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: fed_data_cbp, tier: 0 }
+        - { name: fed_data_adv, tier: 0 }
+        - { name: grata, tier: 0 }
+
+    sic_code:
+      confidence_threshold: 0.75
+      time_decay: { half_life_days: 1825, floor: 0.3 }
+      sources:
+        - { name: fed_data_edgar, tier: 0 }
+        - { name: fed_data_adv, tier: 0 }
+
+    year_founded:
+      confidence_threshold: 0.7
+      time_decay: { half_life_days: 1825, floor: 0.3 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: secretary_of_state, tier: 0 }
+        - { name: grata, tier: 0 }
+
+    business_model:
+      confidence_threshold: 0.65
+      time_decay: { half_life_days: 730, floor: 0.2 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: grata, tier: 0 }
+
+    ownership_type:
+      confidence_threshold: 0.7
+      time_decay: { half_life_days: 730, floor: 0.2 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: secretary_of_state, tier: 0 }
+        - { name: fed_data_adv, tier: 0 }
+
+    description:
+      confidence_threshold: 0.6
+      time_decay: { half_life_days: 365, floor: 0.2 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: grata, tier: 0 }
+        - { name: linkedin, tier: 0 }
+
+    exec_name:
+      confidence_threshold: 0.7
+      time_decay: { half_life_days: 730, floor: 0.2 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: linkedin, tier: 0 }
+        - { name: fed_data_adv, tier: 0 }
+        - { name: clearbit, tier: 2 }
+
+    exec_title:
+      confidence_threshold: 0.7
+      time_decay: { half_life_days: 730, floor: 0.2 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: linkedin, tier: 0 }
+        - { name: fed_data_adv, tier: 0 }
+
+    exec_email:
+      confidence_threshold: 0.7
+      time_decay: { half_life_days: 365, floor: 0.2 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: linkedin, tier: 0 }
+        - { name: clearbit, tier: 2 }
+
+    services_list:
+      confidence_threshold: 0.6
+      time_decay: { half_life_days: 365, floor: 0.2 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: bbb, tier: 0 }
+        - { name: fed_data_adv, tier: 0 }
+
+    licenses:
+      confidence_threshold: 0.7
+      time_decay: { half_life_days: 365, floor: 0.2 }
+      sources:
+        - { name: secretary_of_state, tier: 0 }
+        - { name: fed_data_adv, tier: 0 }
+        - { name: fed_data_edgar, tier: 0 }
+
+    aum:
+      confidence_threshold: 0.7
+      time_decay: { half_life_days: 180, floor: 0.15 }
+      sources:
+        - { name: fed_data_adv, tier: 0 }
+        - { name: fed_data_edgar, tier: 0 }
+
+    website:
+      confidence_threshold: 0.9
+      time_decay: { half_life_days: 1825, floor: 0.5 }
+      sources:
+        - { name: website_crawl, tier: 0 }
+        - { name: grata, tier: 0 }
+        - { name: fed_data_adv, tier: 0 }

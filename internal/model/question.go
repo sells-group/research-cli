@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 // Question represents a question from the Question Registry.
 type Question struct {
 	ID           string     `json:"id"`
@@ -42,6 +44,7 @@ type ExtractionAnswer struct {
 	SourceURL     string        `json:"source_url"`
 	Tier          int           `json:"tier"`
 	Reasoning     string        `json:"reasoning"`
+	DataAsOf      *time.Time    `json:"data_as_of,omitempty"`
 	Contradiction *Contradiction `json:"contradiction,omitempty"`
 }
 
