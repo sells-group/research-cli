@@ -9,7 +9,7 @@ Automated account enrichment pipeline — import leads via CSV into a Notion lea
 | **Input** | CSV file of companies (from Grata, manual research, etc.) → imported into a Notion Lead Tracker DB |
 | **Output** | Enriched fields written to Salesforce Account records + status/quality updated on the Notion lead page |
 | **Runtime** | Go binary (`research-cli`) on Fly.io (cron or webhook) · Neon Postgres (state) · SQLite (local dev) |
-| **Stack** | Go (cobra · zap · eris · viper) · Fly.io (compute) · Neon Postgres (run log + staging) · Firecrawl (crawl + scrape) · Perplexity + Haiku (LinkedIn) · Claude Haiku / Sonnet / Opus (tiered extraction) · Salesforce REST API (destination) · Notion API (lead tracker + registries) · ToolJet (manual review UI) |
+| **Stack** | Go (cobra · zap · eris · viper) · Fly.io (compute) · Neon Postgres (run log + staging) · Jina AI (search + read) → Firecrawl (fallback) · Perplexity + Haiku (LinkedIn) · Claude Haiku / Sonnet / Opus (tiered extraction) · Salesforce REST API (destination) · Notion API (lead tracker + registries) · ToolJet (manual review UI) |
 
 ---
 
@@ -46,46 +46,71 @@ Automated account enrichment pipeline — import leads via CSV into a Notion lea
 3. **If clean HTML:** Local crawl via `colly` (link discovery, depth 2, cap ~50 pages) + `html-to-markdown` conversion. **Zero Firecrawl credits.**
 4. **If blocked/JS-rendered:** Fall back to Firecrawl async crawl (`/v2/crawl`). Full browser rendering + proxy rotation.
 
-- Exclude paths apply to both local and Firecrawl: `/blog/*`, `/news/*`, `/press/*`, `/careers/*`
-- Estimated ~60% of company sites serve clean HTML → **~55% Firecrawl credit reduction**
+- Exclude paths: `/blog/*`, `/news/*`, `/press/*`, `/careers/*`
+- Crawl results cached 24 hours; reused on re-run
+- ~60% of company sites serve clean HTML → **~55% Firecrawl credit reduction**
 
-### Phase 1B — Firecrawl: Google Places + BBB + PPP + SoS *(parallel with 1A)*
+### Phase 1B — External Scrape: Search-then-Scrape *(parallel with 1A)*
 
-- Construct target URLs from company name + location
-- Firecrawl `/v2/scrape` single page per source
-- Returns markdown — fed into classification and extraction alongside company pages
+Uses **Jina AI Search** to discover profile URLs, then scrapes them via the scrape chain (Jina Reader → Firecrawl fallback):
+
+- **Google Maps:** Direct URL construction from company name + location → scrape chain
+- **BBB:** Jina Search with `site:bbb.org` filter → best result filter → scrape chain
+- **Secretary of State:** Jina Search for state business entity registration → scrape chain
+
+Each source runs in parallel. Pages are deduped by content hash, and address cross-referencing extracts structured location metadata.
 
 ### Phase 1C — Perplexity: LinkedIn *(parallel with 1A/1B)*
 
-- Targeted Perplexity query for company LinkedIn profile data
-- Raw response piped through **Haiku** to enforce strict JSON output schema
-- Output merged into enrichment data alongside crawled pages
+- Targeted Perplexity query (`sonar-pro` model) for company LinkedIn profile data
+- Raw response piped through **Haiku** to enforce strict JSON output schema (company name, description, industry, headcount, headquarters, founded, specialties, company type)
+- Output converted to synthetic `[linkedin]` page and merged into page set
+- LinkedIn results cached per domain
+
+### Phase 1D — PPP Loan Lookup *(parallel with 1A/1B/1C)*
+
+- Queries PPP loan dataset for company name matches (fuzzy matching with similarity threshold 0.4)
+- Returns loan match metadata (loan amount, jobs retained, NAICS code) if found
+- PPP matches carried through to aggregation for revenue estimation
+
+**Phase 1 Gate:** Requires at least 1 of the 3 data-producing phases (1A, 1B, 1C) to succeed. Continues with partial data if some sources fail; logs warnings. PPP (1D) is supplementary and does not gate.
 
 ### Phase 2 — Page Classification (Haiku)
 
-- Each crawled page classified against the PAGE_TYPE_TAXONOMY
-- Output per page: `page_types[]`, `relevance_tags[]`, `has_structured_data`, `content_summary`, `quality`
-- Builds a **Page Index** — lookup table mapping page types → URLs
+- Each crawled page classified into one of 21 page types (see taxonomy below)
+- External source pages auto-classified by title prefix (e.g., `[bbb]` → `bbb_profile`, `[google_maps]` → `google_maps`)
+- URL path heuristics short-circuit LLM classification where possible (e.g., `/about` → `about`)
+- Uses Batch API for >3 pages, direct Messages API for small sets
+- Builds a **Page Index** — lookup table mapping page types → classified pages
 
 ### Phase 3 — Question Router (Go code)
 
 - Reads QUESTION_REGISTRY from Notion API (cached in memory for the run)
-- Each question declares which `page_types` it needs
+- Each question declares preferred `page_types`; if none specified, all pages eligible
+- External source pages always included as supplementary context
 - Router matches questions → relevant pages from the Page Index
 - Groups questions into batches by tier
+- **Optimization:** Skips questions that already have high-confidence answers (≥ 0.8) from prior runs, reusing existing answers instead of re-extracting
 
-### Phase 4 — Tier 1: Haiku (~70 questions)
+### Phases 4+5 — Tier 1 + Tier 2 (overlapping execution)
 
+T1, T2-native, and T2-escalated run with maximum overlap:
+
+1. **T1 (Haiku)** and **T2-native (Sonnet)** start in parallel
+2. **T2-escalated** starts as soon as T1 completes, overlapping with still-running T2-native
+3. Results are combined into a single Phase 5 result
+
+**Tier 1 — Haiku (~70 questions):**
 - Single-page fact extraction, no reasoning
 - Each batch gets **only** the pages classified as relevant
-- Strict JSON output per question
+- Strict JSON output: `{"value", "confidence", "reasoning", "source_url"}`
 - Low-confidence answers (< 0.4) escalate to Tier 2
+- **Checkpoint/resume:** T1 answers saved on success; reused if pipeline fails in later phases
 
-### Phase 5 — Tier 2: Sonnet (~25 questions)
-
-- Multi-page synthesis, light reasoning
-- Gets Page Index + all Tier 1 answers as context
-- Also handles confidence re-evals escalated from Tier 1
+**Tier 2 — Sonnet (~25 questions):**
+- **T2-native:** Questions routed directly to T2 (no T1 dependency)
+- **T2-escalated:** Low-confidence T1 answers re-extracted with T1 context
+- Multi-page synthesis (top 2000 chars per page), light reasoning
 
 ### Phase 6 — Tier 3: Opus (~5 questions)
 
@@ -94,26 +119,41 @@ Two-step process to minimize Opus input tokens:
 1. **6A — Haiku Context Prep:** Single batch call reads full crawl + Page Index + T1/T2 answers. Produces a focused context extract per T3 question (~3K tokens each). Strips raw markdown; keeps only decision-relevant facts, quotes, and data points.
 2. **6B — Opus Extraction:** Each of the 5 questions gets its prepared extract (~25K tokens) instead of raw crawl (~150K). Cross-page strategic reasoning on distilled, not raw, context.
 
-- Feature-gated: config switch for `"always"` vs `"ambiguity_only"`
+- **Feature-gated** by `tier3_gate` config:
+  - `"off"` (default): T3 skipped entirely. Use `--with-t3` flag to enable.
+  - `"always"`: Run T3 unconditionally if T3 questions exist.
+  - `"ambiguity_only"`: Run T3 only if T1+T2 answers have confidence < 0.6.
+- **Cost budget gate:** T3 skipped if cumulative per-company cost exceeds `max_cost_per_company_usd` (default $10)
 - ~87% cheaper than raw-context approach at batch pricing
 
-### Phase 7 — Aggregation (Haiku)
+### Phase 7 — Aggregation
 
-- Merge all tier outputs + Google Places/BBB/LinkedIn/PPP/SoS data
-- Validate against master JSON schema from Field Registry
-- Per-field confidence scoring
-- Light Haiku sanity check for contradictions/hallucinations
+- **MergeAnswers:** Combine T1 + T2 + T3 outputs, preferring higher tier and higher confidence. Flags contradictions when tiers disagree (both ≥ 0.5 confidence).
+- **Revenue enrichment:** Augments answers with CBP-based revenue estimates from fedsync data
+- **Validate & type-coerce:** Match answers to Field Registry, validate against regex patterns and length constraints
+- **Merge existing answers:** Reuses high-confidence answers from prior runs that were skipped during extraction
+
+### Phase 7B — Waterfall Cascade *(optional)*
+
+Per-field resolution for low-confidence answers using premium data sources:
+
+- Evaluates each field below `waterfall.confidence_threshold` (default 0.7)
+- Applies configured premium providers (paid lookups, specialized APIs) per field
+- Respects per-company budget: `waterfall.max_premium_cost_usd` (default $2)
+- Results merged back into field values before report generation
 
 ### Phase 8 — Enrichment Report
 
-- Plaintext report per account written to a single SF long text field
-- Contains: fields populated (✓), fields not found (✗), low confidence (⚠), sources used, errors, timestamp, quality score
+- Markdown report per account written to a single SF long text field
+- Contains: phase results, fields populated (✓), fields not found (✗), low confidence (⚠), tier breakdown, sources used, cost, timestamp
 
 ### Phase 9 — Quality Gate → Salesforce + Notion Update
 
-- Score >= threshold → CRUD update to SF via REST API (dynamic field mapping from Field Registry)
+- Quality score computed from field coverage + confidence
+- Score >= `quality_score_threshold` (default 0.6) → CRUD update to SF via REST API (dynamic field mapping from Field Registry)
 - Score < threshold → POST to ToolJet webhook for Research Team manual review
 - **Always:** Update the Notion Lead Tracker page with enrichment status, quality score, fields populated count, and timestamp
+- Salesforce + Notion updates run concurrently (independent operations)
 
 ---
 
@@ -127,28 +167,33 @@ flowchart TD
     PROBE -->|"clean HTML"| CLASS["Phase 2: Page Classification<br>(Haiku)"]
     PROBE -->|"blocked / JS"| FC["Firecrawl Fallback<br>Browser + Proxy"]
     FC --> CLASS
-    GO --> GPBBB["Phase 1B: Firecrawl<br>GP + BBB + PPP + SoS"]
-    GO --> LI["Phase 1C: Perplexity<br>LinkedIn -> Haiku JSON"]
-    GPBBB --> CLASS
+    GO --> SCRAPE["Phase 1B: Search-then-Scrape<br>Jina Search → Scrape Chain<br>(Google Maps + BBB + SoS)"]
+    GO --> LI["Phase 1C: Perplexity<br>LinkedIn → Haiku JSON"]
+    GO --> PPP["Phase 1D: PPP Loan Lookup<br>(Fuzzy Name Match)"]
+    SCRAPE --> CLASS
     CLASS --> IDX["Page Index"]
-    IDX --> ROUTER["Phase 3: Question Router<br>(Go code)"]
-    ROUTER --> T1["Phase 4: Tier 1 -- Haiku<br>~70 Qs · Fact Extraction"]
-    T1 -->|"confidence < 0.4"| T2
-    ROUTER --> T2["Phase 5: Tier 2 -- Sonnet<br>~25 Qs · Multi-page Synthesis"]
-    T2 --> PREP["Phase 6A: Haiku Context Prep<br>Summarize crawl -> focused extracts"]
-    PREP --> T3["Phase 6B: Tier 3 -- Opus<br>5 Qs · Prepared Context"]
-    T1 --> AGG["Phase 7: Aggregation<br>(Haiku)"]
-    T2 --> AGG
+    IDX --> ROUTER["Phase 3: Question Router<br>(Go code + answer skip)"]
+    ROUTER --> T1["T1: Haiku<br>~70 Qs · Fact Extraction"]
+    ROUTER --> T2N["T2-native: Sonnet<br>~25 Qs · Multi-page"]
+    T1 -->|"confidence < 0.4"| T2E["T2-escalated: Sonnet<br>Low-confidence re-extract"]
+    T1 --> PREP["Phase 6A: Haiku Context Prep<br>Summarize crawl → focused extracts"]
+    PREP --> T3["Phase 6B: Tier 3 — Opus<br>5 Qs · Prepared Context<br>(gated: off by default)"]
+    T1 --> AGG["Phase 7: Aggregation<br>+ Revenue Enrichment"]
+    T2N --> AGG
+    T2E --> AGG
     T3 --> AGG
     LI --> AGG
-    AGG --> RPT["Phase 8: Enrichment Report"]
+    PPP --> AGG
+    AGG --> WF["Phase 7B: Waterfall Cascade<br>(optional premium sources)"]
+    WF --> RPT["Phase 8: Enrichment Report"]
     RPT --> GATE{"Phase 9:<br>Quality Gate"}
-    GATE -->|"Score >= threshold"| SF["Salesforce<br>(REST API CRUD)"]
-    GATE -->|"Score < threshold"| TJ["ToolJet Webhook<br>(Research Team Review)"]
+    GATE -->|"Score ≥ 0.6"| SF["Salesforce<br>(REST API CRUD)"]
+    GATE -->|"Score < 0.6"| TJ["ToolJet Webhook<br>(Manual Review)"]
     GATE -->|"Always"| NLT2["Notion Lead Tracker<br>(Status Update)"]
     TJ --> SF
-    GO -.->|"run log writes"| NEON["Neon Postgres<br>(Run Log + Staging)"]
+    GO -.->|"run log + cache"| NEON["Neon Postgres<br>(Runs · Phases · Caches · Checkpoints)"]
     GO -.->|"registry reads"| NREG["Notion DBs<br>(Question + Field Registries)"]
+    GO -.->|"revenue estimates"| FED["fed_data.* Tables<br>(Fedsync)"]
 ```
 
 ---
@@ -159,57 +204,71 @@ flowchart TD
 research-cli/
 ├── cmd/
 │   ├── root.go              # cobra root command, viper config init, zap logger init
-│   ├── import.go            # `research-cli import --csv leads.csv` -> Notion Lead Tracker
-│   ├── run.go               # `research-cli run --url acme.com --sf-id 001xxx` -> single company
-│   ├── batch.go             # `research-cli batch --limit 100` -> process queued leads from Notion
-│   └── serve.go             # `research-cli serve --port 8080` -> webhook listener (Fly auto-stop)
+│   ├── import.go            # `research-cli import --csv leads.csv` → Notion Lead Tracker
+│   ├── run.go               # `research-cli run --url acme.com --sf-id 001xxx` → single company
+│   ├── batch.go             # `research-cli batch --limit 100` → process queued leads from Notion
+│   ├── serve.go             # `research-cli serve --port 8080` → webhook listener (Fly auto-stop)
+│   └── fedsync.go           # `research-cli fedsync {migrate,status,sync,xref}` → federal data sync
+├── config/                  # waterfall config YAML, etc.
 ├── internal/
 │   ├── config/
-│   │   └── config.go        # viper config struct + loader
+│   │   └── config.go        # viper config struct + loader (includes FedsyncConfig, WaterfallConfig, PricingConfig)
 │   ├── pipeline/
 │   │   ├── pipeline.go      # orchestrates phases 1-9 for a single company
-│   │   ├── crawl.go         # Phase 1A: orchestrator (local-first -> Firecrawl fallback)
+│   │   ├── crawl.go         # Phase 1A: orchestrator (local-first → Firecrawl fallback)
 │   │   ├── localcrawl.go    # Local crawl: net/http probe + colly link discovery + html-to-markdown
 │   │   ├── blockdetect.go   # Cloudflare / captcha / JS-shell detection heuristics
-│   │   ├── scrape.go        # Phase 1B: Firecrawl single-page scrapes (GP, BBB, PPP, SoS)
-│   │   ├── linkedin.go      # Phase 1C: Perplexity -> Haiku JSON
-│   │   ├── classify.go      # Phase 2: Haiku page classification
-│   │   ├── router.go        # Phase 3: question -> page matching
-│   │   ├── extract.go       # Phases 4-6: tiered Claude calls
-│   │   ├── aggregate.go     # Phase 7: merge + validate
+│   │   ├── scrape.go        # Phase 1B: Jina Search → scrape chain (Google Maps, BBB, SoS)
+│   │   ├── linkedin.go      # Phase 1C: Perplexity → Haiku JSON
+│   │   ├── classify.go      # Phase 2: Haiku page classification (heuristic + LLM)
+│   │   ├── router.go        # Phase 3: question → page matching + high-confidence skip
+│   │   ├── extract.go       # Phases 4-6: tiered Claude calls (T1∥T2-native, T2-escalated, T3)
+│   │   ├── aggregate.go     # Phase 7: merge + validate + revenue enrichment
 │   │   ├── report.go        # Phase 8: enrichment report
 │   │   └── gate.go          # Phase 9: quality gate + SF write + Notion update
+│   ├── scrape/              # scrape chain abstraction (Jina Reader → Firecrawl fallback)
+│   ├── waterfall/           # Phase 7B: per-field waterfall cascade
+│   │   └── provider/        # premium data source providers
+│   ├── cost/                # per-model cost calculation (Claude, Jina, Perplexity, Firecrawl)
+│   ├── estimate/            # revenue estimation from CBP data
 │   ├── registry/
 │   │   ├── question.go      # reads Question Registry from Notion API
 │   │   └── field.go         # reads Field Registry from Notion API
 │   ├── store/
-│   │   ├── store.go         # interface: RunLog, Staging (Neon or SQLite)
+│   │   ├── store.go         # interface: Runs, Phases, Caches, Checkpoints (Neon or SQLite)
 │   │   ├── postgres.go      # pgx implementation for Neon
 │   │   └── sqlite.go        # modernc.org/sqlite implementation for local dev
-│   └── model/
-│       ├── company.go       # Company, EnrichmentResult, QualityReport
-│       ├── page.go          # CrawledPage, PageIndex, PageClassification
-│       ├── question.go      # Question, QuestionRegistry, TierBatch
-│       └── field.go         # FieldMapping, FieldRegistry
+│   ├── model/
+│   │   ├── company.go       # Company, Run, RunResult, EnrichmentResult, FieldValue, Checkpoint
+│   │   ├── page.go          # CrawledPage, PageIndex, PageClassification, CrawlResult, ProbeResult
+│   │   ├── question.go      # Question, RoutedBatches, ExtractionAnswer, Contradiction, TokenUsage
+│   │   └── field.go         # FieldMapping, FieldRegistry (indexed by key + SF name)
+│   ├── db/                  # shared DB helpers (BulkUpsert, CopyFrom)
+│   ├── fetcher/             # HTTP/FTP download, CSV/XML/JSON/XLSX/ZIP streaming
+│   ├── ocr/                 # PDF text extraction (pdftotext → Mistral fallback)
+│   ├── fedsync/             # federal data sync subsystem
+│   │   ├── migrate.go       # embed.FS migration runner → fed_data.schema_migrations
+│   │   ├── synclog.go       # sync log tracking (start, complete, fail)
+│   │   ├── migrations/      # 40+ SQL migration files (001-040)
+│   │   ├── dataset/         # 26 dataset implementations
+│   │   │   ├── interface.go # Dataset interface, Phase, Cadence, SyncResult
+│   │   │   ├── engine.go    # Engine: Run() orchestration loop
+│   │   │   ├── registry.go  # Registry: maps names → Dataset impls
+│   │   │   ├── schedule.go  # ShouldRun helpers: Daily, Weekly, Monthly, Quarterly, Annual
+│   │   │   └── *.go         # 26 dataset files (cbp, qcew, fpds, adv_part1, form_d, etc.)
+│   │   ├── transform/       # NAICS, FIPS, SIC normalization
+│   │   ├── resolve/         # entity resolution (CRD↔CIK fuzzy matching)
+│   │   └── xbrl/            # XBRL JSON-LD fact parser
+│   └── company/             # company matching utilities
 ├── pkg/
-│   ├── anthropic/
-│   │   ├── client.go        # Claude Messages API client
-│   │   ├── batch.go         # Batch API: create, poll, retrieve results
-│   │   └── cache.go         # prompt caching helpers (primer strategy)
-│   ├── firecrawl/
-│   │   ├── client.go        # Firecrawl v2: crawl, scrape, batch scrape
-│   │   └── poll.go          # async job polling with backoff
-│   ├── perplexity/
-│   │   └── client.go        # Perplexity chat completions (OpenAI-compatible)
-│   ├── salesforce/
-│   │   ├── client.go        # auth (OAuth 2.0 JWT Bearer), token refresh
-│   │   ├── query.go         # SOQL queries
-│   │   ├── crud.go          # single record CRUD
-│   │   └── composite.go     # sObject Collections (bulk update up to 200)
-│   └── notion/
-│       ├── client.go        # Notion API client wrapper
-│       ├── database.go      # query database, create page, update page
-│       └── csv.go           # CSV -> Notion page mapper
+│   ├── anthropic/           # Claude Messages + Batch + prompt caching
+│   ├── firecrawl/           # Firecrawl v2: crawl, scrape (fallback only)
+│   ├── jina/                # Jina AI: Reader (scrape) + Search (discovery)
+│   ├── perplexity/          # Perplexity chat completions (sonar-pro)
+│   ├── salesforce/          # JWT auth, SOQL, CRUD, sObject Collections
+│   ├── notion/              # DB query, page create/update, CSV mapper
+│   └── ppp/                 # PPP loan dataset querier (fuzzy name match)
+├── testdata/                # test fixtures (CSV, JSON, baseline results)
 ├── config.yaml              # default config (viper)
 ├── Dockerfile
 ├── fly.toml
@@ -229,14 +288,17 @@ research-cli/
 | **Eris** | `github.com/rotisserie/eris` | Error wrapping with stack traces | `eris.Wrap(err, "firecrawl crawl failed")`. Unwrap for structured error reporting in run log. |
 | **pgx** | `github.com/jackc/pgx/v5` | Postgres driver for Neon | Connection pooling via `pgxpool`. Neon requires SSL (`sslmode=require`). |
 | **modernc sqlite** | `modernc.org/sqlite` | Pure Go SQLite — local dev, no CGO | Same schema as Neon. Swapped via `store.Store` interface. |
-| **errgroup** | `golang.org/x/sync/errgroup` | Structured concurrency for parallel phases | Fan out Phase 1A/1B/1C in parallel. Limit concurrency for API rate limits. |
+| **errgroup** | `golang.org/x/sync/errgroup` | Structured concurrency for parallel phases | Fan out Phase 1A/1B/1C/1D in parallel. T1∥T2-native overlap. |
 | **go-salesforce** | `github.com/k-capehart/go-salesforce/v3` | Salesforce REST API wrapper | SOQL, CRUD, Collections. On awesome-go. Actively maintained. |
 | **notionapi** | `github.com/jomei/notionapi` | Notion API client | Database query, page create/update. Used for Lead Tracker + Registry reads. |
 | **colly** | `github.com/gocolly/colly/v2` | Web crawling — link discovery, depth control, robots.txt | Phase 1A local crawl. Respects robots.txt. Depth 2, cap 50 pages. Falls back to Firecrawl on block. |
 | **html-to-markdown** | `github.com/JohannesKaufmann/html-to-markdown/v2` | HTML → clean markdown conversion | Replaces Firecrawl's markdown output for locally crawled pages. Handles tables, lists, links. |
 | **anthropic-sdk-go** | `github.com/anthropics/anthropic-sdk-go` | Official Anthropic SDK — Messages + Batch API | Supports prompt caching, batch create/poll/results. Use for all Claude calls. |
+| **jlaffaye/ftp** | `github.com/jlaffaye/ftp` | FTP client for SEC EDGAR bulk downloads | Used by fedsync datasets. |
+| **tealeg/xlsx** | `github.com/tealeg/xlsx/v2` | XLSX parsing | Used by fedsync for Excel-format datasets. |
+| **x/time/rate** | `golang.org/x/time/rate` | Per-host rate limiting | SEC 10 req/s, SAM.gov 5 req/s, default 20 req/s. |
 
-**No SDK for Firecrawl or Perplexity in Go.** Both are simple REST APIs — use `net/http` with typed request/response structs. Perplexity is OpenAI-compatible, so any OpenAI Go client works, but raw HTTP is cleaner for a single endpoint.
+**No SDK for Firecrawl, Jina, or Perplexity in Go.** All are simple REST APIs — use `net/http` with typed request/response structs. Jina AI provides Reader (scrape) and Search (discovery) endpoints. Perplexity is OpenAI-compatible.
 
 ---
 
@@ -809,98 +871,185 @@ Content-Type: application/json
 
 ## Data Model
 
-### Neon Postgres (Run Log + Staging)
+### Store Interface
 
-**Why Neon, not Notion, for the run log?** The Go binary writes status updates at every phase transition (~9 writes per company). At 100 companies/batch, that's 900 writes in minutes. Notion's 3 req/s limit would bottleneck the pipeline. Neon handles this trivially. The Notion Lead Tracker gets a single summary update at the end of each run.
-
-```sql
--- Run log: one row per company enrichment run
-CREATE TABLE runs (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_name    TEXT NOT NULL,
-    company_url     TEXT NOT NULL,
-    sf_account_id   TEXT,
-    notion_page_id  TEXT,
-    status          TEXT NOT NULL DEFAULT 'queued',
-        -- queued -> crawling -> classifying -> extracting -> aggregating -> writing_sf -> complete | failed
-    quality_score   REAL,
-    fields_populated INTEGER,
-    fields_missing   INTEGER,
-    fields_low_conf  INTEGER,
-    pages_crawled    INTEGER,
-    tier3_used       BOOLEAN DEFAULT FALSE,
-    estimated_cost   REAL,
-    error_summary    TEXT,
-    sent_to_tooljet  BOOLEAN DEFAULT FALSE,
-    started_at       TIMESTAMPTZ,
-    completed_at     TIMESTAMPTZ,
-    created_at       TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_runs_status ON runs(status);
-CREATE INDEX idx_runs_sf_account ON runs(sf_account_id);
-CREATE INDEX idx_runs_created ON runs(created_at DESC);
-
--- Phase timing: one row per phase per run
-CREATE TABLE run_phases (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id      UUID REFERENCES runs(id),
-    phase       TEXT NOT NULL,  -- 'crawl', 'classify', 'tier1', 'tier2', 'tier3', 'aggregate', 'sf_write'
-    status      TEXT NOT NULL DEFAULT 'running',  -- running -> complete | failed
-    started_at  TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ,
-    input_tokens  INTEGER,
-    output_tokens INTEGER,
-    cached_tokens INTEGER,
-    estimated_cost REAL,
-    error_detail TEXT,
-    metadata     JSONB  -- phase-specific data (e.g., pages crawled, questions routed, batch IDs)
-);
-
-CREATE INDEX idx_phases_run ON run_phases(run_id);
-
--- Crawl cache: avoid re-crawling recently crawled sites
-CREATE TABLE crawl_cache (
-    company_url  TEXT PRIMARY KEY,
-    crawl_data   JSONB NOT NULL,  -- full crawl result (page markdown + metadata)
-    page_index   JSONB,           -- classified page index
-    crawled_at   TIMESTAMPTZ DEFAULT NOW(),
-    expires_at   TIMESTAMPTZ DEFAULT NOW() + INTERVAL '7 days'
-);
-
-CREATE INDEX idx_cache_expires ON crawl_cache(expires_at);
-```
-
-### SQLite (Local Dev — Same Schema)
+The `Store` interface (`internal/store/store.go`) abstracts all persistence. Implemented by both `postgres.go` (Neon) and `sqlite.go` (local dev). Selected by `store.driver` in config.
 
 ```go
-// internal/store/store.go
 type Store interface {
-    CreateRun(ctx context.Context, run *model.Run) error
-    UpdateRunStatus(ctx context.Context, runID string, status string) error
+    // Runs
+    CreateRun(ctx context.Context, company model.Company) (*model.Run, error)
+    UpdateRunStatus(ctx context.Context, runID string, status model.RunStatus) error
     UpdateRunResult(ctx context.Context, runID string, result *model.RunResult) error
     GetRun(ctx context.Context, runID string) (*model.Run, error)
     ListRuns(ctx context.Context, filter RunFilter) ([]model.Run, error)
 
-    CreatePhase(ctx context.Context, phase *model.RunPhase) error
+    // Phases
+    CreatePhase(ctx context.Context, runID string, name string) (*model.RunPhase, error)
     CompletePhase(ctx context.Context, phaseID string, result *model.PhaseResult) error
 
+    // Crawl cache (24h TTL)
     GetCachedCrawl(ctx context.Context, companyURL string) (*model.CrawlCache, error)
-    SetCachedCrawl(ctx context.Context, cache *model.CrawlCache) error
+    SetCachedCrawl(ctx context.Context, companyURL string, pages []model.CrawledPage, ttl time.Duration) error
+    DeleteExpiredCrawls(ctx context.Context) (int, error)
+
+    // LinkedIn cache (per-domain)
+    GetCachedLinkedIn(ctx context.Context, domain string) ([]byte, error)
+    SetCachedLinkedIn(ctx context.Context, domain string, data []byte, ttl time.Duration) error
+
+    // Scrape cache (per-URL Firecrawl/Jina result)
+    GetCachedScrape(ctx context.Context, urlHash string) ([]byte, error)
+    SetCachedScrape(ctx context.Context, urlHash string, content []byte, ttl time.Duration) error
+
+    // High-confidence answer lookup (skip re-extraction optimization)
+    GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64) ([]model.ExtractionAnswer, error)
+
+    // Checkpoint/resume (saves intermediate state for failure recovery)
+    SaveCheckpoint(ctx context.Context, companyID string, phase string, data []byte) error
+    LoadCheckpoint(ctx context.Context, companyID string) (*model.Checkpoint, error)
+    DeleteCheckpoint(ctx context.Context, companyID string) error
+
+    // Cache cleanup
+    DeleteExpiredLinkedIn(ctx context.Context) (int, error)
+    DeleteExpiredScrapes(ctx context.Context) (int, error)
+
+    // Lifecycle
+    Ping(ctx context.Context) error
+    Migrate(ctx context.Context) error
+    Close() error
 }
 ```
 
-Both `postgres.go` and `sqlite.go` implement this interface. Viper config selects which:
+### Core Model Types
 
-```yaml
-# config.yaml
-store:
-  driver: "postgres"  # or "sqlite"
-  postgres:
-    url: "${RESEARCH_DATABASE_URL}"  # Neon connection string from Fly secrets
-  sqlite:
-    path: "./data/research.db"
+```go
+// Company — input to the pipeline
+type Company struct {
+    URL, Name, SalesforceID, NotionPageID string
+    Location, City, State, ZipCode, Street string
+}
+
+// Run — one enrichment run per company
+type Run struct {
+    ID        string
+    Company   Company
+    Status    RunStatus  // queued → crawling → classifying → extracting → aggregating → writing_sf → complete | failed
+    Result    *RunResult
+    CreatedAt, UpdatedAt time.Time
+}
+
+// RunResult — final outcome of a run
+type RunResult struct {
+    Score          float64
+    FieldsFound    int
+    FieldsTotal    int
+    TotalTokens    int
+    TotalCost      float64
+    Phases         []PhaseResult
+    Answers        []ExtractionAnswer
+    Report         string
+    SalesforceSync bool
+}
+
+// ExtractionAnswer — result of extracting an answer for a question
+type ExtractionAnswer struct {
+    QuestionID    string
+    FieldKey      string
+    Value         any
+    Confidence    float64          // 0.0–1.0
+    Source        string           // source page URL
+    SourceURL     string
+    Tier          int              // 1, 2, or 3
+    Reasoning     string
+    DataAsOf      *time.Time
+    Contradiction *Contradiction   // flagged when tiers disagree
+}
+
+// Contradiction — when two tiers disagree with moderate+ confidence on both sides
+type Contradiction struct {
+    OtherTier       int
+    OtherValue      any
+    OtherConfidence float64
+}
+
+// FieldValue — resolved value ready for Salesforce
+type FieldValue struct {
+    FieldKey   string
+    SFField    string
+    Value      any
+    Confidence float64
+    Source     string
+    Tier       int
+    DataAsOf   *time.Time
+}
+
+// FieldMapping — maps internal field key to SF field (from Field Registry)
+type FieldMapping struct {
+    Key             string
+    SFField         string
+    SFObject        string
+    DataType        string
+    Required        bool
+    MaxLength       int
+    ValidationRegex *regexp.Regexp  // pre-compiled at registry load
+    Status          string
+}
+
+// FieldRegistry — indexed collection with O(1) lookup by key or SF name
+type FieldRegistry struct {
+    Fields   []FieldMapping
+    byKey    map[string]*FieldMapping
+    bySFName map[string]*FieldMapping
+    required []*FieldMapping
+}
+
+// TokenUsage — tracks token consumption per phase
+type TokenUsage struct {
+    InputTokens         int
+    OutputTokens        int
+    CacheCreationTokens int     // prompt caching: tokens written to cache
+    CacheReadTokens     int     // prompt caching: tokens read from cache
+    Cost                float64 // USD
+}
+
+// EnrichmentResult — final pipeline output
+type EnrichmentResult struct {
+    Company     Company
+    RunID       string
+    Score       float64
+    Answers     []ExtractionAnswer
+    FieldValues map[string]FieldValue
+    PPPMatches  []ppp.LoanMatch
+    Report      string
+    Phases      []PhaseResult
+    TotalTokens int
+    TotalCost   float64
+}
+
+// Checkpoint — intermediate state for resume after failure
+type Checkpoint struct {
+    CompanyID string
+    Phase     string    // e.g., "t1_complete"
+    Data      []byte    // JSON-encoded answers
+    CreatedAt time.Time
+}
 ```
+
+### Neon Postgres Schema (Enrichment)
+
+**Why Neon, not Notion, for the run log?** The Go binary writes status updates at every phase transition (~12 writes per company with all sub-phases). At 100 companies/batch, that's 1,200 writes in minutes. Notion's 3 req/s limit would bottleneck the pipeline. Neon handles this trivially.
+
+Tables:
+- `runs` — one row per enrichment run (id, company_url, company_name, status, result JSONB, timestamps)
+- `run_phases` — one row per phase per run (id, run_id, name, status, result JSONB, started_at, completed_at)
+- `crawl_cache` — cached crawl results per company URL (24h TTL)
+- `linkedin_cache` — cached LinkedIn data per domain
+- `scrape_cache` — cached scrape results per URL hash
+- `checkpoints` — intermediate pipeline state for resume after failure
+
+### Neon Postgres Schema (Fedsync)
+
+All fedsync tables live in the `fed_data` schema, separate from enrichment tables. Migrations tracked in `fed_data.schema_migrations`. See the fedsync section below for details.
 
 ---
 
@@ -989,158 +1138,267 @@ func LoadQuestionRegistry(ctx context.Context, client *notionapi.Client, dbID st
 
 ## Page Type Taxonomy
 
-| Page Type | Description | Source |
-|---|---|---|
-| `homepage` | Main landing page — company overview, value prop | Firecrawl (company) |
-| `about` | Company history, mission, values, team overview | Firecrawl (company) |
-| `leadership` | Executive bios, org chart, key personnel | Firecrawl (company) |
-| `services` | Product/service descriptions, capabilities | Firecrawl (company) |
-| `contact` | Contact info, office locations | Firecrawl (company) |
-| `legal` | Terms, privacy policy, compliance disclosures | Firecrawl (company) |
-| `pricing` | Pricing tiers, packages, rate cards | Firecrawl (company) |
-| `case_studies` | Client stories, testimonials | Firecrawl (company) |
-| `industries` | Vertical/sector-specific pages | Firecrawl (company) |
-| `partners` | Partner ecosystem, integrations | Firecrawl (company) |
-| `investors` | IR pages, funding, financial disclosures | Firecrawl (company) |
-| `google_places` | Google Places — address, phone, rating, hours | Firecrawl (scrape) |
-| `bbb` | BBB — accreditation, rating, complaints | Firecrawl (scrape) |
-| `linkedin` | LinkedIn — overview, headcount, key personnel | Perplexity → Haiku |
-| `ppp` | PPP Federal Loan — revenue estimate, employee count | Firecrawl (scrape) |
-| `secretary_of_state` | State registry — legal entity, officers, status | Firecrawl (scrape) |
-| `other` | Catch-all for unclassifiable pages | Firecrawl (company) |
+### Company Website Pages (from Phase 1A crawl)
 
-Defined as a Go constant map in `internal/model/page.go`. Not a runtime config — too small and static.
+| Page Type | Description |
+|---|---|
+| `homepage` | Main landing page — company overview, value prop |
+| `about` | Company history, mission, values |
+| `services` | Service descriptions, capabilities |
+| `products` | Product pages, catalogs |
+| `pricing` | Pricing tiers, packages, rate cards |
+| `contact` | Contact info, office locations |
+| `team` | Executive bios, org chart, key personnel |
+| `careers` | Job listings, culture pages |
+| `blog` | Blog posts |
+| `news` | Press releases, news mentions |
+| `faq` | Frequently asked questions |
+| `testimonials` | Client stories, reviews |
+| `case_studies` | Detailed case studies |
+| `partners` | Partner ecosystem, integrations |
+| `legal` | Terms, privacy policy, compliance disclosures |
+| `investors` | IR pages, funding, financial disclosures |
+| `other` | Catch-all for unclassifiable pages |
+
+### External Source Pages (from Phase 1B/1C)
+
+| Page Type | Source | Discovery |
+|---|---|---|
+| `google_maps` | Google Maps — address, phone, rating, hours | Direct URL construction → scrape chain |
+| `bbb_profile` | BBB — accreditation, rating, complaints | Jina Search `site:bbb.org` → scrape chain |
+| `government_registry` | State business registry — legal entity, officers, status | Jina Search → scrape chain |
+| `linkedin` | LinkedIn — overview, headcount, key personnel | Perplexity → Haiku JSON → synthetic page |
+
+External page types are auto-classified by title prefix (e.g., `[bbb]` → `bbb_profile`). They are always included as supplementary context during question routing, regardless of a question's preferred page types.
+
+Defined as Go constants in `internal/model/page.go`.
 
 ---
 
 ## Question Router (Phase 3)
 
-The router is pure Go in `internal/pipeline/router.go`. Same logic as the original design but with proper types.
-
-```go
-func RouteQuestions(pageIndex model.PageIndex, registry []model.Question) *model.RoutedBatches {
-    result := &model.RoutedBatches{
-        Tier1: make([]model.RoutedQuestion, 0),
-        Tier2: make([]model.RoutedQuestion, 0),
-        Tier3: make([]model.RoutedQuestion, 0),
-    }
-
-    for _, q := range registry {
-        // LinkedIn questions bypass routing
-        if q.Source == "perplexity" {
-            continue
-        }
-
-        // Match relevant pages from the Page Index
-        var matched []model.ClassifiedPage
-        for _, pt := range q.RelevantPageTypes {
-            if pages, ok := pageIndex[pt]; ok {
-                for _, p := range pages {
-                    if p.Quality != "irrelevant" {
-                        matched = append(matched, p)
-                    }
-                }
-            }
-        }
-
-        if len(matched) == 0 {
-            result.Skipped = append(result.Skipped, model.SkippedQuestion{
-                Key: q.Key, Reason: "no_source",
-            })
-            continue
-        }
-
-        routed := model.RoutedQuestion{Question: q, MatchedPages: matched}
-        switch q.Tier {
-        case 1:
-            result.Tier1 = append(result.Tier1, routed)
-        case 2:
-            result.Tier2 = append(result.Tier2, routed)
-        case 3:
-            result.Tier3 = append(result.Tier3, routed)
-        }
-    }
-
-    return result
-}
-```
+The router is pure Go in `internal/pipeline/router.go`. Matches questions to relevant pages from the Page Index and groups them by tier.
 
 **Key routing rules:**
 
+- Each question declares preferred `page_types`; if none specified, all pages are eligible
+- **External source pages** (`bbb_profile`, `google_maps`, `government_registry`, `linkedin`) are always included as supplementary context regardless of a question's preferred types
+- Questions with no matched pages are skipped (reason: `"no_source"`)
 - **Tier 1 (Haiku)** gets only its matched pages — main cost optimization lever
-- **Tier 2 (Sonnet)** gets Page Index + all Tier 1 answers as additional context
+- **Tier 2 (Sonnet)** gets relevant pages + all Tier 1 answers as additional context
 - **Tier 3 (Opus)** gets **prepared context** from Haiku summarization — not raw crawl. Each question receives a focused ~25K token extract instead of the full ~150K token crawl + all prior answers
 - **Confidence escalation:** Tier 1 answers below `confidence_escalation_threshold` (0.4) re-queue into Tier 2
+
+**Post-routing optimizations (applied in `pipeline.go`):**
+
+- **High-confidence answer skip:** Questions whose field keys already have answers with confidence ≥ `skip_confidence_threshold` (default 0.8) from prior runs are removed from all tier batches. Existing answers are merged during aggregation.
+- **Checkpoint/resume:** If a prior run completed T1 but failed later, cached T1 answers are reused instead of re-running extraction.
 
 ---
 
 ## Configuration
 
 ```yaml
-# config.yaml -- loaded by Viper. Env vars override with RESEARCH_ prefix.
+# config.yaml — loaded by Viper. Env vars override with RESEARCH_ prefix.
 
 store:
-  driver: "postgres"  # "postgres" (Neon) or "sqlite" (local dev)
-  postgres:
-    url: "${RESEARCH_DATABASE_URL}"
-  sqlite:
-    path: "./data/research.db"
+  driver: "postgres"          # "postgres" (Neon) or "sqlite" (local dev)
+  database_url: "${RESEARCH_DATABASE_URL}"
+  max_conns: 10
+  min_conns: 2
 
 notion:
   token: "${RESEARCH_NOTION_TOKEN}"
-  lead_tracker_db: "${RESEARCH_NOTION_LEAD_DB}"
-  question_registry_db: "${RESEARCH_NOTION_QUESTION_DB}"
-  field_registry_db: "${RESEARCH_NOTION_FIELD_DB}"
+  lead_db: "${RESEARCH_NOTION_LEAD_DB}"
+  question_db: "${RESEARCH_NOTION_QUESTION_DB}"
+  field_db: "${RESEARCH_NOTION_FIELD_DB}"
+
+jina:
+  key: "${RESEARCH_JINA_KEY}"
+  base_url: "https://r.jina.ai"            # Reader (scrape)
+  search_base_url: "https://s.jina.ai"     # Search (discovery)
 
 firecrawl:
-  api_key: "${RESEARCH_FIRECRAWL_KEY}"
-  base_url: "https://api.firecrawl.dev/v2"
+  key: "${RESEARCH_FIRECRAWL_KEY}"
+  base_url: "https://api.firecrawl.dev/v2"  # Fallback only
   max_pages: 50
-  exclude_paths:
-    - "/blog/*"
-    - "/news/*"
-    - "/press/*"
-    - "/careers/*"
 
 perplexity:
-  api_key: "${RESEARCH_PERPLEXITY_KEY}"
+  key: "${RESEARCH_PERPLEXITY_KEY}"
   base_url: "https://api.perplexity.ai"
-  model: "sonar"
+  model: "sonar-pro"
 
 anthropic:
-  api_key: "${RESEARCH_ANTHROPIC_KEY}"
-  tier1_model: "claude-haiku-4-5-20250214"
-  tier2_model: "claude-sonnet-4-5-20250514"
-  tier3_model: "claude-opus-4-6-20260115"
-  linkedin_json_model: "claude-haiku-4-5-20250214"
-  confidence_escalation_threshold: 0.4
-  tier3_gate: "always"  # "always" or "ambiguity_only"
+  key: "${RESEARCH_ANTHROPIC_KEY}"
+  haiku_model: "claude-haiku-4-5-20251001"
+  sonnet_model: "claude-sonnet-4-5-20250929"
+  opus_model: "claude-opus-4-6"
+  max_batch_size: 100
+  no_batch: false                 # true = use Messages API instead of Batch API
+  small_batch_threshold: 3        # bypass Batch API for <N items (latency optimization)
 
 salesforce:
   client_id: "${RESEARCH_SF_CLIENT_ID}"
   username: "${RESEARCH_SF_USERNAME}"
-  private_key_path: "${RESEARCH_SF_KEY_PATH}"
+  key_path: "${RESEARCH_SF_KEY_PATH}"
   login_url: "https://login.salesforce.com"
-  api_version: "v62.0"
-  quality_threshold: 0.7
 
 tooljet:
   webhook_url: "${RESEARCH_TOOLJET_WEBHOOK}"
 
-batch:
-  tier1_batch_size: 10
-  tier2_batch_size: 5
-  tier3_sequential: true
-  max_concurrent_companies: 10  # parallel enrichment runs in batch mode
+ppp:
+  similarity_threshold: 0.4       # fuzzy name match threshold
+  max_candidates: 10
 
-crawl_cache:
-  enabled: true
-  ttl_days: 7
+pipeline:
+  confidence_escalation_threshold: 0.4   # T1 answers below this escalate to T2
+  tier3_gate: "off"                      # "off", "always", "ambiguity_only"
+  quality_score_threshold: 0.6           # below this → manual review
+  max_cost_per_company_usd: 10.0         # cost budget gate for T3
+  skip_confidence_threshold: 0.8         # reuse existing answers above this
+
+crawl:
+  max_pages: 50
+  max_depth: 2
+  timeout_secs: 60
+  cache_ttl_hours: 24
+  exclude_paths: ["/blog/*", "/news/*", "/press/*", "/careers/*"]
+
+scrape:
+  search_timeout_secs: 15
+  search_retries: 1
+
+waterfall:
+  config_path: "config/waterfall.yaml"
+  confidence_threshold: 0.7        # fields below this enter waterfall
+  max_premium_cost_usd: 2.00       # per-company premium source budget
+
+batch:
+  max_concurrent_companies: 15     # parallel enrichment runs in batch mode
+
+server:
+  port: 8080
 
 log:
-  level: "info"  # debug, info, warn, error
-  format: "json"  # json (prod) or console (dev)
+  level: "info"    # debug, info, warn, error
+  format: "json"   # json (prod) or console (dev)
+
+# Fedsync config (see fedsync section)
+fedsync:
+  database_url: "${RESEARCH_FEDSYNC_DATABASE_URL}"  # falls back to store.database_url
+  temp_dir: "/tmp/fedsync"
+  sam_api_key: "${RESEARCH_FEDSYNC_SAM_API_KEY}"
+  fred_api_key: "${RESEARCH_FEDSYNC_FRED_API_KEY}"
+  bls_api_key: "${RESEARCH_FEDSYNC_BLS_API_KEY}"
+  census_api_key: "${RESEARCH_FEDSYNC_CENSUS_API_KEY}"
+  edgar_user_agent: "Sells Advisors blake@sellsadvisors.com"
+  mistral_api_key: "${RESEARCH_FEDSYNC_MISTRAL_API_KEY}"
+  ocr:
+    provider: "local"              # "local" (pdftotext) or "mistral"
+
+# Per-provider pricing rates (used by cost calculator)
+pricing:
+  anthropic:
+    claude-haiku-4-5-20251001:
+      input: 1.0      # $/MTok
+      output: 5.0
+      batch_discount: 0.5
+      cache_write_mul: 1.25
+      cache_read_mul: 0.1
+    claude-sonnet-4-5-20250929:
+      input: 3.0
+      output: 15.0
+      batch_discount: 0.5
+      cache_write_mul: 1.25
+      cache_read_mul: 0.1
+    claude-opus-4-6:
+      input: 5.0
+      output: 25.0
+      batch_discount: 0.5
+      cache_write_mul: 1.25
+      cache_read_mul: 0.1
+  jina:
+    per_mtok: 0.02
+  perplexity:
+    per_query: 0.005
+  firecrawl:
+    plan_monthly: 19.00
+    credits_included: 3000
 ```
+
+---
+
+## Fedsync — Federal Data Sync
+
+The fedsync subsystem incrementally syncs 26 federal datasets into `fed_data.*` Postgres tables. Runs daily via Fly.io cron; exits in <1s when no new data is expected.
+
+### Dataset Interface
+
+Each of 26 datasets implements the `Dataset` interface in `internal/fedsync/dataset/`:
+
+```go
+type Dataset interface {
+    Name() string                                                       // e.g., "cbp"
+    Table() string                                                     // e.g., "fed_data.cbp_data"
+    Phase() Phase                                                      // Phase1, Phase1B, Phase2, Phase3
+    Cadence() Cadence                                                  // Daily, Weekly, Monthly, Quarterly, Annual
+    ShouldRun(now time.Time, lastSync *time.Time) bool                 // scheduling check
+    Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error)
+}
+```
+
+The `Engine` iterates the registry, checks `ShouldRun()` for each dataset, calls `Sync()`, and records outcomes in `fed_data.sync_log`.
+
+### Datasets by Phase
+
+| Phase | Category | Datasets | Cadence |
+|---|---|---|---|
+| **1** | Market Intelligence | Census CBP, SUSB · BLS QCEW, OEWS · SAM.gov FPDS · Census Economic Census | Annual–Daily |
+| **1B** | Buyer Intelligence (SEC/EDGAR) | ADV Part 1A · IARD daily XML · 13F Holdings · Form D · EDGAR Submissions · Entity Cross-ref | Daily–Quarterly |
+| **2** | Extended Intelligence | ADV Part 2 (OCR) · FINRA BrokerCheck · Form BD · OSHA ITA · EPA ECHO · Census NES, ASM · BLS ECI | Monthly–Annual |
+| **3** | On-Demand | ADV Part 3/CRS (OCR) · XBRL Facts · FRED Series · Census ABS · BLS CPS/LAUS · Census M3 | Daily–Annual |
+
+### Streaming Pattern (Large Datasets)
+
+Memory stays bounded regardless of dataset size:
+
+1. `fetcher.DownloadToFile()` → ZIP to temp dir
+2. `fetcher.ExtractZIP()` → CSV/TSV to temp dir
+3. `fetcher.StreamCSV()` → `<-chan []string` (row channel)
+4. Consumer batches rows (5,000–10,000) → `db.BulkUpsert()` or `db.CopyFrom()`
+
+### Rate Limiting
+
+Per-host limiters in `internal/fetcher/http.go` via `golang.org/x/time/rate`:
+
+| Host | Limit | Notes |
+|---|---|---|
+| SEC (efts/www/data.sec.gov) | 10 req/s | EDGAR requires `User-Agent` header |
+| SAM.gov | 5 req/s | |
+| Default | 20 req/s | |
+
+### Migrations
+
+SQL files embedded via `embed.FS` in `internal/fedsync/migrate.go`. Tracked in `fed_data.schema_migrations`. Applied in lexicographic order, idempotent (skips already-applied).
+
+### CLI Commands
+
+```bash
+research-cli fedsync migrate                            # apply schema migrations
+research-cli fedsync status                             # show sync log (last sync per dataset)
+research-cli fedsync sync                               # sync all due datasets
+research-cli fedsync sync --phase 1                     # sync Phase 1 only
+research-cli fedsync sync --datasets cbp,fpds --force   # force specific datasets
+research-cli fedsync sync --full                        # full historical reload
+research-cli fedsync xref                               # build entity cross-reference (CRD↔CIK)
+```
+
+### Integration with Enrichment
+
+Fedsync data feeds back into the enrichment pipeline in two ways:
+
+1. **Phase 1D — PPP Loan Lookup:** Queries `fed_data.ppp_*` tables for company name matches
+2. **Phase 7 — Revenue Enrichment:** Uses Census CBP data via the `estimate.RevenueEstimator` to augment extracted answers with revenue estimates based on NAICS code and employee count
 
 ---
 
