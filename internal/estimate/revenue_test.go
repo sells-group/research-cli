@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/pashagolub/pgxmock/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -297,6 +298,28 @@ func TestFormatRevenue(t *testing.T) {
 			assert.Equal(t, tt.expected, FormatRevenue(tt.amount))
 		})
 	}
+}
+
+func TestEstimate_ErrNoRows(t *testing.T) {
+	// Verify that pgx.ErrNoRows is handled gracefully (returns nil, nil)
+	// rather than treated as a real error.
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	// All levels return ErrNoRows directly (simulates pgx driver behavior).
+	for _, pattern := range []string{"541512%", "5415%", "54%"} {
+		mock.ExpectQuery("SELECT naics, year").
+			WithArgs(pattern, "06").
+			WillReturnError(pgx.ErrNoRows)
+	}
+
+	e := NewRevenueEstimator(mock)
+	_, err = e.Estimate(context.Background(), "541512", "06", 100)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no CBP data")
+
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestConfidenceSmallSample(t *testing.T) {

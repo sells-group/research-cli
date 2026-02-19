@@ -2,9 +2,11 @@ package estimate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
 
@@ -175,7 +177,7 @@ func (e *RevenueEstimator) queryMarketSize(ctx context.Context, naics, stateFIPS
 		&r.naics, &r.year, &r.totalEmp, &r.totalEst, &r.totalPayroll,
 	)
 	if err != nil {
-		if err.Error() == "no rows in result set" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, eris.Wrap(err, "query mv_market_size")
