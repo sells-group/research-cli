@@ -72,6 +72,20 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	return &Client{pool: pool, cfg: cfg}, nil
 }
 
+// NewFromPool creates a PPP client from an existing pgxpool.Pool.
+// The client does NOT own the pool — Close() is a no-op.
+// Use this when PPP data lives in fed_data.ppp_loans alongside other fedsync tables.
+func NewFromPool(p *pgxpool.Pool, cfg Config) *Client {
+	return &Client{pool: &sharedPool{Pool: p}, cfg: cfg}
+}
+
+// sharedPool wraps pgxpool.Pool with a no-op Close so we don't close a shared connection.
+type sharedPool struct {
+	*pgxpool.Pool
+}
+
+func (s *sharedPool) Close() {} // no-op: we don't own this pool
+
 // Close releases the connection pool.
 func (c *Client) Close() { c.pool.Close() }
 
@@ -109,7 +123,7 @@ const tier1SQL = `
 SELECT loannumber, borrowername, borroweraddress, borrowercity, borrowerstate, borrowerzip,
        currentapprovalamount, forgivenessamount, jobsreported, dateapproved, loanstatus,
        businesstype, naicscode, businessagedescription
-FROM ppp_loans
+FROM fed_data.ppp_loans
 WHERE borrowerstate = $1 AND UPPER(TRIM(borrowername)) = $2
 ORDER BY currentapprovalamount DESC`
 
@@ -127,7 +141,7 @@ const tier2SQL = `
 SELECT loannumber, borrowername, borroweraddress, borrowercity, borrowerstate, borrowerzip,
        currentapprovalamount, forgivenessamount, jobsreported, dateapproved, loanstatus,
        businesstype, naicscode, businessagedescription
-FROM ppp_loans
+FROM fed_data.ppp_loans
 WHERE borrowerstate = $1
   AND UPPER(REGEXP_REPLACE(TRIM(borrowername),
       '\s*,?\s*(LLC|L\.?L\.?C\.?|INC\.?|INCORPORATED|CORP\.?|CORPORATION|CO\.?|COMPANY|LTD\.?|LIMITED|L\.?P\.?|LLP|L\.?L\.?P\.?|PLLC|P\.?L\.?L\.?C\.?|P\.?C\.?|DBA|D/B/A)\s*\.?\s*$',
@@ -149,7 +163,7 @@ SELECT loannumber, borrowername, borroweraddress, borrowercity, borrowerstate, b
        currentapprovalamount, forgivenessamount, jobsreported, dateapproved, loanstatus,
        businesstype, naicscode, businessagedescription,
        similarity(UPPER(borrowername), $2) AS sim_score
-FROM ppp_loans
+FROM fed_data.ppp_loans
 WHERE borrowerstate = $1
   AND borrowername %% $2
   AND ($3::text IS NULL OR borrowercity ILIKE $3)

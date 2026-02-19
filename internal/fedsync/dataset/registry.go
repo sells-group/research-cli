@@ -25,6 +25,7 @@ func NewRegistry(cfg *config.Config) *Registry {
 	r.Register(&OEWS{})
 	r.Register(&FPDS{cfg: cfg})
 	r.Register(&EconCensus{cfg: cfg})
+	r.Register(&PPP{})
 
 	// Phase 1B: Buyer Intelligence (SEC/EDGAR)
 	r.Register(&ADVPart1{})
@@ -46,6 +47,7 @@ func NewRegistry(cfg *config.Config) *Registry {
 
 	// Phase 3: On-Demand
 	r.Register(&ADVPart3{cfg: cfg})
+	r.Register(&ADVEnrichment{cfg: cfg})
 	r.Register(&XBRLFacts{cfg: cfg})
 	r.Register(&FRED{cfg: cfg})
 	r.Register(&ABS{cfg: cfg})
