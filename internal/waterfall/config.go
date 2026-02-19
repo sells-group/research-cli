@@ -1,6 +1,7 @@
 package waterfall
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/rotisserie/eris"
@@ -67,7 +68,52 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.Fields[key] = fc
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return nil, eris.Wrap(err, "waterfall: invalid config")
+	}
+
 	return cfg, nil
+}
+
+// Validate checks that config values are within acceptable ranges.
+func (c *Config) Validate() error {
+	if err := validateThreshold("defaults.confidence_threshold", c.Defaults.ConfidenceThreshold); err != nil {
+		return err
+	}
+	if err := validateDecay("defaults.time_decay", c.Defaults.TimeDecay); err != nil {
+		return err
+	}
+	if c.Defaults.MaxPremiumCostUSD < 0 {
+		return fmt.Errorf("defaults.max_premium_cost_usd must be >= 0, got %f", c.Defaults.MaxPremiumCostUSD)
+	}
+	for key, fc := range c.Fields {
+		if err := validateThreshold(key+".confidence_threshold", fc.ConfidenceThreshold); err != nil {
+			return err
+		}
+		if fc.TimeDecay != nil {
+			if err := validateDecay(key+".time_decay", *fc.TimeDecay); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateThreshold(name string, val float64) error {
+	if val < 0 || val > 1 {
+		return fmt.Errorf("%s must be between 0.0 and 1.0, got %f", name, val)
+	}
+	return nil
+}
+
+func validateDecay(name string, dc DecayConfig) error {
+	if dc.HalfLifeDays <= 0 {
+		return fmt.Errorf("%s.half_life_days must be > 0, got %d", name, dc.HalfLifeDays)
+	}
+	if dc.Floor < 0 || dc.Floor > 1 {
+		return fmt.Errorf("%s.floor must be between 0.0 and 1.0, got %f", name, dc.Floor)
+	}
+	return nil
 }
 
 // GetFieldConfig returns the config for a field, falling back to defaults.

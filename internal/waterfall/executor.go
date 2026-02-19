@@ -281,11 +281,11 @@ func ApplyToFieldValues(fieldValues map[string]model.FieldValue, wr *WaterfallRe
 			continue
 		}
 
-		// Update confidence to effective (decayed) value.
+		// If winner is from a different source (e.g., premium upgrade), replace value.
+		originalConfidence := existing.Confidence
 		existing.Confidence = res.Winner.EffectiveConfidence
 
-		// If winner is from a different source (e.g., premium upgrade), replace value.
-		if res.Winner.Source != existing.Source && res.Winner.EffectiveConfidence > existing.Confidence {
+		if res.Winner.Source != existing.Source && res.Winner.EffectiveConfidence > originalConfidence {
 			existing.Value = res.Winner.Value
 			existing.Source = res.Winner.Source
 			existing.Tier = res.Winner.Tier
