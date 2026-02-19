@@ -654,6 +654,9 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			fieldValues = waterfall.ApplyToFieldValues(fieldValues, wr)
 			result.FieldValues = fieldValues
 			return &model.PhaseResult{
+				TokenUsage: model.TokenUsage{
+					Cost: wr.TotalPremiumUSD,
+				},
 				Metadata: map[string]any{
 					"fields_resolved":   wr.FieldsResolved,
 					"fields_total":      wr.FieldsTotal,
@@ -749,7 +752,7 @@ func (p *Pipeline) computePhaseCost(phase string, usage model.TokenUsage) float6
 	case "6_extract_t3":
 		modelName = p.cfg.Anthropic.OpusModel
 	default:
-		return 0
+		return usage.Cost // preserve any cost already set (e.g., waterfall premium)
 	}
 
 	// Warn if model has no pricing entry — cost will report as $0.

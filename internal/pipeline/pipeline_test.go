@@ -11,6 +11,8 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/scrape"
+	"github.com/sells-group/research-cli/internal/waterfall"
+	"github.com/sells-group/research-cli/internal/waterfall/provider"
 	scrapemocks "github.com/sells-group/research-cli/internal/scrape/mocks"
 	storemocks "github.com/sells-group/research-cli/internal/store/mocks"
 	"github.com/sells-group/research-cli/pkg/anthropic"
@@ -509,6 +511,201 @@ func TestPipeline_Checkpoint_ResumesFromT1(t *testing.T) {
 			}
 		}
 	}
+
+	st.AssertExpectations(t)
+}
+
+// --- Waterfall Phase 7B integration test ---
+
+// waterfallMockProvider implements provider.Provider for pipeline integration testing.
+type waterfallMockProvider struct {
+	name            string
+	supportedFields []string
+	costPerQuery    float64
+	queryResult     *provider.QueryResult
+}
+
+func (m *waterfallMockProvider) Name() string              { return m.name }
+func (m *waterfallMockProvider) SupportedFields() []string  { return m.supportedFields }
+func (m *waterfallMockProvider) CostPerQuery(_ []string) float64 { return m.costPerQuery }
+func (m *waterfallMockProvider) CanProvide(fieldKey string) bool {
+	for _, f := range m.supportedFields {
+		if f == fieldKey {
+			return true
+		}
+	}
+	return false
+}
+func (m *waterfallMockProvider) Query(_ context.Context, _ provider.CompanyIdentifier, _ []string) (*provider.QueryResult, error) {
+	return m.queryResult, nil
+}
+
+func TestPipeline_WithWaterfall(t *testing.T) {
+	ctx := context.Background()
+
+	company := model.Company{
+		URL:          "https://acme.com",
+		Name:         "Acme Corp",
+		SalesforceID: "001ABC",
+		NotionPageID: "page-123",
+	}
+
+	questions := []model.Question{
+		{ID: "q1", Text: "What industry?", Tier: 1, FieldKey: "industry", PageTypes: []model.PageType{model.PageTypeAbout}, OutputFormat: "string"},
+		{ID: "q2", Text: "How many employees?", Tier: 1, FieldKey: "employees", PageTypes: []model.PageType{model.PageTypeAbout}, OutputFormat: "number"},
+	}
+
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", DataType: "string", Required: true},
+		{Key: "employees", SFField: "NumberOfEmployees", DataType: "number"},
+	})
+
+	cfg := &config.Config{
+		Crawl: config.CrawlConfig{
+			MaxPages:      50,
+			MaxDepth:      2,
+			CacheTTLHours: 24,
+		},
+		Pipeline: config.PipelineConfig{
+			ConfidenceEscalationThreshold: 0.4,
+			Tier3Gate:                     "ambiguity_only",
+			QualityScoreThreshold:         0.5,
+		},
+		Anthropic: config.AnthropicConfig{
+			HaikuModel:  "claude-haiku-4-5-20251001",
+			SonnetModel: "claude-sonnet-4-5-20250929",
+			OpusModel:   "claude-opus-4-6",
+		},
+	}
+
+	// Set up waterfall executor with a mock provider.
+	now := time.Now()
+	wfCfg := &waterfall.Config{
+		Defaults: waterfall.DefaultConfig{
+			ConfidenceThreshold: 0.7,
+			TimeDecay:           waterfall.DecayConfig{HalfLifeDays: 365, Floor: 0.2},
+			MaxPremiumCostUSD:   5.0,
+		},
+		Fields: map[string]waterfall.FieldConfig{
+			"employees": {
+				ConfidenceThreshold: 0.65,
+				TimeDecay:           &waterfall.DecayConfig{HalfLifeDays: 180, Floor: 0.15},
+				Sources: []waterfall.SourceConfig{
+					{Name: "website_crawl", Tier: 0},
+					{Name: "testprovider", Tier: 2},
+				},
+			},
+		},
+	}
+
+	wfMock := &waterfallMockProvider{
+		name:            "testprovider",
+		supportedFields: []string{"employees"},
+		costPerQuery:    0.25,
+		queryResult: &provider.QueryResult{
+			Provider: "testprovider",
+			Fields:   []provider.FieldResult{{FieldKey: "employees", Value: 500, Confidence: 0.95, DataAsOf: &now}},
+			CostUSD:  0.25,
+		},
+	}
+
+	registry := provider.NewRegistry()
+	registry.Register(wfMock)
+	wfExec := waterfall.NewExecutor(wfCfg, registry).WithNow(now)
+
+	// --- Set up mocks (same pattern as TestPipeline_Run_FullFlow) ---
+	st := storemocks.NewMockStore(t)
+	st.On("CreateRun", mock.Anything, company).Return(&model.Run{
+		ID: "run-wf", Company: company, Status: model.RunStatusQueued,
+	}, nil)
+	st.On("UpdateRunStatus", mock.Anything, "run-wf", mock.AnythingOfType("model.RunStatus")).Return(nil)
+	st.On("CreatePhase", mock.Anything, "run-wf", mock.AnythingOfType("string")).Return(&model.RunPhase{ID: "phase-wf"}, nil)
+	st.On("CompletePhase", mock.Anything, "phase-wf", mock.AnythingOfType("*model.PhaseResult")).Return(nil)
+	st.On("GetCachedCrawl", mock.Anything, "https://acme.com").Return(&model.CrawlCache{
+		CompanyURL: "https://acme.com",
+		Pages: []model.CrawledPage{
+			{URL: "https://acme.com", Title: "Home", Markdown: "Welcome to Acme Corporation, a technology company."},
+			{URL: "https://acme.com/about", Title: "About Acme", Markdown: "Acme Corp has 200 employees and operates in the technology industry."},
+		},
+		CrawledAt: time.Now(),
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}, nil)
+	st.On("UpdateRunResult", mock.Anything, "run-wf", mock.AnythingOfType("*model.RunResult")).Return(nil)
+	st.On("GetCachedLinkedIn", mock.Anything, "acme.com").Return(nil, nil)
+	st.On("SetCachedLinkedIn", mock.Anything, "acme.com", mock.Anything, mock.Anything).Return(nil).Maybe()
+	st.On("GetHighConfidenceAnswers", mock.Anything, "https://acme.com", mock.AnythingOfType("float64")).Return(nil, nil)
+	st.On("LoadCheckpoint", mock.Anything, "https://acme.com").Return(nil, nil)
+	st.On("SaveCheckpoint", mock.Anything, "https://acme.com", mock.AnythingOfType("string"), mock.Anything).Return(nil).Maybe()
+	st.On("DeleteCheckpoint", mock.Anything, "https://acme.com").Return(nil)
+
+	s := scrapemocks.NewMockScraper(t)
+	s.On("Name").Return("mock").Maybe()
+	s.On("Supports", mock.Anything).Return(true).Maybe()
+	s.On("Scrape", mock.Anything, mock.Anything).Return(&scrape.Result{
+		Page: model.CrawledPage{URL: "https://example.com", Title: "External", Markdown: "Acme Corp info."},
+		Source: "mock",
+	}, nil).Maybe()
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
+
+	fcClient := firecrawlmocks.NewMockClient(t)
+
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string"), mock.Anything).
+		Return(&jina.SearchResponse{Code: 200, Data: []jina.SearchResult{{Title: "Ext", URL: "https://example.com/p", Content: "c"}}}, nil).Maybe()
+
+	pplxClient := perplexitymocks.NewMockClient(t)
+	pplxClient.On("ChatCompletion", mock.Anything, mock.AnythingOfType("perplexity.ChatCompletionRequest")).
+		Return(&perplexity.ChatCompletionResponse{
+			Choices: []perplexity.Choice{{Message: perplexity.Message{Content: "Acme Corp LinkedIn: Technology company, 200 employees."}}},
+			Usage:   perplexity.Usage{PromptTokens: 100, CompletionTokens: 50},
+		}, nil).Maybe()
+
+	aiClient := anthropicmocks.NewMockClient(t)
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(&anthropic.MessageResponse{
+			Content: []anthropic.ContentBlock{{Text: `{"page_type": "about", "confidence": 0.9, "value": "Technology", "company_name": "Acme Corp", "description": "Tech company", "industry": "Technology", "employee_count": "200", "headquarters": "NYC", "founded": "2010", "specialties": "Tech", "website": "https://acme.com", "linkedin_url": "https://linkedin.com/company/acme", "company_type": "Private", "reasoning": "from page", "source_url": "https://acme.com/about"}`}},
+			Usage:   anthropic.TokenUsage{InputTokens: 100, OutputTokens: 20},
+		}, nil)
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001ABC", mock.AnythingOfType("map[string]interface {}")).Return(nil).Maybe()
+
+	notionClient := notionmocks.NewMockClient(t)
+	notionClient.On("UpdatePage", mock.Anything, "page-123", mock.Anything).Return(nil, nil).Maybe()
+
+	pppClient := pppmocks.NewMockQuerier(t)
+	pppClient.On("FindLoans", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+		Return(nil, nil).Maybe()
+
+	// --- Run pipeline with waterfall ---
+	p := New(cfg, st, chain, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, nil, wfExec, questions, fields)
+
+	result, err := p.Run(ctx, company)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Verify Phase 7B appeared in phases.
+	phaseNames := make(map[string]bool)
+	var waterfallPhase *model.PhaseResult
+	for _, ph := range result.Phases {
+		phaseNames[ph.Name] = true
+		if ph.Name == "7b_waterfall" {
+			waterfallPhase = &ph
+		}
+	}
+	assert.True(t, phaseNames["7b_waterfall"], "Phase 7B should be present")
+	assert.True(t, phaseNames["7_aggregate"], "Phase 7 should also be present")
+
+	// Verify waterfall phase metadata.
+	if assert.NotNil(t, waterfallPhase) {
+		assert.Contains(t, waterfallPhase.Metadata, "premium_cost_usd")
+		assert.Contains(t, waterfallPhase.Metadata, "fields_resolved")
+		assert.Contains(t, waterfallPhase.Metadata, "fields_total")
+	}
+
+	// Verify total cost includes premium spend (Bug 2 fix).
+	assert.Greater(t, result.TotalCost, 0.0, "total cost should include premium spend")
 
 	st.AssertExpectations(t)
 }
