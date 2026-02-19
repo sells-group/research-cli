@@ -49,12 +49,13 @@ func mockDownloadToFileZIP(t *testing.T, innerName, content string) func(context
 }
 
 // expectBulkUpsert sets up pgxmock expectations for a db.BulkUpsert call.
-// BulkUpsert does: Begin -> CREATE TEMP TABLE -> COPY -> INSERT ON CONFLICT -> Commit.
+// BulkUpsert does: Begin -> CREATE TEMP TABLE -> COPY -> DELETE (dedup) -> INSERT ON CONFLICT -> Commit.
 func expectBulkUpsert(m pgxmock.PgxPoolIface, table string, cols []string, n int64) {
 	tempTable := fmt.Sprintf("_tmp_upsert_%s", strings.ReplaceAll(table, ".", "_"))
 	m.ExpectBegin()
 	m.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	m.ExpectCopyFrom(pgx.Identifier{tempTable}, cols).WillReturnResult(n)
+	m.ExpectExec("DELETE FROM").WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	m.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", n))
 	m.ExpectCommit()
 }
@@ -63,6 +64,36 @@ func expectBulkUpsert(m pgxmock.PgxPoolIface, table string, cols []string, n int
 func jsonBody(t *testing.T, v any) io.ReadCloser {
 	t.Helper()
 	data, err := json.Marshal(v)
+	require.NoError(t, err)
+	return io.NopCloser(strings.NewReader(string(data)))
+}
+
+// foiaMetadataBody builds the real FOIA metadata API JSON format from a foiaReportsMetadata.
+// The real API nests files under year keys: {"advFilingData": {"2025": {"files": [...]}, ...}}.
+func foiaMetadataBody(t *testing.T, meta foiaReportsMetadata) io.ReadCloser {
+	t.Helper()
+	nestSection := func(entries []foiaFileEntry) map[string]any {
+		section := map[string]any{}
+		byYear := map[string][]foiaFileEntry{}
+		for _, e := range entries {
+			yr := e.Year
+			if yr == "" {
+				yr = "2026"
+			}
+			byYear[yr] = append(byYear[yr], e)
+		}
+		for yr, files := range byYear {
+			section[yr] = map[string]any{"files": files}
+		}
+		return section
+	}
+	raw := map[string]any{
+		"advFilingData":  nestSection(meta.ADVFilingData),
+		"advBrochures":   nestSection(meta.ADVBrochures),
+		"advFirmCRSDocs": nestSection(meta.ADVFirmCRSDocs),
+		"advFirmCRS":     nestSection(meta.ADVFirmCRS),
+	}
+	data, err := json.Marshal(raw)
 	require.NoError(t, err)
 	return io.NopCloser(strings.NewReader(string(data)))
 }
@@ -504,20 +535,15 @@ func TestM3_Sync(t *testing.T) {
 
 	f := fetchermocks.NewMockFetcher(t)
 
+	// M3 now uses a single consolidated API call returning all data types.
+	// Census API returns "time" column (not "time_slot_id") when time=from+YYYY is used.
 	censusResp := [][]string{
-		{"cell_value", "time_slot_id", "category_code", "data_type_code"},
-		{"150000", "2024-06", "AMTMNO", "T"},
-		{"120000", "2024-05", "AMTMNO", "T"},
+		{"cell_value", "time", "category_code", "data_type_code", "seasonally_adj", "us"},
+		{"150000", "2024-06", "MTM", "NO", "yes", "*"},
+		{"120000", "2024-05", "MTM", "VS", "yes", "*"},
 	}
 
-	// M3 iterates over 4 categories. Return data for first, errors for rest.
-	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
-		return strings.Contains(url, "AMTMNO")
-	})).Return(jsonBody(t, censusResp), nil)
-
-	for i := 0; i < 3; i++ {
-		f.EXPECT().Download(mock.Anything, mock.Anything).Return(nil, errors.New("skip")).Maybe()
-	}
+	f.EXPECT().Download(mock.Anything, mock.Anything).Return(jsonBody(t, censusResp), nil).Once()
 
 	expectBulkUpsert(pool, "fed_data.m3_data", m3Cols, 2)
 
@@ -525,75 +551,6 @@ func TestM3_Sync(t *testing.T) {
 	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), result.RowsSynced)
-}
-
-// --- ADV Part 1: parseAndLoad ---
-
-func TestADVPart1_ParseAndLoad(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	csv := `crd_number,firm_name,sec_number,city,state,country,website,aum,num_accounts,num_employees,filing_date,report_date,raum,fund_id,fund_name,fund_type,gross_asset_value,net_asset_value,owner_name,owner_type,ownership_pct,is_control
-12345,Acme Advisors,801-12345,New York,NY,US,https://acme.com,5000000,100,25,2024-06-01,2024-03-31,4500000,FUND001,Acme Growth Fund,Hedge Fund,10000000,9500000,John Smith,INDIVIDUAL,75.5,Y
-67890,Beta Capital,801-67890,Chicago,IL,US,https://beta.com,2000000,50,10,2024-06-15,,,,,,,,,,
-`
-	r := strings.NewReader(csv)
-
-	firmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website", "aum", "num_accounts", "num_employees", "filing_date"}
-	aumCols := []string{"crd_number", "report_date", "aum", "raum", "num_accounts"}
-	fundCols := []string{"crd_number", "fund_id", "fund_name", "fund_type", "gross_asset_value", "net_asset_value"}
-	ownerCols := []string{"crd_number", "owner_name", "owner_type", "ownership_pct", "is_control"}
-
-	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 2)
-	expectBulkUpsert(pool, "fed_data.adv_aum", aumCols, 1)
-	expectBulkUpsert(pool, "fed_data.adv_private_funds", fundCols, 1)
-	expectBulkUpsert(pool, "fed_data.adv_owners", ownerCols, 1)
-
-	ds := &ADVPart1{}
-	log := zap.NewNop()
-	result, err := ds.parseAndLoad(context.Background(), pool, r, log)
-	require.NoError(t, err)
-	assert.Equal(t, int64(2), result.RowsSynced)
-	assert.Equal(t, int64(2), result.Metadata["firms"])
-	assert.Equal(t, int64(1), result.Metadata["aum_records"])
-	assert.Equal(t, int64(1), result.Metadata["funds"])
-	assert.Equal(t, int64(1), result.Metadata["owners"])
-	assert.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestADVPart1_ParseAndLoad_EmptyCSV(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	csv := `crd_number,firm_name,sec_number,city,state,country,website,aum,num_accounts,num_employees,filing_date
-`
-	r := strings.NewReader(csv)
-
-	ds := &ADVPart1{}
-	log := zap.NewNop()
-	result, err := ds.parseAndLoad(context.Background(), pool, r, log)
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
-}
-
-func TestADVPart1_ParseAndLoad_SkipZeroCRD(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	csv := `crd_number,firm_name,sec_number,city,state,country,website,aum,num_accounts,num_employees,filing_date
-0,Bad Firm,,,,,,,,,
-,Missing CRD,,,,,,,,,
-`
-	r := strings.NewReader(csv)
-
-	ds := &ADVPart1{}
-	log := zap.NewNop()
-	result, err := ds.parseAndLoad(context.Background(), pool, r, log)
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
 }
 
 // --- IA Compilation: parseAndLoad ---
@@ -604,41 +561,37 @@ func TestIACompilation_ParseAndLoad(t *testing.T) {
 	defer pool.Close()
 
 	xmlData := `<?xml version="1.0"?>
-<IaCompilation>
-  <Firm>
-    <CrdNb>12345</CrdNb>
-    <FirmName>Acme Advisors</FirmName>
-    <SecNb>801-12345</SecNb>
-    <MainAddr>
-      <City>New York</City>
-      <StateOrCountry>NY</StateOrCountry>
-      <Country>US</Country>
-    </MainAddr>
-    <WebAddr>https://acme.com</WebAddr>
-    <TotalGrossAssetAmt>5000000</TotalGrossAssetAmt>
-    <TotalNumberOfAccounts>100</TotalNumberOfAccounts>
-    <MostRecentFilingDate>2024-06-01</MostRecentFilingDate>
-  </Firm>
-  <Firm>
-    <CrdNb>67890</CrdNb>
-    <FirmName>Beta Capital</FirmName>
-    <SecNb>801-67890</SecNb>
-    <MainAddr>
-      <City>Chicago</City>
-      <StateOrCountry>IL</StateOrCountry>
-      <Country>US</Country>
-    </MainAddr>
-    <WebAddr>https://beta.com</WebAddr>
-    <TotalGrossAssetAmt>2000000</TotalGrossAssetAmt>
-    <TotalNumberOfAccounts>50</TotalNumberOfAccounts>
-    <MostRecentFilingDate>2024-06-15</MostRecentFilingDate>
-  </Firm>
-</IaCompilation>`
+<IAPDFirmSECReport GenOn="2024-06-01">
+  <Firms>
+    <Firm>
+      <Info FirmCrdNb="12345" SECNb="801-12345" BusNm="Acme Advisors"/>
+      <MainAddr City="New York" State="NY" Cntry="US"/>
+      <Filing Dt="2024-06-01"/>
+      <FormInfo><Part1A>
+        <Item1><WebAddrs><WebAddr>https://acme.com</WebAddr></WebAddrs></Item1>
+        <Item5A TtlEmp="0"/>
+        <Item5F Q5F2C="5000000" Q5F2F="100"/>
+      </Part1A></FormInfo>
+    </Firm>
+    <Firm>
+      <Info FirmCrdNb="67890" SECNb="801-67890" BusNm="Beta Capital"/>
+      <MainAddr City="Chicago" State="IL" Cntry="US"/>
+      <Filing Dt="2024-06-15"/>
+      <FormInfo><Part1A>
+        <Item1><WebAddrs><WebAddr>https://beta.com</WebAddr></WebAddrs></Item1>
+        <Item5A TtlEmp="0"/>
+        <Item5F Q5F2C="2000000" Q5F2F="50"/>
+      </Part1A></FormInfo>
+    </Firm>
+  </Firms>
+</IAPDFirmSECReport>`
 
 	r := strings.NewReader(xmlData)
 
-	iaCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website", "aum", "num_accounts", "filing_date"}
-	expectBulkUpsert(pool, "fed_data.adv_firms", iaCols, 2)
+	iaFirmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website"}
+	iaFilingCols := []string{"crd_number", "filing_date", "aum", "num_accounts", "legal_name", "num_employees", "total_employees", "sec_registered"}
+	expectBulkUpsert(pool, "fed_data.adv_firms", iaFirmCols, 2)
+	expectBulkUpsert(pool, "fed_data.adv_filings", iaFilingCols, 2)
 
 	ds := &IACompilation{}
 	log := zap.NewNop()
@@ -654,12 +607,13 @@ func TestIACompilation_ParseAndLoad_SkipZeroCRD(t *testing.T) {
 	defer pool.Close()
 
 	xmlData := `<?xml version="1.0"?>
-<IaCompilation>
-  <Firm>
-    <CrdNb>0</CrdNb>
-    <FirmName>Bad Firm</FirmName>
-  </Firm>
-</IaCompilation>`
+<IAPDFirmSECReport GenOn="2024-06-01">
+  <Firms>
+    <Firm>
+      <Info FirmCrdNb="0" BusNm="Bad Firm"/>
+    </Firm>
+  </Firms>
+</IAPDFirmSECReport>`
 
 	r := strings.NewReader(xmlData)
 
@@ -676,27 +630,27 @@ func TestIACompilation_ParseAndLoad_TruncatesLongState(t *testing.T) {
 	defer pool.Close()
 
 	xmlData := `<?xml version="1.0"?>
-<IaCompilation>
-  <Firm>
-    <CrdNb>11111</CrdNb>
-    <FirmName>Long State Firm</FirmName>
-    <SecNb>801-11111</SecNb>
-    <MainAddr>
-      <City>Boston</City>
-      <StateOrCountry>MASSACHUSETTS</StateOrCountry>
-      <Country>US</Country>
-    </MainAddr>
-    <WebAddr></WebAddr>
-    <TotalGrossAssetAmt>1000000</TotalGrossAssetAmt>
-    <TotalNumberOfAccounts>10</TotalNumberOfAccounts>
-    <MostRecentFilingDate>2024-01-15</MostRecentFilingDate>
-  </Firm>
-</IaCompilation>`
+<IAPDFirmSECReport GenOn="2024-01-15">
+  <Firms>
+    <Firm>
+      <Info FirmCrdNb="11111" SECNb="801-11111" BusNm="Long State Firm"/>
+      <MainAddr City="Boston" State="MASSACHUSETTS" Cntry="US"/>
+      <Filing Dt="2024-01-15"/>
+      <FormInfo><Part1A>
+        <Item1><WebAddrs></WebAddrs></Item1>
+        <Item5A TtlEmp="0"/>
+        <Item5F Q5F2C="1000000" Q5F2F="10"/>
+      </Part1A></FormInfo>
+    </Firm>
+  </Firms>
+</IAPDFirmSECReport>`
 
 	r := strings.NewReader(xmlData)
 
-	iaCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website", "aum", "num_accounts", "filing_date"}
-	expectBulkUpsert(pool, "fed_data.adv_firms", iaCols, 1)
+	iaFirmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website"}
+	iaFilingCols := []string{"crd_number", "filing_date", "aum", "num_accounts", "legal_name", "num_employees", "total_employees", "sec_registered"}
+	expectBulkUpsert(pool, "fed_data.adv_firms", iaFirmCols, 1)
+	expectBulkUpsert(pool, "fed_data.adv_filings", iaFilingCols, 1)
 
 	ds := &IACompilation{}
 	log := zap.NewNop()
@@ -836,7 +790,7 @@ func TestEDGARSubmissions_DecodeSubmission(t *testing.T) {
 
 	sub, err := ds.decodeSubmission(r)
 	require.NoError(t, err)
-	assert.Equal(t, "1234567", sub.CIK.String())
+	assert.Equal(t, "1234567", sub.CIK)
 	assert.Equal(t, "Acme Financial", sub.Name)
 	assert.Equal(t, "6282", sub.SIC)
 	assert.Equal(t, "DE", sub.StateOfInc)
@@ -1475,24 +1429,21 @@ func TestEconCensus_Sync_FetchYearErrorContinues(t *testing.T) {
 // Additional coverage — M3 edge cases
 // =====================================================================
 
-func TestM3_Sync_AllCategoriesFail(t *testing.T) {
+func TestM3_Sync_DownloadFail(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
 
-	// All 4 categories fail download -> 0 rows, no upsert.
+	// Single API call fails -> error returned.
 	f.EXPECT().Download(mock.Anything, mock.Anything).
-		Return(nil, errors.New("skip")).Times(4)
-
-	// BulkUpsert is still called with empty rows.
-	expectBulkUpsert(pool, "fed_data.m3_data", m3Cols, 0)
+		Return(nil, errors.New("network error")).Once()
 
 	ds := &M3{cfg: &config.Config{Fedsync: config.FedsyncConfig{CensusKey: "key"}}}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
+	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "m3: download")
 }
 
 func TestM3_ParseTimeSlot(t *testing.T) {
@@ -1807,7 +1758,7 @@ func TestEPAECHO_Sync_MidBatchFlush(t *testing.T) {
 	f := fetchermocks.NewMockFetcher(t)
 
 	var sb strings.Builder
-	sb.WriteString("registry_id,fac_name,fac_city,fac_state,fac_zip,col5,col6,fac_lat,fac_long\n")
+	sb.WriteString("REGISTRY_ID,PRIMARY_NAME,CITY_NAME,STATE_CODE,POSTAL_CODE,col5,col6,LATITUDE83,LONGITUDE83\n")
 	for i := 1; i <= 5002; i++ {
 		sb.WriteString(fmt.Sprintf("%d,Facility %d,City,ST,12345,x,y,39.78,-89.65\n", 110000000+i, i))
 	}
@@ -1958,27 +1909,26 @@ func TestIACompilation_ParseAndLoad_MidBatchFlush(t *testing.T) {
 	defer pool.Close()
 
 	var sb strings.Builder
-	sb.WriteString(`<?xml version="1.0"?>` + "\n<IaCompilation>\n")
+	sb.WriteString(`<?xml version="1.0"?>` + "\n<IAPDFirmSECReport GenOn=\"2024-06-01\">\n<Firms>\n")
 	for i := 1; i <= 2002; i++ {
 		sb.WriteString(fmt.Sprintf(`  <Firm>
-    <CrdNb>%d</CrdNb>
-    <FirmName>Firm %d</FirmName>
-    <SecNb>801-%d</SecNb>
-    <MainAddr><City>City</City><StateOrCountry>NY</StateOrCountry><Country>US</Country></MainAddr>
-    <WebAddr></WebAddr>
-    <TotalGrossAssetAmt>1000000</TotalGrossAssetAmt>
-    <TotalNumberOfAccounts>10</TotalNumberOfAccounts>
-    <MostRecentFilingDate>2024-06-01</MostRecentFilingDate>
+    <Info FirmCrdNb="%d" SECNb="801-%d" BusNm="Firm %d"/>
+    <MainAddr City="City" State="NY" Cntry="US"/>
+    <Filing Dt="2024-06-01"/>
+    <FormInfo><Part1A><Item1><WebAddrs></WebAddrs></Item1><Item5A TtlEmp="0"/><Item5F Q5F2C="1000000" Q5F2F="10"/></Part1A></FormInfo>
   </Firm>
 `, i, i, i))
 	}
-	sb.WriteString("</IaCompilation>")
+	sb.WriteString("</Firms>\n</IAPDFirmSECReport>")
 
 	r := strings.NewReader(sb.String())
 
-	iaCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website", "aum", "num_accounts", "filing_date"}
-	expectBulkUpsert(pool, "fed_data.adv_firms", iaCols, 2000)
-	expectBulkUpsert(pool, "fed_data.adv_firms", iaCols, 2)
+	iaFirmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website"}
+	iaFilingCols := []string{"crd_number", "filing_date", "aum", "num_accounts", "legal_name", "num_employees", "total_employees", "sec_registered"}
+	expectBulkUpsert(pool, "fed_data.adv_firms", iaFirmCols, 2000)
+	expectBulkUpsert(pool, "fed_data.adv_filings", iaFilingCols, 2000)
+	expectBulkUpsert(pool, "fed_data.adv_firms", iaFirmCols, 2)
+	expectBulkUpsert(pool, "fed_data.adv_filings", iaFilingCols, 2)
 
 	ds := &IACompilation{}
 	log := zap.NewNop()
@@ -1988,35 +1938,6 @@ func TestIACompilation_ParseAndLoad_MidBatchFlush(t *testing.T) {
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
-// =====================================================================
-// Mid-batch flush tests — ADV Part 1 parseAndLoad (>5000 rows)
-// =====================================================================
-
-func TestADVPart1_ParseAndLoad_MidBatchFlush(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	var sb strings.Builder
-	sb.WriteString("crd_number,firm_name,sec_number,city,state,country,website,aum,num_accounts,num_employees,filing_date,report_date,raum,fund_id,fund_name,fund_type,gross_asset_value,net_asset_value,owner_name,owner_type,ownership_pct,is_control\n")
-	for i := 1; i <= 10002; i++ {
-		sb.WriteString(fmt.Sprintf("%d,Firm %d,801-%d,City,ST,US,,1000000,10,5,2024-06-01,,,,,,,,,,\n", i, i, i))
-	}
-
-	r := strings.NewReader(sb.String())
-
-	firmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website", "aum", "num_accounts", "num_employees", "filing_date"}
-	// First batch of 10000, then final 2
-	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 10000)
-	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 2)
-
-	ds := &ADVPart1{}
-	log := zap.NewNop()
-	result, err := ds.parseAndLoad(context.Background(), pool, r, log)
-	require.NoError(t, err)
-	assert.Equal(t, int64(10002), result.RowsSynced)
-	assert.NoError(t, pool.ExpectationsWereMet())
-}
 
 // =====================================================================
 // Mid-batch flush tests — CBP parseCSV (>10000 rows)
@@ -2175,7 +2096,7 @@ func TestSUSB_ParseCSV_MidBatchFlush(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("statefips,naics,entrsizedscr,firm,estb,empl,payr\n")
 	for i := 1; i <= 5002; i++ {
-		sb.WriteString(fmt.Sprintf("01,523110,Small,%d,%d,%d,%d\n", i, i*2, i*10, i*100))
+		sb.WriteString(fmt.Sprintf("%02d,523110,Size%d,%d,%d,%d,%d\n", i%56+1, i, i, i*2, i*10, i*100))
 	}
 
 	r := strings.NewReader(sb.String())
@@ -2203,7 +2124,7 @@ func TestOEWS_ParseCSV_MidBatchFlush(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("area,area_type,naics,occ_code,tot_emp,h_mean,a_mean,h_median,a_median\n")
 	for i := 1; i <= 5002; i++ {
-		sb.WriteString(fmt.Sprintf("%05d,1,523110,11-1011,%d,55.5,%d,50.0,%d\n", i, i*10, i*100, i*90))
+		sb.WriteString(fmt.Sprintf("%05d,1,523110,%02d-%04d,%d,55.5,%d,50.0,%d\n", i, i/10000+11, i%10000, i*10, i*100, i*90))
 	}
 
 	r := strings.NewReader(sb.String())
@@ -2219,45 +2140,6 @@ func TestOEWS_ParseCSV_MidBatchFlush(t *testing.T) {
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
-// =====================================================================
-// ADV Part 1 — exercise AUM, fund, and owner batch paths
-// =====================================================================
-
-func TestADVPart1_ParseAndLoad_AllSubTables(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	// Row with all sub-tables populated: report_date, fund_id, owner_name
-	var sb strings.Builder
-	sb.WriteString("crd_number,firm_name,sec_number,city,state,country,website,aum,num_accounts,num_employees,filing_date,report_date,raum,fund_id,fund_name,fund_type,gross_asset_value,net_asset_value,owner_name,owner_type,ownership_pct,is_control\n")
-	for i := 1; i <= 3; i++ {
-		sb.WriteString(fmt.Sprintf("%d,Firm %d,801-%d,City,ST,US,,1000000,10,5,2024-06-01,2024-06-01,500000,F%d,Fund %d,Hedge,2000000,1500000,Owner %d,INDIVIDUAL,25.0,Y\n", i, i, i, i, i, i))
-	}
-
-	r := strings.NewReader(sb.String())
-
-	firmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website", "aum", "num_accounts", "num_employees", "filing_date"}
-	aumCols := []string{"crd_number", "report_date", "aum", "raum", "num_accounts"}
-	fundCols := []string{"crd_number", "fund_id", "fund_name", "fund_type", "gross_asset_value", "net_asset_value"}
-	ownerCols := []string{"crd_number", "owner_name", "owner_type", "ownership_pct", "is_control"}
-
-	// Final flush for each sub-table (3 rows each)
-	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 3)
-	expectBulkUpsert(pool, "fed_data.adv_aum", aumCols, 3)
-	expectBulkUpsert(pool, "fed_data.adv_private_funds", fundCols, 3)
-	expectBulkUpsert(pool, "fed_data.adv_owners", ownerCols, 3)
-
-	ds := &ADVPart1{}
-	log := zap.NewNop()
-	result, err := ds.parseAndLoad(context.Background(), pool, r, log)
-	require.NoError(t, err)
-	assert.Equal(t, int64(3), result.RowsSynced)
-	assert.Equal(t, int64(3), result.Metadata["aum_records"])
-	assert.Equal(t, int64(3), result.Metadata["funds"])
-	assert.Equal(t, int64(3), result.Metadata["owners"])
-	assert.NoError(t, pool.ExpectationsWereMet())
-}
 
 // =====================================================================
 // EDGAR Submissions — mid-batch flush (entity+filing batches)
@@ -2427,14 +2309,12 @@ func TestM3_Sync_UpsertError(t *testing.T) {
 
 	f := fetchermocks.NewMockFetcher(t)
 
-	// Return valid M3 data for all categories
+	// Return valid M3 data with recognized data_type_code
 	validResp := [][]string{
-		{"cell_value", "time_slot_id", "category_code", "data_type_code"},
-		{"1000", "2024-01", "CAT1", "DT1"},
+		{"cell_value", "time", "category_code", "data_type_code", "seasonally_adj", "us"},
+		{"1000", "2024-01", "MTM", "NO", "yes", "*"},
 	}
-	for i := 0; i < 4; i++ {
-		f.EXPECT().Download(mock.Anything, mock.Anything).Return(jsonBody(t, validResp), nil).Once()
-	}
+	f.EXPECT().Download(mock.Anything, mock.Anything).Return(jsonBody(t, validResp), nil).Once()
 
 	// BulkUpsert fails
 	pool.ExpectBegin().WillReturnError(errors.New("db error"))
@@ -2452,21 +2332,15 @@ func TestM3_Sync_ReadAllError(t *testing.T) {
 
 	f := fetchermocks.NewMockFetcher(t)
 
-	// Return a reader that fails on ReadAll for all categories
-	for i := 0; i < 4; i++ {
-		f.EXPECT().Download(mock.Anything, mock.Anything).Return(
-			io.NopCloser(&failReader{}), nil,
-		).Once()
-	}
-
-	// All categories fail, so 0 rows for upsert
-	m3Cols := []string{"category", "data_type", "year", "month", "value"}
-	expectBulkUpsert(pool, "fed_data.m3_data", m3Cols, 0)
+	// Return a reader that fails on ReadAll
+	f.EXPECT().Download(mock.Anything, mock.Anything).Return(
+		io.NopCloser(&failReader{}), nil,
+	).Once()
 
 	ds := &M3{cfg: &config.Config{Fedsync: config.FedsyncConfig{CensusKey: "test-key"}}}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
+	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "m3: read response")
 }
 
 type failReader struct{}
@@ -2480,21 +2354,15 @@ func TestM3_Sync_InvalidJSON(t *testing.T) {
 
 	f := fetchermocks.NewMockFetcher(t)
 
-	// Return invalid JSON for all 4 categories
-	for i := 0; i < 4; i++ {
-		f.EXPECT().Download(mock.Anything, mock.Anything).Return(
-			io.NopCloser(strings.NewReader("not json")), nil,
-		).Once()
-	}
-
-	// BulkUpsert with 0 rows (all categories had invalid JSON)
-	m3Cols := []string{"category", "data_type", "year", "month", "value"}
-	expectBulkUpsert(pool, "fed_data.m3_data", m3Cols, 0)
+	// Return invalid JSON
+	f.EXPECT().Download(mock.Anything, mock.Anything).Return(
+		io.NopCloser(strings.NewReader("not json")), nil,
+	).Once()
 
 	ds := &M3{cfg: &config.Config{Fedsync: config.FedsyncConfig{CensusKey: "test-key"}}}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
+	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "m3: parse json")
 }
 
 // =====================================================================
@@ -2610,7 +2478,7 @@ func TestEPAECHO_Sync_UpsertError(t *testing.T) {
 
 	f := fetchermocks.NewMockFetcher(t)
 
-	csvContent := "RegistryID,FacilityName,City,State,Zip,NAICSCodes,CurrSvFlag,FacLat,FacLong\nEPA001,Firm,NYC,NY,10001,523110,Y,40.7128,-74.0060\n"
+	csvContent := "REGISTRY_ID,PRIMARY_NAME,CITY_NAME,STATE_CODE,POSTAL_CODE,col5,col6,LATITUDE83,LONGITUDE83\nEPA001,Firm,NYC,NY,10001,x,y,40.7128,-74.0060\n"
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		mockDownloadToFileZIP(t, "data.csv", csvContent),
 	)
@@ -2692,39 +2560,3 @@ func TestEDGARSubmissions_DecodeSubmission_Invalid(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// =====================================================================
-// ADV Part 1 — mid-batch flush for AUM sub-table
-// =====================================================================
-
-func TestADVPart1_ParseAndLoad_AUMMidBatch(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	// 10002 rows, all with report_date populated → 10002 AUM rows, flush at 10000+2
-	var sb strings.Builder
-	sb.WriteString("crd_number,firm_name,sec_number,city,state,country,website,aum,num_accounts,num_employees,filing_date,report_date,raum,fund_id,fund_name,fund_type,gross_asset_value,net_asset_value,owner_name,owner_type,ownership_pct,is_control\n")
-	for i := 1; i <= 10002; i++ {
-		sb.WriteString(fmt.Sprintf("%d,Firm %d,801-%d,City,ST,US,,1000000,10,5,2024-06-01,2024-06-01,500000,,,,,,,,\n", i, i, i))
-	}
-
-	r := strings.NewReader(sb.String())
-
-	firmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website", "aum", "num_accounts", "num_employees", "filing_date"}
-	aumCols := []string{"crd_number", "report_date", "aum", "raum", "num_accounts"}
-
-	// Firms: 10000 + 2
-	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 10000)
-	// AUM: 10000 + 2 (same batch boundary)
-	expectBulkUpsert(pool, "fed_data.adv_aum", aumCols, 10000)
-	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 2)
-	expectBulkUpsert(pool, "fed_data.adv_aum", aumCols, 2)
-
-	ds := &ADVPart1{}
-	log := zap.NewNop()
-	result, err := ds.parseAndLoad(context.Background(), pool, r, log)
-	require.NoError(t, err)
-	assert.Equal(t, int64(10002), result.RowsSynced)
-	assert.Equal(t, int64(10002), result.Metadata["aum_records"])
-	assert.NoError(t, pool.ExpectationsWereMet())
-}
