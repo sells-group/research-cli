@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os/signal"
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/jomei/notionapi"
 	"github.com/rotisserie/eris"
@@ -38,7 +40,7 @@ var batchCmd = &cobra.Command{
 			return eris.Wrap(err, "query queued leads")
 		}
 
-		return processBatch(ctx, leads, batchLimit, cfg.Batch.MaxConcurrentCompanies, func(ctx context.Context, company model.Company) (*model.EnrichmentResult, error) {
+		return processBatch(ctx, leads, batchLimit, cfg.Batch.MaxConcurrentCompanies, env.Notion, func(ctx context.Context, company model.Company) (*model.EnrichmentResult, error) {
 			return env.Pipeline.Run(ctx, company)
 		})
 	},
@@ -96,7 +98,8 @@ func leadToCompany(page notionapi.Page) model.Company {
 type enrichFunc func(ctx context.Context, company model.Company) (*model.EnrichmentResult, error)
 
 // processBatch applies limit, then processes leads concurrently using the given enrichment function.
-func processBatch(ctx context.Context, leads []notionapi.Page, limit, concurrency int, enrich enrichFunc) error {
+// If notionClient is non-nil, failed enrichments update the Notion page status to "Failed".
+func processBatch(ctx context.Context, leads []notionapi.Page, limit, concurrency int, notionClient notion.Client, enrich enrichFunc) error {
 	if len(leads) == 0 {
 		zap.L().Info("no queued leads found")
 		return nil
@@ -126,6 +129,11 @@ func processBatch(ctx context.Context, leads []notionapi.Page, limit, concurrenc
 			if err != nil {
 				failed.Add(1)
 				log.Error("enrichment failed", zap.Error(err))
+				if notionClient != nil && company.NotionPageID != "" {
+					if nErr := updateNotionFailed(gctx, notionClient, company.NotionPageID, err); nErr != nil {
+						log.Warn("failed to update notion status to Failed", zap.Error(nErr))
+					}
+				}
 				return nil // don't abort batch on individual failure
 			}
 
@@ -146,5 +154,32 @@ func processBatch(ctx context.Context, leads []notionapi.Page, limit, concurrenc
 		zap.Int64("succeeded", succeeded.Load()),
 		zap.Int64("failed", failed.Load()),
 	)
+	return nil
+}
+
+// updateNotionFailed sets the Notion page status to "Failed" when enrichment errors out.
+func updateNotionFailed(ctx context.Context, client notion.Client, pageID string, enrichErr error) error {
+	now := notionapi.Date(time.Now())
+	errMsg := enrichErr.Error()
+	if len(errMsg) > 200 {
+		errMsg = errMsg[:200]
+	}
+	_, err := client.UpdatePage(ctx, pageID, &notionapi.PageUpdateRequest{
+		Properties: notionapi.Properties{
+			"Status": notionapi.StatusProperty{
+				Status: notionapi.Status{
+					Name: "Failed",
+				},
+			},
+			"Last Enriched": notionapi.DateProperty{
+				Date: &notionapi.DateObject{
+					Start: &now,
+				},
+			},
+		},
+	})
+	if err != nil {
+		return eris.Wrap(err, fmt.Sprintf("batch: update notion page %s to Failed", pageID))
+	}
 	return nil
 }
