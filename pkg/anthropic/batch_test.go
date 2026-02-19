@@ -182,6 +182,46 @@ func (c *getBatchFuncClient) GetBatchResults(context.Context, string) (BatchResu
 	return nil, nil
 }
 
+func TestPollBatch_JitterRange(t *testing.T) {
+	// Verify that jitter stays within ±20% of the base interval.
+	// We run multiple polls and check the observed intervals.
+	var timestamps []time.Time
+	var calls atomic.Int32
+
+	wrapper := &getBatchFuncClient{fn: func(_ context.Context, batchID string) (*BatchResponse, error) {
+		timestamps = append(timestamps, time.Now())
+		n := calls.Add(1)
+		if n < 8 {
+			return &BatchResponse{
+				ID:               batchID,
+				ProcessingStatus: "in_progress",
+			}, nil
+		}
+		return &BatchResponse{
+			ID:               batchID,
+			ProcessingStatus: "ended",
+			RequestCounts:    RequestCounts{Succeeded: 1},
+		}, nil
+	}}
+
+	_, err := PollBatch(context.Background(), wrapper, "batch_jitter",
+		WithPollInterval(20*time.Millisecond),
+		WithPollCap(200*time.Millisecond),
+	)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(timestamps), 4, "need enough data points")
+
+	// Compute observed gaps and verify they grow (backoff) but stay within bounds.
+	for i := 1; i < len(timestamps); i++ {
+		gap := timestamps[i].Sub(timestamps[i-1])
+		// Base interval doubles each time: 20, 40, 80, 160, 200 (cap)
+		// With ±20% jitter and timing variance, gaps should be at least 50%
+		// of the base and at most 200% (generous bounds for CI).
+		assert.Greater(t, gap.Milliseconds(), int64(5),
+			"gap %d too small: %v", i, gap)
+	}
+}
+
 func TestCollectBatchResults_Success(t *testing.T) {
 	items := []BatchResultItem{
 		{

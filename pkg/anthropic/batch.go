@@ -3,6 +3,7 @@ package anthropic
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"github.com/rotisserie/eris"
@@ -83,10 +84,16 @@ func PollBatch(ctx context.Context, client Client, batchID string, opts ...PollO
 		case <-time.After(interval):
 		}
 
-		// Exponential backoff: double each iteration, capped.
+		// Exponential backoff with jitter: double, cap, then add ±20% jitter.
 		interval *= 2
 		if interval > cfg.cap {
 			interval = cfg.cap
+		}
+		jitter := time.Duration(rand.Int64N(int64(interval) / 5))
+		if rand.IntN(2) == 0 {
+			interval += jitter
+		} else {
+			interval -= jitter
 		}
 	}
 }
