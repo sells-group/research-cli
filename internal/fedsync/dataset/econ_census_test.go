@@ -53,8 +53,8 @@ func TestEconCensus_ParseResponse(t *testing.T) {
 
 	rows, err := ds.parseResponse(data, 2022)
 	assert.NoError(t, err)
-	// 523110 (Finance) and 541100 (Professional Services) are relevant; 312100 (Beverage) is not
-	assert.Len(t, rows, 2)
+	// All NAICS codes are accepted
+	assert.Len(t, rows, 3)
 
 	// Check first row (523110)
 	assert.Equal(t, int16(2022), rows[0][0])
@@ -62,8 +62,30 @@ func TestEconCensus_ParseResponse(t *testing.T) {
 	assert.Equal(t, "523110", rows[0][2])       // naics
 	assert.Equal(t, 1500, rows[0][3])           // estab
 
-	// Check second row (541100)
-	assert.Equal(t, "541100", rows[1][2])
+	// Check second row (312100)
+	assert.Equal(t, "312100", rows[1][2])
+
+	// Check third row (541100)
+	assert.Equal(t, "541100", rows[2][2])
+}
+
+func TestEconCensus_ParseResponse_NAICS2022(t *testing.T) {
+	ds := &EconCensus{}
+
+	// 2022 Census API returns NAICS2022 instead of NAICS2017
+	data := []byte(`[
+		["GEO_ID","NAICS2022","ESTAB","RCPTOT","PAYANN","EMP","state"],
+		["0400000US06","523110","1500","5000000","2000000","15000","06"],
+		["0400000US36","312100","800","3000000","1000000","8000","36"]
+	]`)
+
+	rows, err := ds.parseResponse(data, 2022)
+	assert.NoError(t, err)
+	assert.Len(t, rows, 2)
+
+	assert.Equal(t, int16(2022), rows[0][0])
+	assert.Equal(t, "523110", rows[0][2])
+	assert.Equal(t, "312100", rows[1][2])
 }
 
 func TestEconCensus_ParseResponse_Empty(t *testing.T) {

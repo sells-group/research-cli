@@ -57,17 +57,17 @@ func TestQCEW_IsRelevantFile(t *testing.T) {
 	assert.True(t, ds.isRelevantFile("2023.q1-q4 52 NAICS 52.csv"))
 	assert.True(t, ds.isRelevantFile("2023.q1-q4 54 NAICS 54.csv"))
 	assert.True(t, ds.isRelevantFile("path/to/10 total all.csv"))
-	assert.False(t, ds.isRelevantFile("2023.q1-q4 31 NAICS 31.csv"))
+	assert.True(t, ds.isRelevantFile("2023.q1-q4 31 NAICS 31.csv"))
 	assert.False(t, ds.isRelevantFile("readme.txt"))
 }
 
 func TestQCEW_Sync_NoRelevantFiles(t *testing.T) {
 	dir := t.TempDir()
 
-	// ZIP contains only irrelevant files: a non-CSV and an irrelevant NAICS CSV.
+	// ZIP contains only non-CSV files that don't match any NAICS prefix.
 	files := map[string]string{
-		"readme.txt":                    "QCEW data readme",
-		"2023.q1-q4 31 NAICS 31.csv":   qcewCSVHeader + "36000,5,311110,70,0,2023,1,3000,3100,3200,100000000,2000,500\n",
+		"readme.txt":        "QCEW data readme",
+		"metadata.json":     "{}",
 	}
 
 	zipPath := createTestZipMulti(t, dir, "qcew_no_relevant.zip", files)

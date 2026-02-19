@@ -65,7 +65,7 @@ func TestCBP_Sync_EmptyCSV(t *testing.T) {
 	f := fetchermocks.NewMockFetcher(t)
 
 	numYears := currentDataYear() - cbpStartYear + 1
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToFile(f, zipPath).Times(numYears * 2) // county + state per year
 
 	// No BulkUpsert expected since 0 rows pass.
 

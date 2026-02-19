@@ -29,61 +29,87 @@ func (d *M3) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }
 
-// m3Categories defines the M3 series to fetch.
-var m3Categories = []struct {
-	Category string
-	DataType string
-}{
-	{"AMTMNO", "new_orders"},      // New Orders
-	{"AMTMVS", "shipments"},       // Value of Shipments
-	{"AMTMTI", "inventories"},     // Total Inventories
-	{"AMTMUO", "unfilled_orders"}, // Unfilled Orders
+// m3DataTypes maps data_type_code values to human-readable names.
+// The consolidated eits/m3 endpoint returns these in the response.
+var m3DataTypes = map[string]string{
+	"NO": "new_orders",
+	"VS": "shipments",
+	"TI": "inventories",
+	"UO": "unfilled_orders",
 }
 
 func (d *M3) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing M3 data")
 
+	// Census consolidated M3 endpoint requires: time, seasonally_adj, for=us:*
+	// Fetch all data types and category codes in a single request.
+	url := fmt.Sprintf(
+		"https://api.census.gov/data/timeseries/eits/m3?get=cell_value,time_slot_id,category_code,data_type_code&for=us:*&time=from+2020&seasonally_adj=yes&key=%s",
+		d.cfg.Fedsync.CensusKey)
+
+	body, err := f.Download(ctx, url)
+	if err != nil {
+		return nil, eris.Wrap(err, "m3: download")
+	}
+
+	data, err := io.ReadAll(body)
+	body.Close()
+	if err != nil {
+		return nil, eris.Wrap(err, "m3: read response")
+	}
+
+	var result [][]string
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, eris.Wrap(err, "m3: parse json")
+	}
+
+	if len(result) < 2 {
+		return &SyncResult{RowsSynced: 0}, nil
+	}
+
+	// Build column index from header
+	header := result[0]
+	colIdx := make(map[string]int, len(header))
+	for i, col := range header {
+		colIdx[col] = i
+	}
+
 	var allRows [][]any
+	seen := make(map[string]int)
 
-	for _, cat := range m3Categories {
-		url := fmt.Sprintf("https://api.census.gov/data/timeseries/eits/%s?get=cell_value,time_slot_id,category_code,data_type_code&key=%s",
-			cat.Category, d.cfg.Fedsync.CensusKey)
+	for _, row := range result[1:] {
+		cellValue := getColIdx(row, colIdx, "cell_value")
+		timeStr := getColIdx(row, colIdx, "time")
+		catCode := getColIdx(row, colIdx, "category_code")
+		dtCode := getColIdx(row, colIdx, "data_type_code")
 
-		body, err := f.Download(ctx, url)
-		if err != nil {
-			log.Warn("skip category", zap.String("category", cat.Category), zap.Error(err))
+		// Only keep core data types (VS, NO, TI, UO)
+		dataType, ok := m3DataTypes[dtCode]
+		if !ok {
 			continue
 		}
 
-		data, err := io.ReadAll(body)
-		body.Close()
-		if err != nil {
+		year, month := parseTimeSlot(timeStr)
+		if year == 0 {
 			continue
 		}
 
-		var result [][]string
-		if err := json.Unmarshal(data, &result); err != nil {
-			continue
+		r := []any{
+			catCode,
+			dataType,
+			int16(year),
+			int16(month),
+			parseInt64Or(cellValue, 0),
 		}
 
-		for _, row := range result[1:] {
-			if len(row) < 2 {
-				continue
-			}
-			// Parse time_slot_id like "2024-01" into year/month.
-			year, month := parseTimeSlot(row[1])
-			if year == 0 {
-				continue
-			}
-			allRows = append(allRows, []any{
-				cat.Category,
-				cat.DataType,
-				int16(year),
-				int16(month),
-				parseInt64Or(row[0], 0),
-			})
+		key := fmt.Sprintf("%s|%s|%d|%d", catCode, dataType, year, month)
+		if idx, exists := seen[key]; exists {
+			allRows[idx] = r
+			continue
 		}
+		seen[key] = len(allRows)
+		allRows = append(allRows, r)
 	}
 
 	n, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{

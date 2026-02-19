@@ -56,6 +56,10 @@ func (d *QCEW) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDi
 
 			zipPath := filepath.Join(tempDir, fmt.Sprintf("qcew_%d.zip", year))
 			if _, err := f.DownloadToFile(gctx, url, zipPath); err != nil {
+				if strings.Contains(err.Error(), "status 404") {
+					log.Info("QCEW data not yet available, skipping", zap.Int("year", year))
+					return nil
+				}
 				return eris.Wrapf(err, "qcew: download year %d", year)
 			}
 
@@ -148,6 +152,7 @@ func (d *QCEW) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int
 
 	var batch [][]any
 	var totalRows int64
+	seen := make(map[string]int) // conflict key → batch index (dedup within batch)
 
 	for {
 		record, err := reader.Read()
@@ -186,6 +191,14 @@ func (d *QCEW) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int
 			parseIntOr(trimQuotes(getCol(record, colIdx, "qtrly_estabs")), 0),
 		}
 
+		// Deduplicate by conflict key within the batch to avoid
+		// "ON CONFLICT DO UPDATE cannot affect row a second time".
+		key := fmt.Sprintf("%s|%s|%s|%d|%d", areaFips, ownCode, industryCode, year, qtr)
+		if idx, exists := seen[key]; exists {
+			batch[idx] = row // overwrite with latest
+			continue
+		}
+		seen[key] = len(batch)
 		batch = append(batch, row)
 
 		if len(batch) >= qcewBatchSize {
@@ -199,6 +212,7 @@ func (d *QCEW) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int
 			}
 			totalRows += n
 			batch = batch[:0]
+			seen = make(map[string]int)
 		}
 	}
 

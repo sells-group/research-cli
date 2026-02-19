@@ -49,24 +49,56 @@ func (d *CBP) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir
 
 	for year := cbpStartYear; year <= currentYear; year++ {
 		year := year
+		// Download county-level file.
 		g.Go(func() error {
 			yy := fmt.Sprintf("%02d", year%100)
 			url := fmt.Sprintf("https://www2.census.gov/programs-surveys/cbp/datasets/%d/cbp%sco.zip", year, yy)
 
-			log.Info("downloading CBP data", zap.Int("year", year), zap.String("url", url))
+			log.Info("downloading CBP county data", zap.Int("year", year), zap.String("url", url))
 
 			zipPath := filepath.Join(tempDir, fmt.Sprintf("cbp%sco.zip", yy))
 			if _, err := f.DownloadToFile(gctx, url, zipPath); err != nil {
-				return eris.Wrapf(err, "cbp: download year %d", year)
+				if strings.Contains(err.Error(), "status 404") {
+					log.Info("CBP county data not yet available, skipping", zap.Int("year", year))
+					return nil
+				}
+				return eris.Wrapf(err, "cbp: download county year %d", year)
 			}
 
 			rows, err := d.processZip(gctx, pool, zipPath, year)
 			if err != nil {
-				return eris.Wrapf(err, "cbp: process year %d", year)
+				return eris.Wrapf(err, "cbp: process county year %d", year)
 			}
 
 			totalRows.Add(rows)
-			log.Info("processed CBP year", zap.Int("year", year), zap.Int64("rows", rows))
+			log.Info("processed CBP county year", zap.Int("year", year), zap.Int64("rows", rows))
+
+			_ = os.Remove(zipPath)
+			return nil
+		})
+		// Download state-level file (fips_county='000', used by mv_market_size).
+		g.Go(func() error {
+			yy := fmt.Sprintf("%02d", year%100)
+			url := fmt.Sprintf("https://www2.census.gov/programs-surveys/cbp/datasets/%d/cbp%sst.zip", year, yy)
+
+			log.Info("downloading CBP state data", zap.Int("year", year), zap.String("url", url))
+
+			zipPath := filepath.Join(tempDir, fmt.Sprintf("cbp%sst.zip", yy))
+			if _, err := f.DownloadToFile(gctx, url, zipPath); err != nil {
+				if strings.Contains(err.Error(), "status 404") {
+					log.Info("CBP state data not yet available, skipping", zap.Int("year", year))
+					return nil
+				}
+				return eris.Wrapf(err, "cbp: download state year %d", year)
+			}
+
+			rows, err := d.processZip(gctx, pool, zipPath, year)
+			if err != nil {
+				return eris.Wrapf(err, "cbp: process state year %d", year)
+			}
+
+			totalRows.Add(rows)
+			log.Info("processed CBP state year", zap.Int("year", year), zap.Int64("rows", rows))
 
 			_ = os.Remove(zipPath)
 			return nil
@@ -130,6 +162,12 @@ func (d *CBP) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int)
 		}
 		if err != nil {
 			continue // skip malformed rows
+		}
+
+		// State-level files have an "lfo" (legal form of organization) column
+		// with multiple rows per state+NAICS. Keep only the total row (lfo="-").
+		if lfo := trimQuotes(getCol(record, colIdx, "lfo")); lfo != "" && lfo != "-" {
+			continue
 		}
 
 		naics := trimQuotes(getCol(record, colIdx, "naics"))

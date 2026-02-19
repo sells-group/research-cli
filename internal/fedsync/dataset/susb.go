@@ -49,15 +49,25 @@ func (d *SUSB) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDi
 		default:
 		}
 
-		url := fmt.Sprintf("https://www2.census.gov/programs-surveys/susb/datasets/%d/us_state_totals_naics_%d.zip", year, year)
+		// Census now publishes SUSB as plain TXT files (not ZIPs).
+		url := fmt.Sprintf("https://www2.census.gov/programs-surveys/susb/datasets/%d/us_state_6digitnaics_%d.txt", year, year)
 		log.Info("downloading SUSB data", zap.Int("year", year), zap.String("url", url))
 
-		zipPath := filepath.Join(tempDir, fmt.Sprintf("susb_%d.zip", year))
-		if _, err := f.DownloadToFile(ctx, url, zipPath); err != nil {
+		txtPath := filepath.Join(tempDir, fmt.Sprintf("susb_%d.txt", year))
+		if _, err := f.DownloadToFile(ctx, url, txtPath); err != nil {
+			if strings.Contains(err.Error(), "status 404") {
+				log.Info("SUSB data not yet available, skipping", zap.Int("year", year))
+				continue
+			}
 			return nil, eris.Wrapf(err, "susb: download year %d", year)
 		}
 
-		rows, err := d.processZip(ctx, pool, zipPath, year)
+		file, err := os.Open(txtPath)
+		if err != nil {
+			return nil, eris.Wrapf(err, "susb: open year %d", year)
+		}
+		rows, err := d.parseCSV(ctx, pool, file, year)
+		file.Close()
 		if err != nil {
 			return nil, eris.Wrapf(err, "susb: process year %d", year)
 		}
@@ -65,7 +75,7 @@ func (d *SUSB) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDi
 		totalRows += rows
 		log.Info("processed SUSB year", zap.Int("year", year), zap.Int64("rows", rows))
 
-		_ = os.Remove(zipPath)
+		_ = os.Remove(txtPath)
 	}
 
 	return &SyncResult{
@@ -114,6 +124,7 @@ func (d *SUSB) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int
 
 	var batch [][]any
 	var totalRows int64
+	seen := make(map[string]int) // conflict key → batch index (dedup within batch)
 
 	for {
 		record, err := reader.Read()
@@ -130,7 +141,7 @@ func (d *SUSB) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int
 		}
 		naics = transform.NormalizeNAICS(naics)
 
-		fipsState := transform.NormalizeFIPSState(trimQuotes(getCol(record, colIdx, "statefips")))
+		fipsState := transform.NormalizeFIPSState(trimQuotes(getCol(record, colIdx, "state")))
 		entrSize := trimQuotes(getCol(record, colIdx, "entrsizedscr"))
 
 		row := []any{
@@ -144,6 +155,14 @@ func (d *SUSB) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int
 			parseInt64Or(trimQuotes(getCol(record, colIdx, "payr")), 0),
 		}
 
+		// Deduplicate by conflict key within the batch to avoid
+		// "ON CONFLICT DO UPDATE cannot affect row a second time".
+		key := fmt.Sprintf("%d|%s|%s|%s", year, fipsState, naics, entrSize)
+		if idx, exists := seen[key]; exists {
+			batch[idx] = row // overwrite with latest
+			continue
+		}
+		seen[key] = len(batch)
 		batch = append(batch, row)
 
 		if len(batch) >= susbBatchSize {
@@ -157,6 +176,7 @@ func (d *SUSB) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int
 			}
 			totalRows += n
 			batch = batch[:0]
+			seen = make(map[string]int)
 		}
 	}
 

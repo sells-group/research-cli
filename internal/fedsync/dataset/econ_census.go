@@ -110,10 +110,16 @@ func (d *EconCensus) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, 
 
 func (d *EconCensus) fetchYear(ctx context.Context, f fetcher.Fetcher, apiKey string, year int) ([][]any, error) {
 	// Census API: get establishment count, receipts, payroll, employees by NAICS and geography
+	// 2022+ uses NAICS2022 variable; earlier years use NAICS2017
+	naicsVar := "NAICS2017"
+	if year >= 2022 {
+		naicsVar = "NAICS2022"
+	}
 	url := fmt.Sprintf(
-		"%s/%d/ecnbasic?get=GEO_ID,NAICS2017,ESTAB,RCPTOT,PAYANN,EMP&for=state:*&key=%s",
+		"%s/%d/ecnbasic?get=GEO_ID,%s,ESTAB,RCPTOT,PAYANN,EMP&for=state:*&key=%s",
 		econCensusBaseURL,
 		year,
+		naicsVar,
 		apiKey,
 	)
 
@@ -149,12 +155,20 @@ func (d *EconCensus) parseResponse(data []byte, year int) ([][]any, error) {
 	}
 
 	var rows [][]any
+	seen := make(map[string]int) // conflict key → index in rows (dedup)
 	for _, record := range raw[1:] {
+		// 2022+ Census API returns NAICS2022; earlier years return NAICS2017
 		naics := getColIdx(record, colIdx, "NAICS2017")
+		if naics == "" {
+			naics = getColIdx(record, colIdx, "NAICS2022")
+		}
 		if !transform.IsRelevantNAICS(naics) {
 			continue
 		}
 		naics = transform.NormalizeNAICS(naics)
+		if len(naics) > 6 {
+			naics = naics[:6] // truncate to fit VARCHAR(6)
+		}
 
 		geoID := getColIdx(record, colIdx, "GEO_ID")
 
@@ -168,6 +182,14 @@ func (d *EconCensus) parseResponse(data []byte, year int) ([][]any, error) {
 			parseIntOr(getColIdx(record, colIdx, "EMP"), 0),
 		}
 
+		// Deduplicate by conflict key to avoid
+		// "ON CONFLICT DO UPDATE cannot affect row a second time".
+		key := fmt.Sprintf("%d|%s|%s", year, geoID, naics)
+		if idx, exists := seen[key]; exists {
+			rows[idx] = row // overwrite with latest
+			continue
+		}
+		seen[key] = len(rows)
 		rows = append(rows, row)
 	}
 
