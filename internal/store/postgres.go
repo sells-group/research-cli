@@ -88,6 +88,12 @@ func NewPostgres(ctx context.Context, connString string, poolCfg *PoolConfig) (*
 	return &PostgresStore{pool: pool, closeFn: pool.Close}, nil
 }
 
+// Pool returns the underlying database pool for use by subsystems
+// that need direct query access (e.g., revenue estimation).
+func (s *PostgresStore) Pool() db.Pool {
+	return s.pool
+}
+
 const postgresMigration = `
 CREATE TABLE IF NOT EXISTS runs (
 	id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,

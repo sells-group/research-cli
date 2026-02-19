@@ -69,6 +69,7 @@ Use --full to perform a full reload instead of incremental sync.`,
 		f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{
 			UserAgent:  cfg.Fedsync.EDGARUserAgent,
 			MaxRetries: 3,
+			Timeout:    30 * time.Minute,
 		})
 
 		// Build engine.

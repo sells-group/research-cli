@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/rotisserie/eris"
+	"golang.org/x/text/encoding/htmlindex"
 )
 
 // StreamXML decodes XML elements matching the given local name and sends them to a channel.
@@ -20,6 +21,13 @@ func StreamXML[T any](ctx context.Context, r io.Reader, elementName string) (<-c
 		defer close(errCh)
 
 		decoder := xml.NewDecoder(r)
+		decoder.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
+			enc, err := htmlindex.Get(charset)
+			if err != nil {
+				return nil, eris.Wrapf(err, "xml: unsupported charset %q", charset)
+			}
+			return enc.NewDecoder().Reader(input), nil
+		}
 
 		for {
 			if ctx.Err() != nil {

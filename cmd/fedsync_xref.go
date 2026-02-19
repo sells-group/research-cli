@@ -1,6 +1,8 @@
 package main
 
 import (
+	"time"
+
 	"github.com/rotisserie/eris"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -31,6 +33,7 @@ var fedsyncXrefCmd = &cobra.Command{
 		f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{
 			UserAgent:  cfg.Fedsync.EDGARUserAgent,
 			MaxRetries: 3,
+			Timeout:    2 * time.Minute,
 		})
 
 		syncLog := fedsync.NewSyncLog(pool)

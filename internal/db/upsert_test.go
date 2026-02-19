@@ -47,6 +47,7 @@ func TestBulkUpsert_Success(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_fed_data_test"}, []string{"col1", "col2"}).WillReturnResult(2)
+	mock.ExpectExec("DELETE FROM").WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	mock.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", 2))
 	mock.ExpectCommit()
 
@@ -70,6 +71,7 @@ func TestBulkUpsert_Success_ExplicitUpdateCols(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_fed_data_test"}, []string{"id", "name", "value"}).WillReturnResult(1)
+	mock.ExpectExec("DELETE FROM").WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	mock.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectCommit()
 
@@ -94,6 +96,7 @@ func TestBulkUpsert_SimpleTable(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_mytable"}, []string{"id", "name"}).WillReturnResult(1)
+	mock.ExpectExec("DELETE FROM").WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	mock.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectCommit()
 
@@ -179,6 +182,7 @@ func TestBulkUpsert_InsertConflictError(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_fed_data_test"}, []string{"col1", "col2"}).WillReturnResult(2)
+	mock.ExpectExec("DELETE FROM").WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	mock.ExpectExec("INSERT INTO").WillReturnError(fmt.Errorf("unique violation"))
 	mock.ExpectRollback()
 
@@ -202,6 +206,7 @@ func TestBulkUpsert_CommitError(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_fed_data_test"}, []string{"col1", "col2"}).WillReturnResult(2)
+	mock.ExpectExec("DELETE FROM").WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	mock.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", 2))
 	mock.ExpectCommit().WillReturnError(fmt.Errorf("commit failed"))
 	mock.ExpectRollback()
@@ -257,11 +262,13 @@ func TestBulkUpsertMulti_Success(t *testing.T) {
 	// Table 1
 	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_fed_data_table1"}, []string{"id", "name"}).WillReturnResult(2)
+	mock.ExpectExec("DELETE FROM").WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	mock.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", 2))
 
 	// Table 2
 	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_fed_data_table2"}, []string{"key", "value"}).WillReturnResult(3)
+	mock.ExpectExec("DELETE FROM").WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	mock.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", 3))
 
 	mock.ExpectCommit()
@@ -304,6 +311,7 @@ func TestBulkUpsertMulti_MixedEmptyAndFull(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_fed_data_active"}, []string{"id", "val"}).WillReturnResult(1)
+	mock.ExpectExec("DELETE FROM").WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	mock.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectCommit()
 
@@ -370,6 +378,7 @@ func TestBulkUpsertMulti_TransactionRollbackOnError(t *testing.T) {
 	// Table 1 succeeds
 	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectCopyFrom(pgx.Identifier{"_tmp_upsert_fed_data_t1"}, []string{"id"}).WillReturnResult(1)
+	mock.ExpectExec("DELETE FROM").WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	mock.ExpectExec("INSERT INTO").WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	// Table 2 fails on COPY
 	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))

@@ -71,6 +71,19 @@ func BulkUpsert(ctx context.Context, pool Pool, cfg UpsertConfig, rows [][]any) 
 		return 0, eris.Wrapf(err, "db: upsert: COPY into temp table for %s", cfg.Table)
 	}
 
+	// Deduplicate temp table — ON CONFLICT DO UPDATE fails if the same
+	// conflict key appears more than once in a single INSERT. Keep the
+	// last row (highest ctid) per conflict key set.
+	dedupSQL := fmt.Sprintf(
+		"DELETE FROM %s a USING %s b WHERE a.ctid < b.ctid AND %s",
+		pgx.Identifier{tempTable}.Sanitize(),
+		pgx.Identifier{tempTable}.Sanitize(),
+		dedupJoinCondition(cfg.ConflictKeys, "a", "b"),
+	)
+	if _, err := tx.Exec(ctx, dedupSQL); err != nil {
+		return 0, eris.Wrapf(err, "db: upsert: dedup temp table for %s", cfg.Table)
+	}
+
 	// Build INSERT ... ON CONFLICT ... DO UPDATE
 	colList := quoteAndJoin(cfg.Columns)
 	conflictList := quoteAndJoin(cfg.ConflictKeys)
@@ -168,6 +181,17 @@ func BulkUpsertMulti(ctx context.Context, pool Pool, entries []MultiUpsertEntry)
 			return nil, eris.Wrapf(err, "db: upsert multi: COPY into temp table for %s", cfg.Table)
 		}
 
+		// Deduplicate temp table.
+		dedupSQL := fmt.Sprintf(
+			"DELETE FROM %s a USING %s b WHERE a.ctid < b.ctid AND %s",
+			pgx.Identifier{tempTable}.Sanitize(),
+			pgx.Identifier{tempTable}.Sanitize(),
+			dedupJoinCondition(cfg.ConflictKeys, "a", "b"),
+		)
+		if _, err := tx.Exec(ctx, dedupSQL); err != nil {
+			return nil, eris.Wrapf(err, "db: upsert multi: dedup temp table for %s", cfg.Table)
+		}
+
 		colList := quoteAndJoin(cfg.Columns)
 		conflictList := quoteAndJoin(cfg.ConflictKeys)
 
@@ -198,6 +222,16 @@ func BulkUpsertMulti(ctx context.Context, pool Pool, entries []MultiUpsertEntry)
 	}
 
 	return results, nil
+}
+
+// dedupJoinCondition builds "a.col1 = b.col1 AND a.col2 = b.col2" for dedup DELETE.
+func dedupJoinCondition(keys []string, aliasA, aliasB string) string {
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		col := pgx.Identifier{k}.Sanitize()
+		parts[i] = fmt.Sprintf("%s.%s = %s.%s", aliasA, col, aliasB, col)
+	}
+	return strings.Join(parts, " AND ")
 }
 
 // sanitizeTable handles schema-qualified table names like "fed_data.cbp_data".
