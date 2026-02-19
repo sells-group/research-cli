@@ -13,7 +13,8 @@ func TestIsRelevantNAICS(t *testing.T) {
 	}{
 		{"523110", true},  // Finance
 		{"541110", true},  // Professional services
-		{"311111", false}, // Food manufacturing
+		{"311111", true},  // Food manufacturing
+		{"236115", true},  // Construction
 		{"", true},        // Empty = include
 		{"-", true},       // Dash = include
 		{"52", true},      // Sector-level
@@ -57,14 +58,14 @@ func TestNormalizeFIPSCounty(t *testing.T) {
 	assert.Equal(t, "001", NormalizeFIPSCounty("1"))
 	assert.Equal(t, "037", NormalizeFIPSCounty("37"))
 	assert.Equal(t, "037", NormalizeFIPSCounty("037"))
-	assert.Equal(t, "", NormalizeFIPSCounty(""))
+	assert.Equal(t, "000", NormalizeFIPSCounty("")) // state-level defaults to "000"
 }
 
 func TestCombineFIPS(t *testing.T) {
 	assert.Equal(t, "06037", CombineFIPS("6", "37"))
 	assert.Equal(t, "36061", CombineFIPS("36", "061"))
 	assert.Equal(t, "", CombineFIPS("", "037"))
-	assert.Equal(t, "", CombineFIPS("06", ""))
+	assert.Equal(t, "06000", CombineFIPS("06", "")) // state-level: county defaults to "000"
 }
 
 func TestFormatFIPS(t *testing.T) {

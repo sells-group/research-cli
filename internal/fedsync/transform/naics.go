@@ -4,32 +4,43 @@ import (
 	"strings"
 )
 
-// NAICSPrefixes defines the 2-digit NAICS sectors relevant to financial advisory.
-// Used to filter large datasets to relevant industries.
+// NAICSPrefixes defines the 2-digit NAICS sectors used by QCEW file filtering.
 var NAICSPrefixes = []string{
+	"10", // Total (aggregate)
+	"11", // Agriculture, Forestry, Fishing and Hunting
+	"21", // Mining, Quarrying, and Oil and Gas Extraction
+	"22", // Utilities
+	"23", // Construction
+	"31", // Manufacturing
+	"32", // Manufacturing
+	"33", // Manufacturing
+	"42", // Wholesale Trade
+	"44", // Retail Trade
+	"45", // Retail Trade
+	"48", // Transportation and Warehousing
+	"49", // Transportation and Warehousing
+	"51", // Information
 	"52", // Finance and Insurance
 	"53", // Real Estate
 	"54", // Professional, Scientific, and Technical Services
 	"55", // Management of Companies and Enterprises
 	"56", // Administrative and Support
-	"62", // Health Care
 	"61", // Educational Services
+	"62", // Health Care
+	"71", // Arts, Entertainment, and Recreation
+	"72", // Accommodation and Food Services
 	"81", // Other Services
+	"92", // Public Administration
 }
 
-// IsRelevantNAICS checks if a NAICS code falls within the relevant sectors.
-// An empty code is considered relevant (to avoid dropping data).
+// IsRelevantNAICS returns true for any non-empty NAICS code.
+// All sectors are relevant for revenue estimation and market sizing.
 func IsRelevantNAICS(code string) bool {
 	code = strings.TrimSpace(code)
 	if code == "" || code == "-" {
 		return true
 	}
-	for _, prefix := range NAICSPrefixes {
-		if strings.HasPrefix(code, prefix) {
-			return true
-		}
-	}
-	return false
+	return true
 }
 
 // NormalizeNAICS normalizes a NAICS code to 6 digits by padding with zeros.
