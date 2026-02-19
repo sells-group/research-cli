@@ -182,3 +182,129 @@ func TestCleanExternalMarkdown_UnknownSource(t *testing.T) {
 	result := CleanExternalMarkdown("sos", input)
 	assert.Equal(t, input, result)
 }
+
+func TestParseReviewMetadata_GoogleMaps(t *testing.T) {
+	tests := []struct {
+		name        string
+		md          string
+		wantRating  float64
+		wantCount   int
+		wantNil     bool
+	}{
+		{
+			name:       "stars parenthesized reviews",
+			md:         "Acme Corp\n4.8 stars (127 reviews)\n123 Main St",
+			wantRating: 4.8,
+			wantCount:  127,
+		},
+		{
+			name:       "stars dot separator",
+			md:         "Acme Corp\n4.5 stars · 89 reviews\n123 Main St",
+			wantRating: 4.5,
+			wantCount:  89,
+		},
+		{
+			name:       "singular star and review",
+			md:         "Acme Corp\n3.0 star (1 review)\nSalt Lake City",
+			wantRating: 3.0,
+			wantCount:  1,
+		},
+		{
+			name:       "comma-separated review count",
+			md:         "Big Corp\n4.2 stars (1,234 reviews)",
+			wantRating: 4.2,
+			wantCount:  1234,
+		},
+		{
+			name:       "whole number rating",
+			md:         "Simple Corp\n5 stars (10 reviews)",
+			wantRating: 5,
+			wantCount:  10,
+		},
+		{
+			name:    "no match",
+			md:      "Acme Corp\n123 Main St\nSalt Lake City",
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := ParseReviewMetadata("google_maps", tt.md)
+			if tt.wantNil {
+				assert.Nil(t, meta)
+				return
+			}
+			assert.NotNil(t, meta)
+			assert.InDelta(t, tt.wantRating, meta.Rating, 0.001)
+			assert.Equal(t, tt.wantCount, meta.ReviewCount)
+			assert.Empty(t, meta.BBBRating)
+		})
+	}
+}
+
+func TestParseReviewMetadata_BBB(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		md        string
+		wantGrade string
+		wantNil   bool
+	}{
+		{
+			name:      "A+ with colon",
+			source:    "bbb",
+			md:        "Business Profile\nBBB Rating: A+\nBusiness Started: 2011",
+			wantGrade: "A+",
+		},
+		{
+			name:      "A- without colon",
+			source:    "bbb",
+			md:        "BBB Rating A-\nSome other content",
+			wantGrade: "A-",
+		},
+		{
+			name:      "F rating",
+			source:    "bbb",
+			md:        "BBB Rating: F\nComplaints: 42",
+			wantGrade: "F",
+		},
+		{
+			name:      "B+ rating",
+			source:    "bbb",
+			md:        "Overview\nBBB Rating: B+\nAccredited",
+			wantGrade: "B+",
+		},
+		{
+			name:      "bbb_profile source alias",
+			source:    "bbb_profile",
+			md:        "BBB Rating: A\nDetails",
+			wantGrade: "A",
+		},
+		{
+			name:    "no BBB rating",
+			source:  "bbb",
+			md:      "Business Profile\nBusiness Started: 2011",
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := ParseReviewMetadata(tt.source, tt.md)
+			if tt.wantNil {
+				assert.Nil(t, meta)
+				return
+			}
+			assert.NotNil(t, meta)
+			assert.Equal(t, tt.wantGrade, meta.BBBRating)
+			assert.Zero(t, meta.Rating)
+			assert.Zero(t, meta.ReviewCount)
+		})
+	}
+}
+
+func TestParseReviewMetadata_UnknownSource(t *testing.T) {
+	meta := ParseReviewMetadata("sos", "BBB Rating: A+\n4.8 stars (127 reviews)")
+	assert.Nil(t, meta)
+}

@@ -145,5 +145,132 @@
     "required": false,
     "max_length": 5000,
     "status": "Active"
+  },
+  {
+    "id": "f_description",
+    "key": "description",
+    "sf_field": "Description__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_business_model",
+    "key": "business_model",
+    "sf_field": "Business_Model__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_naics_code",
+    "key": "naics_code",
+    "sf_field": "NAICS_Code__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_key_people",
+    "key": "key_people",
+    "sf_field": "Key_People__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 1000,
+    "status": "Active"
+  },
+  {
+    "id": "f_exec_first_name",
+    "key": "exec_first_name",
+    "sf_field": "Exec_First_Name__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_exec_last_name",
+    "key": "exec_last_name",
+    "sf_field": "Exec_Last_Name__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_exec_title",
+    "key": "exec_title",
+    "sf_field": "Exec_Title__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_exec_linkedin",
+    "key": "exec_linkedin",
+    "sf_field": "Exec_LinkedIn__c",
+    "sf_object": "Account",
+    "data_type": "url",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_review_count",
+    "key": "review_count",
+    "sf_field": "Review_Count__c",
+    "sf_object": "Account",
+    "data_type": "integer",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_review_rating",
+    "key": "review_rating",
+    "sf_field": "Review_Rating__c",
+    "sf_object": "Account",
+    "data_type": "float",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_revenue_estimate",
+    "key": "revenue_estimate",
+    "sf_field": "Revenue_Estimate__c",
+    "sf_object": "Account",
+    "data_type": "integer",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_revenue_confidence",
+    "key": "revenue_confidence",
+    "sf_field": "Revenue_Confidence__c",
+    "sf_object": "Account",
+    "data_type": "float",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_employee_estimate",
+    "key": "employee_estimate",
+    "sf_field": "Employee_Estimate__c",
+    "sf_object": "Account",
+    "data_type": "integer",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_employees_linkedin",
+    "key": "employees_linkedin",
+    "sf_field": "Employees_LinkedIn__c",
+    "sf_object": "Account",
+    "data_type": "integer",
+    "required": false,
+    "status": "Active"
   }
 ]

@@ -296,6 +296,9 @@ func scrapeSource(ctx context.Context, src ExternalSource, company model.Company
 	// Strip boilerplate from external source pages before storing.
 	page.Markdown = CleanExternalMarkdown(src.Name, page.Markdown)
 
+	// Extract structured metadata (reviews, ratings) before title prefixing.
+	page.Metadata = ParseReviewMetadata(src.Name, page.Markdown)
+
 	// Guard against double-prefixing the title.
 	prefix := fmt.Sprintf("[%s] ", src.Name)
 	if !strings.HasPrefix(page.Title, prefix) {

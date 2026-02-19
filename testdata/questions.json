@@ -148,5 +148,115 @@
     "instructions": "Evaluate the company as a potential acquisition target considering: market position, service quality, team depth, geographic presence, growth indicators, and potential risks. Provide a structured assessment.",
     "output_format": "string",
     "status": "Active"
+  },
+  {
+    "id": "q_description",
+    "text": "Write a 2-3 sentence description of what this company does, who they serve, and how they position themselves.",
+    "tier": 1,
+    "field_key": "description",
+    "page_types": ["homepage", "about", "services"],
+    "instructions": "Write a 2-3 sentence description of what this company does, who they serve, and how they position themselves.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_business_model",
+    "text": "Classify this company's business model: Services, Manufacturer, Distributor, Retailer, SaaS, Marketplace, or Other.",
+    "tier": 1,
+    "field_key": "business_model",
+    "page_types": ["homepage", "about", "services"],
+    "instructions": "Classify this company's business model: Services, Manufacturer, Distributor, Retailer, SaaS, Marketplace, or Other.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_naics_code",
+    "text": "What is the most specific NAICS code (up to 6 digits) for this company's primary business activity? Return just the code.",
+    "tier": 2,
+    "field_key": "naics_code",
+    "page_types": ["homepage", "about", "services"],
+    "instructions": "What is the most specific NAICS code (up to 6 digits) for this company's primary business activity? Return just the code.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_key_people",
+    "text": "List key people (name and title) found on the website. Format: 'Name (Title), Name (Title)'.",
+    "tier": 1,
+    "field_key": "key_people",
+    "page_types": ["team", "about", "homepage"],
+    "instructions": "List key people (name and title) found on the website. Format: 'Name (Title), Name (Title)'.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_exec_first_name",
+    "text": "What is the first name of the primary owner, CEO, or president?",
+    "tier": 1,
+    "field_key": "exec_first_name",
+    "page_types": ["team", "about", "homepage"],
+    "instructions": "What is the first name of the primary owner, CEO, or president?",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_exec_last_name",
+    "text": "What is the last name of the primary owner, CEO, or president?",
+    "tier": 1,
+    "field_key": "exec_last_name",
+    "page_types": ["team", "about", "homepage"],
+    "instructions": "What is the last name of the primary owner, CEO, or president?",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_exec_title",
+    "text": "What is the title of the primary owner, CEO, or president?",
+    "tier": 1,
+    "field_key": "exec_title",
+    "page_types": ["team", "about", "homepage"],
+    "instructions": "What is the title of the primary owner, CEO, or president?",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_exec_linkedin",
+    "text": "What is the LinkedIn profile URL of the primary owner/CEO/president, if found?",
+    "tier": 1,
+    "field_key": "exec_linkedin",
+    "page_types": ["team", "about", "linkedin"],
+    "instructions": "What is the LinkedIn profile URL of the primary owner/CEO/president, if found?",
+    "output_format": "url",
+    "status": "Active"
+  },
+  {
+    "id": "q_review_count",
+    "text": "How many Google reviews does this company have? Use the review count from Google Maps metadata if available.",
+    "tier": 1,
+    "field_key": "review_count",
+    "page_types": ["google_maps"],
+    "instructions": "How many Google reviews does this company have? Use the review count from Google Maps metadata if available.",
+    "output_format": "integer",
+    "status": "Active"
+  },
+  {
+    "id": "q_review_rating",
+    "text": "What is this company's Google review rating (out of 5)? Use the rating from Google Maps metadata if available.",
+    "tier": 1,
+    "field_key": "review_rating",
+    "page_types": ["google_maps"],
+    "instructions": "What is this company's Google review rating (out of 5)? Use the rating from Google Maps metadata if available.",
+    "output_format": "float",
+    "status": "Active"
+  },
+  {
+    "id": "q_employees_linkedin",
+    "text": "How many employees does this company have according to LinkedIn?",
+    "tier": 1,
+    "field_key": "employees_linkedin",
+    "page_types": ["linkedin"],
+    "instructions": "Extract the employee count from LinkedIn company data. Return as an integer.",
+    "output_format": "integer",
+    "status": "Active"
   }
 ]

@@ -78,13 +78,21 @@ func IsExternalPageType(pt PageType) bool {
 	return false
 }
 
+// PageMetadata holds structured metadata extracted from external source pages.
+type PageMetadata struct {
+	ReviewCount int     `json:"review_count,omitempty"`
+	Rating      float64 `json:"rating,omitempty"`
+	BBBRating   string  `json:"bbb_rating,omitempty"`
+}
+
 // CrawledPage represents a page fetched during crawling.
 type CrawledPage struct {
-	URL      string `json:"url"`
-	Title    string `json:"title"`
-	Markdown string `json:"markdown"`
-	HTML     string `json:"html,omitempty"`
-	StatusCode int  `json:"status_code"`
+	URL        string        `json:"url"`
+	Title      string        `json:"title"`
+	Markdown   string        `json:"markdown"`
+	HTML       string        `json:"html,omitempty"`
+	StatusCode int           `json:"status_code"`
+	Metadata   *PageMetadata `json:"metadata,omitempty"`
 }
 
 // PageClassification holds the result of page type classification.

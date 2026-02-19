@@ -1,6 +1,12 @@
 package pipeline
 
-import "strings"
+import (
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/sells-group/research-cli/internal/model"
+)
 
 // CleanExternalMarkdown strips boilerplate from external source pages,
 // keeping only the business-relevant content.
@@ -137,6 +143,58 @@ func cleanGoogleMapsMarkdown(md string) string {
 	}
 
 	return strings.TrimSpace(md)
+}
+
+// Review/rating regex patterns.
+var (
+	// Google Maps: "4.8 stars (127 reviews)", "4.5 stars · 89 reviews", "3.0 star (1 review)"
+	googleMapsReviewRe = regexp.MustCompile(`(\d+\.?\d*)\s+stars?\s*[\(·]\s*(\d[\d,]*)\s+reviews?\)?`)
+
+	// BBB rating: "BBB Rating: A+", "BBB Rating A-", "BBB Rating: F"
+	bbbRatingRe = regexp.MustCompile(`BBB\s+Rating:?\s+([A-F][+-]?)`)
+)
+
+// ParseReviewMetadata extracts structured review/rating data from external
+// source markdown. Returns nil if no metadata is found.
+func ParseReviewMetadata(source, md string) *model.PageMetadata {
+	switch source {
+	case "google_maps":
+		return parseGoogleMapsMetadata(md)
+	case "bbb", "bbb_profile":
+		return parseBBBMetadata(md)
+	default:
+		return nil
+	}
+}
+
+func parseGoogleMapsMetadata(md string) *model.PageMetadata {
+	m := googleMapsReviewRe.FindStringSubmatch(md)
+	if m == nil {
+		return nil
+	}
+	rating, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return nil
+	}
+	countStr := strings.ReplaceAll(m[2], ",", "")
+	count, err := strconv.Atoi(countStr)
+	if err != nil {
+		return nil
+	}
+	return &model.PageMetadata{
+		Rating:      rating,
+		ReviewCount: count,
+	}
+}
+
+func parseBBBMetadata(md string) *model.PageMetadata {
+	m := bbbRatingRe.FindStringSubmatch(md)
+	if m == nil {
+		return nil
+	}
+	return &model.PageMetadata{
+		BBBRating: m[1],
+	}
 }
 
 // stripSection removes a named section and its content (up to the next
