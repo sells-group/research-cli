@@ -192,7 +192,8 @@ type BatchConfig struct {
 
 // ServerConfig configures the webhook server.
 type ServerConfig struct {
-	Port int `yaml:"port" mapstructure:"port"`
+	Port          int    `yaml:"port" mapstructure:"port"`
+	WebhookSecret string `yaml:"webhook_secret" mapstructure:"webhook_secret"`
 }
 
 // LogConfig configures logging.

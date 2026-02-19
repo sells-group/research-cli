@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -24,10 +25,13 @@ var servePort int
 const webhookSemSize = 20
 
 // buildMux constructs the HTTP handler for the webhook server.
-// It is extracted as a named function so it can be tested independently.
-func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store) *http.ServeMux {
+// It returns the mux and a drain function that waits for all in-flight
+// enrichment jobs to complete. The caller should invoke drain after the
+// HTTP server has stopped accepting new requests.
+func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store, webhookSecret string) (*http.ServeMux, func()) {
 	mux := http.NewServeMux()
 	sem := make(chan struct{}, webhookSemSize)
+	var wg sync.WaitGroup
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -43,6 +47,15 @@ func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store) *http.S
 	})
 
 	mux.HandleFunc("POST /webhook/enrich", func(w http.ResponseWriter, r *http.Request) {
+		// Authenticate if a webhook secret is configured.
+		if webhookSecret != "" {
+			auth := r.Header.Get("Authorization")
+			if auth != "Bearer "+webhookSecret {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+		}
+
 		var req struct {
 			URL          string `json:"url"`
 			SalesforceID string `json:"salesforce_id"`
@@ -73,9 +86,12 @@ func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store) *http.S
 			Name:         req.Name,
 		}
 
-		// Run enrichment asynchronously
+		// Run enrichment asynchronously with a background context so
+		// in-flight jobs are not cancelled immediately on SIGINT.
+		wg.Add(1)
 		go func() {
 			defer func() { <-sem }()
+			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
 					zap.L().Error("webhook enrichment panicked",
@@ -90,7 +106,9 @@ func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store) *http.S
 					zap.String("company", company.URL))
 				return
 			}
-			result, err := p.Run(ctx, company)
+			jobCtx, jobCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			defer jobCancel()
+			result, err := p.Run(jobCtx, company)
 			if err != nil {
 				zap.L().Error("webhook enrichment failed",
 					zap.String("company", company.URL),
@@ -112,7 +130,10 @@ func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store) *http.S
 		})
 	})
 
-	return mux
+	drain := func() {
+		wg.Wait()
+	}
+	return mux, drain
 }
 
 var serveCmd = &cobra.Command{
@@ -132,9 +153,11 @@ var serveCmd = &cobra.Command{
 		}
 		defer env.Close()
 
-		mux := buildMux(ctx, env.Pipeline, env.Store)
+		mux, drain := buildMux(ctx, env.Pipeline, env.Store, cfg.Server.WebhookSecret)
 		port := resolvePort(servePort, cfg.Server.Port)
-		return startServer(ctx, mux, port)
+		srvErr := startServer(ctx, mux, port)
+		drain() // wait for in-flight enrichment jobs after server shutdown
+		return srvErr
 	},
 }
 
