@@ -174,7 +174,7 @@ func TestParseExtractionAnswer_InvalidJSON(t *testing.T) {
 	answer := parseExtractionAnswer(text, q, 1)
 
 	assert.Equal(t, "q1", answer.QuestionID)
-	assert.Equal(t, text, answer.Value)
+	assert.Nil(t, answer.Value, "malformed JSON should produce nil Value, not raw text")
 	assert.Equal(t, 0.0, answer.Confidence)
 }
 

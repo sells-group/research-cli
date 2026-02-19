@@ -710,9 +710,11 @@ func parseExtractionAnswer(text string, q model.Question, tier int) model.Extrac
 	}
 
 	if err := json.Unmarshal([]byte(cleaned), &raw); err != nil {
-		// If JSON parsing fails, use raw text as value.
-		answer.Value = text
-		return answer
+		zap.L().Warn("extract: failed to parse answer JSON",
+			zap.String("question", q.ID),
+			zap.Error(err),
+		)
+		return answer // Value stays nil, Confidence stays 0.0
 	}
 
 	answer.Value = raw.Value
