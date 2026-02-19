@@ -96,13 +96,23 @@ func (e *Engine) Run(ctx context.Context, opts RunOpts) error {
 			}
 
 			start := time.Now()
-			syncCtx, syncCancel := context.WithTimeout(gctx, 30*time.Minute)
-			result, err := ds.Sync(syncCtx, e.pool, e.fetcher, e.tempDir)
+			syncCtx, syncCancel := context.WithTimeout(gctx, 60*time.Minute)
+			var result *SyncResult
+			if opts.Full {
+				if fs, ok := ds.(FullSyncer); ok {
+					dsLog.Info("running full sync")
+					result, err = fs.SyncFull(syncCtx, e.pool, e.fetcher, e.tempDir)
+				} else {
+					result, err = ds.Sync(syncCtx, e.pool, e.fetcher, e.tempDir)
+				}
+			} else {
+				result, err = ds.Sync(syncCtx, e.pool, e.fetcher, e.tempDir)
+			}
 			syncCancel()
 			elapsed := time.Since(start)
 
 			if syncCtx.Err() == context.DeadlineExceeded {
-				dsLog.Warn("sync timed out after 30 minutes", zap.Duration("elapsed", elapsed))
+				dsLog.Warn("sync timed out after 60 minutes", zap.Duration("elapsed", elapsed))
 			}
 
 			if err != nil {

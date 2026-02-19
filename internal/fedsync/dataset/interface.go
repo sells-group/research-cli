@@ -69,6 +69,14 @@ type SyncResult struct {
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
+// FullSyncer is an optional interface that datasets can implement to support
+// a full historical load (triggered by the --full flag). When the engine runs
+// with Full=true and a dataset implements FullSyncer, SyncFull is called
+// instead of Sync.
+type FullSyncer interface {
+	SyncFull(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error)
+}
+
 // Dataset defines the interface each federal dataset must implement.
 type Dataset interface {
 	// Name returns the unique identifier for this dataset (e.g., "cbp", "adv_part1").
