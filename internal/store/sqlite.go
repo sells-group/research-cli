@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS crawl_cache (
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 CREATE INDEX IF NOT EXISTS idx_runs_company ON runs(company);
 CREATE INDEX IF NOT EXISTS idx_run_phases_run_id ON run_phases(run_id);
-CREATE INDEX IF NOT EXISTS idx_crawl_cache_company_url ON crawl_cache(company_url);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_crawl_cache_company_url ON crawl_cache(company_url);
 CREATE INDEX IF NOT EXISTS idx_crawl_cache_expires_at ON crawl_cache(expires_at);
 
 CREATE TABLE IF NOT EXISTS linkedin_cache (
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS linkedin_cache (
 	expires_at DATETIME NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_linkedin_cache_domain ON linkedin_cache(domain);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_linkedin_cache_domain ON linkedin_cache(domain);
 CREATE INDEX IF NOT EXISTS idx_linkedin_cache_expires_at ON linkedin_cache(expires_at);
 
 CREATE TABLE IF NOT EXISTS scrape_cache (
@@ -293,7 +293,7 @@ func (s *SQLiteStore) SetCachedCrawl(ctx context.Context, companyURL string, pag
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO crawl_cache (id, company_url, pages, crawled_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
+		`INSERT OR REPLACE INTO crawl_cache (id, company_url, pages, crawled_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
 		id, companyURL, string(pagesJSON), now, expiresAt,
 	)
 	return eris.Wrap(err, "sqlite: set cached crawl")
@@ -323,7 +323,7 @@ func (s *SQLiteStore) SetCachedLinkedIn(ctx context.Context, domain string, data
 	expiresAt := now.Add(ttl)
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO linkedin_cache (id, domain, data, cached_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
+		`INSERT OR REPLACE INTO linkedin_cache (id, domain, data, cached_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
 		id, domain, string(data), now, expiresAt,
 	)
 	return eris.Wrap(err, "sqlite: set cached linkedin")

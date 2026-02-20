@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/jomei/notionapi"
 	"github.com/rotisserie/eris"
@@ -49,29 +50,31 @@ func parseQuestionPage(p notionapi.Page) (model.Question, error) {
 		ID: string(p.ID),
 	}
 
-	// Text (title)
-	if prop, ok := p.Properties["Text"]; ok {
+	// Question Key (title)
+	if prop, ok := p.Properties["Question Key"]; ok {
 		if tp, ok := prop.(*notionapi.TitleProperty); ok {
 			q.Text = plainText(tp.Title)
 		}
 	}
 
-	// Tier (number)
+	// Tier (select → parse to int)
 	if prop, ok := p.Properties["Tier"]; ok {
-		if np, ok := prop.(*notionapi.NumberProperty); ok {
-			q.Tier = int(np.Number)
+		if sp, ok := prop.(*notionapi.SelectProperty); ok {
+			if v, err := strconv.Atoi(sp.Select.Name); err == nil {
+				q.Tier = v
+			}
 		}
 	}
 
-	// FieldKey (rich_text)
-	if prop, ok := p.Properties["FieldKey"]; ok {
+	// Target SF Fields (rich_text)
+	if prop, ok := p.Properties["Target SF Fields"]; ok {
 		if rtp, ok := prop.(*notionapi.RichTextProperty); ok {
 			q.FieldKey = plainText(rtp.RichText)
 		}
 	}
 
-	// PageTypes (multi_select)
-	if prop, ok := p.Properties["PageTypes"]; ok {
+	// Relevant Page Types (multi_select)
+	if prop, ok := p.Properties["Relevant Page Types"]; ok {
 		if msp, ok := prop.(*notionapi.MultiSelectProperty); ok {
 			for _, opt := range msp.MultiSelect {
 				q.PageTypes = append(q.PageTypes, model.PageType(opt.Name))
@@ -86,10 +89,10 @@ func parseQuestionPage(p notionapi.Page) (model.Question, error) {
 		}
 	}
 
-	// OutputFormat (select)
-	if prop, ok := p.Properties["OutputFormat"]; ok {
-		if sp, ok := prop.(*notionapi.SelectProperty); ok {
-			q.OutputFormat = sp.Select.Name
+	// Output Schema (rich_text)
+	if prop, ok := p.Properties["Output Schema"]; ok {
+		if rtp, ok := prop.(*notionapi.RichTextProperty); ok {
+			q.OutputFormat = plainText(rtp.RichText)
 		}
 	}
 
@@ -101,7 +104,7 @@ func parseQuestionPage(p notionapi.Page) (model.Question, error) {
 	}
 
 	if q.Text == "" {
-		return q, eris.New("missing Text property")
+		return q, eris.New("missing Question Key property")
 	}
 
 	return q, nil

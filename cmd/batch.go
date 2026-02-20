@@ -34,8 +34,28 @@ var batchCmd = &cobra.Command{
 		}
 		defer env.Close()
 
-		// Query queued leads from Notion
-		leads, err := notion.QueryQueuedLeads(ctx, env.Notion, cfg.Notion.LeadDB)
+		// Query queued leads from Notion with retry for transient errors.
+		var leads []notionapi.Page
+		const maxQueryRetries = 3
+		for attempt := range maxQueryRetries {
+			leads, err = notion.QueryQueuedLeads(ctx, env.Notion, cfg.Notion.LeadDB)
+			if err == nil {
+				break
+			}
+			if attempt < maxQueryRetries-1 {
+				backoff := time.Duration(1<<attempt) * time.Second
+				zap.L().Warn("notion query failed, retrying",
+					zap.Int("attempt", attempt+1),
+					zap.Duration("backoff", backoff),
+					zap.Error(err),
+				)
+				select {
+				case <-ctx.Done():
+					return eris.Wrap(ctx.Err(), "query queued leads cancelled")
+				case <-time.After(backoff):
+				}
+			}
+		}
 		if err != nil {
 			return eris.Wrap(err, "query queued leads")
 		}
@@ -130,9 +150,13 @@ func processBatch(ctx context.Context, leads []notionapi.Page, limit, concurrenc
 				failed.Add(1)
 				log.Error("enrichment failed", zap.Error(err))
 				if notionClient != nil && company.NotionPageID != "" {
-					if nErr := updateNotionFailed(gctx, notionClient, company.NotionPageID, err); nErr != nil {
+					// Use a detached context so the Notion update succeeds even
+					// if the batch context has been cancelled.
+					nCtx, nCancel := context.WithTimeout(context.Background(), 10*time.Second)
+					if nErr := updateNotionFailed(nCtx, notionClient, company.NotionPageID, err); nErr != nil {
 						log.Warn("failed to update notion status to Failed", zap.Error(nErr))
 					}
+					nCancel()
 				}
 				return nil // don't abort batch on individual failure
 			}

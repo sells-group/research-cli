@@ -222,6 +222,64 @@ func TestPollBatch_JitterRange(t *testing.T) {
 	}
 }
 
+func TestPollBatch_Expired(t *testing.T) {
+	mc := new(MockClient)
+
+	mc.On("GetBatch", mock.Anything, "batch_expired").Return(&BatchResponse{
+		ID:               "batch_expired",
+		ProcessingStatus: "expired",
+		RequestCounts:    RequestCounts{Expired: 5},
+	}, nil)
+
+	resp, err := PollBatch(context.Background(), mc, "batch_expired",
+		WithPollInterval(10*time.Millisecond),
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expired")
+	assert.NotNil(t, resp)
+	assert.Equal(t, "expired", resp.ProcessingStatus)
+
+	mc.AssertExpectations(t)
+}
+
+func TestPollBatch_Canceled(t *testing.T) {
+	mc := new(MockClient)
+
+	mc.On("GetBatch", mock.Anything, "batch_canceled").Return(&BatchResponse{
+		ID:               "batch_canceled",
+		ProcessingStatus: "canceled",
+		RequestCounts:    RequestCounts{Canceled: 3},
+	}, nil)
+
+	resp, err := PollBatch(context.Background(), mc, "batch_canceled",
+		WithPollInterval(10*time.Millisecond),
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "canceled")
+	assert.NotNil(t, resp)
+	assert.Equal(t, "canceled", resp.ProcessingStatus)
+
+	mc.AssertExpectations(t)
+}
+
+func TestPollBatch_Canceling(t *testing.T) {
+	mc := new(MockClient)
+
+	mc.On("GetBatch", mock.Anything, "batch_canceling").Return(&BatchResponse{
+		ID:               "batch_canceling",
+		ProcessingStatus: "canceling",
+	}, nil)
+
+	resp, err := PollBatch(context.Background(), mc, "batch_canceling",
+		WithPollInterval(10*time.Millisecond),
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "canceled")
+	assert.NotNil(t, resp)
+
+	mc.AssertExpectations(t)
+}
+
 func TestCollectBatchResults_Success(t *testing.T) {
 	items := []BatchResultItem{
 		{
@@ -267,6 +325,78 @@ func TestCollectBatchResults_Empty(t *testing.T) {
 	results, err := CollectBatchResults(iter)
 	require.NoError(t, err)
 	assert.Empty(t, results)
+}
+
+func TestCollectBatchResultsDetailed_TracksFailures(t *testing.T) {
+	items := []BatchResultItem{
+		{
+			CustomID: "q1",
+			Type:     "succeeded",
+			Message: &MessageResponse{
+				ID:      "msg_1",
+				Content: []ContentBlock{{Type: "text", Text: "Answer 1"}},
+			},
+		},
+		{
+			CustomID: "q2",
+			Type:     "errored",
+			Message:  nil,
+		},
+		{
+			CustomID: "q3",
+			Type:     "succeeded",
+			Message: &MessageResponse{
+				ID:      "msg_3",
+				Content: []ContentBlock{{Type: "text", Text: "Answer 3"}},
+			},
+		},
+		{
+			CustomID: "q4",
+			Type:     "canceled",
+			Message:  nil,
+		},
+		{
+			CustomID: "q5",
+			Type:     "expired",
+			Message:  nil,
+		},
+	}
+
+	iter := NewMockBatchResultIterator(items)
+	result, err := CollectBatchResultsDetailed(iter)
+	require.NoError(t, err)
+
+	assert.Len(t, result.Succeeded, 2)
+	assert.Equal(t, "Answer 1", result.Succeeded["q1"].Content[0].Text)
+	assert.Equal(t, "Answer 3", result.Succeeded["q3"].Content[0].Text)
+
+	assert.Len(t, result.Failures, 3)
+	assert.Equal(t, "q2", result.Failures[0].CustomID)
+	assert.Equal(t, "errored", result.Failures[0].Type)
+	assert.Equal(t, "q4", result.Failures[1].CustomID)
+	assert.Equal(t, "canceled", result.Failures[1].Type)
+	assert.Equal(t, "q5", result.Failures[2].CustomID)
+	assert.Equal(t, "expired", result.Failures[2].Type)
+}
+
+func TestCollectBatchResultsDetailed_AllSucceeded(t *testing.T) {
+	items := []BatchResultItem{
+		{
+			CustomID: "q1",
+			Type:     "succeeded",
+			Message: &MessageResponse{
+				ID:      "msg_1",
+				Content: []ContentBlock{{Type: "text", Text: "Answer 1"}},
+			},
+		},
+	}
+
+	iter := NewMockBatchResultIterator(items)
+	result, err := CollectBatchResultsDetailed(iter)
+	require.NoError(t, err)
+
+	assert.Len(t, result.Succeeded, 1)
+	assert.Empty(t, result.Failures)
 }
 
 func TestCollectBatchResults_IteratorError(t *testing.T) {

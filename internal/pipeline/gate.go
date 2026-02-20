@@ -48,14 +48,19 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 
 	// SF or ToolJet update.
 	g.Go(func() error {
-		if gate.Passed {
-			if result.Company.SalesforceID != "" {
-				sfFields := buildSFFields(result.FieldValues)
-				if result.Report != "" {
-					sfFields["Enrichment_Report__c"] = result.Report
-				}
-				if len(sfFields) > 0 {
-					if err := salesforce.UpdateAccount(gCtx, sfClient, result.Company.SalesforceID, sfFields); err != nil {
+		if gate.Passed && sfClient != nil {
+			accountFields, contactFields := buildSFFieldsByObject(result.FieldValues, fields)
+			if result.Report != "" {
+				accountFields["Enrichment_Report__c"] = result.Report
+			}
+			ensureMinimumSFFields(accountFields, result.Company)
+
+			accountID := result.Company.SalesforceID
+
+			if accountID != "" {
+				// Existing account — update.
+				if len(accountFields) > 0 {
+					if err := salesforce.UpdateAccount(gCtx, sfClient, accountID, accountFields); err != nil {
 						sfErr = err
 						zap.L().Error("gate: salesforce update failed",
 							zap.String("company", result.Company.Name),
@@ -65,8 +70,42 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 					}
 					gate.SFUpdated = true
 				}
+			} else {
+				// New account — create.
+				newID, err := salesforce.CreateAccount(gCtx, sfClient, accountFields)
+				if err != nil {
+					sfErr = err
+					zap.L().Error("gate: salesforce create failed",
+						zap.String("company", result.Company.Name),
+						zap.Error(err),
+					)
+					return eris.Wrap(err, "gate: sf create")
+				}
+				accountID = newID
+				result.Company.SalesforceID = newID
+				gate.SFUpdated = true
+
+				// Write new SF ID back to Notion.
+				if notionClient != nil && result.Company.NotionPageID != "" {
+					if err := writeNotionSalesforceID(gCtx, notionClient, result.Company.NotionPageID, newID); err != nil {
+						zap.L().Warn("gate: failed to write SF ID to Notion",
+							zap.String("company", result.Company.Name),
+							zap.Error(err),
+						)
+					}
+				}
 			}
-		} else {
+
+			// Create Contact if we have contact fields.
+			if len(contactFields) > 0 && accountID != "" {
+				if _, err := salesforce.CreateContact(gCtx, sfClient, accountID, contactFields); err != nil {
+					zap.L().Warn("gate: salesforce create contact failed",
+						zap.String("company", result.Company.Name),
+						zap.Error(err),
+					)
+				}
+			}
+		} else if !gate.Passed {
 			if cfg.ToolJet.WebhookURL != "" {
 				if err := sendToToolJet(gCtx, result, cfg.ToolJet.WebhookURL); err != nil {
 					zap.L().Warn("gate: tooljet webhook failed",
@@ -157,6 +196,58 @@ func buildSFFields(fieldValues map[string]model.FieldValue) map[string]any {
 		}
 	}
 	return fields
+}
+
+// buildSFFieldsByObject splits field values into Account and Contact maps
+// based on the SFObject property from the field registry.
+func buildSFFieldsByObject(fieldValues map[string]model.FieldValue, registry *model.FieldRegistry) (accountFields map[string]any, contactFields map[string]any) {
+	accountFields = make(map[string]any)
+	contactFields = make(map[string]any)
+	for _, fv := range fieldValues {
+		if fv.SFField == "" {
+			continue
+		}
+		fm := registry.ByKey(fv.FieldKey)
+		if fm != nil && fm.SFObject == "Contact" {
+			contactFields[fv.SFField] = fv.Value
+		} else {
+			accountFields[fv.SFField] = fv.Value
+		}
+	}
+	return accountFields, contactFields
+}
+
+// ensureMinimumSFFields sets Name and Website from the Company if not already
+// present in the enriched fields. Required for Account creation.
+func ensureMinimumSFFields(fields map[string]any, company model.Company) {
+	if fields["Name"] == nil || fields["Name"] == "" {
+		if company.Name != "" {
+			fields["Name"] = company.Name
+		}
+	}
+	if fields["Website"] == nil || fields["Website"] == "" {
+		if company.URL != "" {
+			fields["Website"] = company.URL
+		}
+	}
+}
+
+// writeNotionSalesforceID updates the SalesforceID property on the Lead Tracker page.
+func writeNotionSalesforceID(ctx context.Context, client notion.Client, pageID, sfID string) error {
+	_, err := client.UpdatePage(ctx, pageID, &notionapi.PageUpdateRequest{
+		Properties: notionapi.Properties{
+			"SalesforceID": notionapi.RichTextProperty{
+				Type: notionapi.PropertyTypeRichText,
+				RichText: []notionapi.RichText{
+					{Type: notionapi.ObjectTypeText, Text: &notionapi.Text{Content: sfID}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return eris.Wrap(err, fmt.Sprintf("gate: write sf id to notion page %s", pageID))
+	}
+	return nil
 }
 
 func sendToToolJet(ctx context.Context, result *model.EnrichmentResult, webhookURL string) error {

@@ -103,7 +103,9 @@ func TestQualityGate_PassNoSFFieldValues(t *testing.T) {
 		{Key: "industry", SFField: "Industry"},
 	})
 
-	// Field values exist but none have SF field mapping.
+	// Field values exist but none have SF field mapping. However,
+	// ensureMinimumSFFields still adds Name from Company, so UpdateAccount
+	// is called with at least the company name.
 	result := &model.EnrichmentResult{
 		Company: model.Company{
 			Name:         "No SF Fields",
@@ -116,7 +118,9 @@ func TestQualityGate_PassNoSFFieldValues(t *testing.T) {
 	}
 
 	sfClient := salesforcemocks.NewMockClient(t)
-	// UpdateOne should NOT be called since no SF fields are populated.
+	// UpdateOne IS called because ensureMinimumSFFields adds Name.
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001ABC", mock.AnythingOfType("map[string]interface {}")).
+		Return(nil)
 
 	notionClient := notionmocks.NewMockClient(t)
 	notionClient.On("UpdatePage", mock.Anything, "page-123", mock.Anything).Return(nil, nil)
@@ -129,7 +133,7 @@ func TestQualityGate_PassNoSFFieldValues(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.True(t, gate.Passed)
-	assert.False(t, gate.SFUpdated) // No SF fields to update
+	assert.True(t, gate.SFUpdated)
 	sfClient.AssertExpectations(t)
 }
 

@@ -213,16 +213,17 @@ func ClassifyPhase(ctx context.Context, pages []model.CrawledPage, aiClient anth
 
 	// If no-batch mode or only a few pages, use direct messages instead of batch.
 	var llmIndex model.PageIndex
-	var llmUsage *model.TokenUsage
 	var err error
 	threshold := aiCfg.SmallBatchThreshold
 	if threshold <= 0 {
 		threshold = smallBatchThresholdClassify
 	}
+	// classifyBatch/classifyDirect accumulate tokens directly into totalUsage
+	// via the usage pointer parameter, so we discard the returned usage.
 	if aiCfg.NoBatch || len(batchItems) <= threshold {
-		llmIndex, llmUsage, err = classifyDirect(ctx, llmPages, batchItems, aiClient, totalUsage)
+		llmIndex, _, err = classifyDirect(ctx, llmPages, batchItems, aiClient, totalUsage)
 	} else {
-		llmIndex, llmUsage, err = classifyBatch(ctx, llmPages, batchItems, aiClient, totalUsage)
+		llmIndex, _, err = classifyBatch(ctx, llmPages, batchItems, aiClient, totalUsage)
 	}
 	if err != nil {
 		return nil, totalUsage, err
@@ -231,9 +232,6 @@ func ClassifyPhase(ctx context.Context, pages []model.CrawledPage, aiClient anth
 	// Merge LLM-classified pages into the index.
 	for pt, pages := range llmIndex {
 		index[pt] = append(index[pt], pages...)
-	}
-	if llmUsage != nil {
-		totalUsage = llmUsage
 	}
 
 	// Re-attach deduplicated pages: give them the same classification as

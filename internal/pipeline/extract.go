@@ -73,6 +73,44 @@ All available context:
 Provide a thorough, well-reasoned answer. Return a valid JSON object:
 {"value": <definitive value>, "confidence": <0.0-1.0>, "reasoning": "<detailed explanation>", "source_url": "<most relevant source URL>"}`
 
+// Rich prompt templates for multi-field questions with Instructions.
+const tier1PromptRich = `%s
+
+Output JSON schema:
+%s
+
+Page URL: %s
+Page content:
+%s
+
+Extract the requested data from this page. Return valid JSON matching the schema above.`
+
+const tier2PromptRich = `%s
+
+Output JSON schema:
+%s
+
+Previous findings (Tier 1):
+%s
+
+Source pages:
+%s
+
+Synthesize the best answer from all available sources. Return valid JSON matching the schema above.`
+
+const tier3PromptRich = `%s
+
+Output JSON schema:
+%s
+
+All available context:
+%s
+
+Provide a thorough, well-reasoned answer. Return valid JSON matching the schema above.`
+
+// richSystemText is the system prompt for multi-field (rich) extractions.
+const richSystemText = "You are a research analyst extracting structured data from web pages. Return valid JSON matching the requested schema. Use null for fields not found."
+
 // ExtractTier1 runs Tier 1 extraction: single-page fact extraction using Haiku.
 func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
 	start := time.Now()
@@ -98,13 +136,16 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient a
 	}
 
 	// Build batch items: one per question, using the first matched page.
+	// Multi-field questions (with Instructions) use a rich prompt template
+	// and a dedicated system prompt.
+	richSystemBlocks := anthropic.BuildCachedSystemBlocks(richSystemText)
+
 	var batchItems []anthropic.BatchRequestItem
 	for i, rq := range routed {
-		page := rq.Pages[0] // Tier 1: single page
-		instructions := ""
-		if rq.Question.Instructions != "" {
-			instructions = fmt.Sprintf("Instructions: %s", rq.Question.Instructions)
+		if len(rq.Pages) == 0 {
+			continue
 		}
+		page := rq.Pages[0] // Tier 1: single page
 
 		content := truncateByRelevance(page.Markdown, rq.Question.Text, 8000)
 
@@ -113,21 +154,39 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient a
 			content += "\n\n--- Additional Sources ---\n" + externalCtx
 		}
 
-		prompt := fmt.Sprintf(tier1Prompt,
-			rq.Question.Text,
-			instructions,
-			rq.Question.OutputFormat,
-			page.URL,
-			content,
-			page.URL,
-		)
+		// Choose prompt template and system blocks based on whether the
+		// question has structured Instructions (multi-field grouped prompt).
+		var prompt string
+		sysBlocks := systemBlocks
+		if rq.Question.Instructions != "" && len(splitFieldKeys(rq.Question.FieldKey)) > 1 {
+			prompt = fmt.Sprintf(tier1PromptRich,
+				rq.Question.Instructions,
+				rq.Question.OutputFormat,
+				page.URL,
+				content,
+			)
+			sysBlocks = richSystemBlocks
+		} else {
+			instructions := ""
+			if rq.Question.Instructions != "" {
+				instructions = fmt.Sprintf("Instructions: %s", rq.Question.Instructions)
+			}
+			prompt = fmt.Sprintf(tier1Prompt,
+				rq.Question.Text,
+				instructions,
+				rq.Question.OutputFormat,
+				page.URL,
+				content,
+				page.URL,
+			)
+		}
 
 		batchItems = append(batchItems, anthropic.BatchRequestItem{
 			CustomID: fmt.Sprintf("t1-%d-%s", i, rq.Question.ID),
 			Params: anthropic.MessageRequest{
 				Model:     aiCfg.HaikuModel,
-				MaxTokens: 512,
-				System:    systemBlocks,
+				MaxTokens: maxTokensForQuestion(rq.Question),
+				System:    sysBlocks,
 				Messages: []anthropic.Message{
 					{Role: "user", Content: prompt},
 				},
@@ -199,29 +258,42 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 	t1Context := buildT1Context(lowConfT1)
 
 	// Build page context per question.
+	richSystemBlocks := anthropic.BuildCachedSystemBlocks(richSystemText)
+
 	var batchItems []anthropic.BatchRequestItem
 	for i, rq := range routed {
-		instructions := ""
-		if rq.Question.Instructions != "" {
-			instructions = fmt.Sprintf("Instructions: %s", rq.Question.Instructions)
-		}
-
 		pagesContext := buildPagesContext(rq.Pages, 4000)
 
-		prompt := fmt.Sprintf(tier2Prompt,
-			rq.Question.Text,
-			instructions,
-			rq.Question.OutputFormat,
-			t1Context,
-			pagesContext,
-		)
+		var prompt string
+		sysBlocks := systemBlocks
+		if rq.Question.Instructions != "" && len(splitFieldKeys(rq.Question.FieldKey)) > 1 {
+			prompt = fmt.Sprintf(tier2PromptRich,
+				rq.Question.Instructions,
+				rq.Question.OutputFormat,
+				t1Context,
+				pagesContext,
+			)
+			sysBlocks = richSystemBlocks
+		} else {
+			instructions := ""
+			if rq.Question.Instructions != "" {
+				instructions = fmt.Sprintf("Instructions: %s", rq.Question.Instructions)
+			}
+			prompt = fmt.Sprintf(tier2Prompt,
+				rq.Question.Text,
+				instructions,
+				rq.Question.OutputFormat,
+				t1Context,
+				pagesContext,
+			)
+		}
 
 		batchItems = append(batchItems, anthropic.BatchRequestItem{
 			CustomID: fmt.Sprintf("t2-%d-%s", i, rq.Question.ID),
 			Params: anthropic.MessageRequest{
 				Model:     aiCfg.SonnetModel,
-				MaxTokens: 1024,
-				System:    systemBlocks,
+				MaxTokens: maxTokensForQuestion(rq.Question),
+				System:    sysBlocks,
 				Messages: []anthropic.Message{
 					{Role: "user", Content: prompt},
 				},
@@ -289,26 +361,38 @@ func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers
 	systemBlocks := anthropic.BuildCachedSystemBlocks(t3SystemText)
 
 	// Build requests for each T3 question.
+	richSystemBlocks := anthropic.BuildCachedSystemBlocks(richSystemText)
+
 	var batchItems []anthropic.BatchRequestItem
 	for i, rq := range routed {
-		instructions := ""
-		if rq.Question.Instructions != "" {
-			instructions = fmt.Sprintf("Instructions: %s", rq.Question.Instructions)
+		var prompt string
+		sysBlocks := systemBlocks
+		if rq.Question.Instructions != "" && len(splitFieldKeys(rq.Question.FieldKey)) > 1 {
+			prompt = fmt.Sprintf(tier3PromptRich,
+				rq.Question.Instructions,
+				rq.Question.OutputFormat,
+				summaryCtx,
+			)
+			sysBlocks = richSystemBlocks
+		} else {
+			instructions := ""
+			if rq.Question.Instructions != "" {
+				instructions = fmt.Sprintf("Instructions: %s", rq.Question.Instructions)
+			}
+			prompt = fmt.Sprintf(tier3Prompt,
+				rq.Question.Text,
+				instructions,
+				rq.Question.OutputFormat,
+				summaryCtx,
+			)
 		}
-
-		prompt := fmt.Sprintf(tier3Prompt,
-			rq.Question.Text,
-			instructions,
-			rq.Question.OutputFormat,
-			summaryCtx,
-		)
 
 		batchItems = append(batchItems, anthropic.BatchRequestItem{
 			CustomID: fmt.Sprintf("t3-%d-%s", i, rq.Question.ID),
 			Params: anthropic.MessageRequest{
 				Model:     aiCfg.OpusModel,
-				MaxTokens: 2048,
-				System:    systemBlocks,
+				MaxTokens: maxTokensForQuestion(rq.Question),
+				System:    sysBlocks,
 				Messages: []anthropic.Message{
 					{Role: "user", Content: prompt},
 				},
@@ -560,9 +644,9 @@ func executeBatch(ctx context.Context, items []anthropic.BatchRequestItem, route
 	if aiCfg.NoBatch || len(items) <= threshold {
 		// Concurrent direct execution with retry + exponential backoff.
 		type indexedAnswer struct {
-			index  int
-			answer model.ExtractionAnswer
-			usage  anthropic.TokenUsage
+			index   int
+			answers []model.ExtractionAnswer
+			usage   anthropic.TokenUsage
 		}
 
 		g, gCtx := errgroup.WithContext(ctx)
@@ -608,13 +692,13 @@ func executeBatch(ctx context.Context, items []anthropic.BatchRequestItem, route
 					return nil // Don't fail the group on individual errors.
 				}
 
-				answer := parseExtractionAnswer(extractText(resp), routed[i].Question, tier)
+				parsed := parseExtractionAnswer(extractText(resp), routed[i].Question, tier)
 
 				mu.Lock()
 				results = append(results, indexedAnswer{
-					index:  i,
-					answer: answer,
-					usage:  resp.Usage,
+					index:   i,
+					answers: parsed,
+					usage:   resp.Usage,
 				})
 				mu.Unlock()
 				return nil
@@ -629,7 +713,7 @@ func executeBatch(ctx context.Context, items []anthropic.BatchRequestItem, route
 			usage.OutputTokens += int(r.usage.OutputTokens)
 			usage.CacheCreationTokens += int(r.usage.CacheCreationInputTokens)
 			usage.CacheReadTokens += int(r.usage.CacheReadInputTokens)
-			answers = append(answers, r.answer)
+			answers = append(answers, r.answers...)
 		}
 		return answers, usage, nil
 	}
@@ -686,43 +770,135 @@ func executeBatch(ctx context.Context, items []anthropic.BatchRequestItem, route
 		usage.CacheCreationTokens += int(resp.Usage.CacheCreationInputTokens)
 		usage.CacheReadTokens += int(resp.Usage.CacheReadInputTokens)
 
-		answer := parseExtractionAnswer(extractText(resp), rq.Question, tier)
-		answers = append(answers, answer)
+		parsed := parseExtractionAnswer(extractText(resp), rq.Question, tier)
+		answers = append(answers, parsed...)
 	}
 
 	return answers, usage, nil
 }
 
-func parseExtractionAnswer(text string, q model.Question, tier int) model.ExtractionAnswer {
-	answer := model.ExtractionAnswer{
-		QuestionID: q.ID,
-		FieldKey:   q.FieldKey,
-		Tier:       tier,
-		Confidence: 0.0,
+// maxTokensForQuestion returns an appropriate MaxTokens value based on the
+// number of target fields. Multi-field questions need more output tokens.
+func maxTokensForQuestion(q model.Question) int64 {
+	fieldKeys := splitFieldKeys(q.FieldKey)
+	if len(fieldKeys) <= 1 {
+		return 512
 	}
+	tokens := len(fieldKeys) * 100
+	if tokens < 512 {
+		tokens = 512
+	}
+	if tokens > 4096 {
+		tokens = 4096
+	}
+	return int64(tokens)
+}
 
+// parseExtractionAnswer parses the LLM response text for a question.
+// For multi-field questions (FieldKey contains commas), it splits the JSON
+// response into one ExtractionAnswer per target field. For single-field
+// questions using the legacy {"value":..., "confidence":...} format, it returns
+// a single-element slice.
+func parseExtractionAnswer(text string, q model.Question, tier int) []model.ExtractionAnswer {
 	cleaned := cleanJSON(text)
-	var raw struct {
-		Value      any     `json:"value"`
-		Confidence float64 `json:"confidence"`
-		Reasoning  string  `json:"reasoning"`
-		SourceURL  string  `json:"source_url"`
-	}
 
-	if err := json.Unmarshal([]byte(cleaned), &raw); err != nil {
+	// Try to parse as a generic JSON object.
+	var rawMap map[string]any
+	if err := json.Unmarshal([]byte(cleaned), &rawMap); err != nil {
 		zap.L().Warn("extract: failed to parse answer JSON",
 			zap.String("question", q.ID),
 			zap.Error(err),
 		)
-		return answer // Value stays nil, Confidence stays 0.0
+		return []model.ExtractionAnswer{{
+			QuestionID: q.ID,
+			FieldKey:   q.FieldKey,
+			Tier:       tier,
+			Confidence: 0.0,
+		}}
 	}
 
-	answer.Value = raw.Value
-	answer.Confidence = raw.Confidence
-	answer.Reasoning = raw.Reasoning
-	answer.SourceURL = raw.SourceURL
+	fieldKeys := splitFieldKeys(q.FieldKey)
 
-	return answer
+	// Single-field with legacy {"value":..., "confidence":...} format.
+	if len(fieldKeys) == 1 {
+		if _, hasValue := rawMap["value"]; hasValue {
+			conf, _ := toFloat64(rawMap["confidence"])
+			reasoning, _ := rawMap["reasoning"].(string)
+			sourceURL, _ := rawMap["source_url"].(string)
+			return []model.ExtractionAnswer{{
+				QuestionID: q.ID,
+				FieldKey:   fieldKeys[0],
+				Value:      rawMap["value"],
+				Confidence: conf,
+				Reasoning:  reasoning,
+				SourceURL:  sourceURL,
+				Tier:       tier,
+			}}
+		}
+	}
+
+	// Multi-field: extract global metadata, then one answer per field key.
+	globalConf, _ := toFloat64(rawMap["confidence"])
+	globalReasoning, _ := rawMap["reasoning"].(string)
+	globalSourceURL, _ := rawMap["source_url"].(string)
+
+	var answers []model.ExtractionAnswer
+	for _, fk := range fieldKeys {
+		val, found := rawMap[fk]
+		if !found {
+			continue
+		}
+		answers = append(answers, model.ExtractionAnswer{
+			QuestionID: q.ID,
+			FieldKey:   fk,
+			Value:      val,
+			Confidence: globalConf,
+			Reasoning:  globalReasoning,
+			SourceURL:  globalSourceURL,
+			Tier:       tier,
+		})
+	}
+
+	// If no field keys matched, fall back to a single answer with the whole map.
+	if len(answers) == 0 {
+		return []model.ExtractionAnswer{{
+			QuestionID: q.ID,
+			FieldKey:   q.FieldKey,
+			Tier:       tier,
+			Confidence: globalConf,
+			Reasoning:  globalReasoning,
+			SourceURL:  globalSourceURL,
+		}}
+	}
+
+	return answers
+}
+
+// splitFieldKeys splits a comma-separated field key string, trimming whitespace.
+func splitFieldKeys(fieldKey string) []string {
+	parts := strings.Split(fieldKey, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// toFloat64 attempts to convert an any value to float64.
+func toFloat64(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	default:
+		return 0, false
+	}
 }
 
 func buildT1Context(answers []model.ExtractionAnswer) string {

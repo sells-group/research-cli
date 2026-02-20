@@ -426,30 +426,33 @@ func TestParseExtractionAnswer_NumericValue(t *testing.T) {
 	q := model.Question{ID: "q1", FieldKey: "count"}
 	text := `{"value": 42, "confidence": 0.8, "reasoning": "counted", "source_url": "https://acme.com"}`
 
-	answer := parseExtractionAnswer(text, q, 1)
+	answers := parseExtractionAnswer(text, q, 1)
 
-	assert.Equal(t, float64(42), answer.Value)
-	assert.Equal(t, 0.8, answer.Confidence)
-	assert.Equal(t, "counted", answer.Reasoning)
+	require.Len(t, answers, 1)
+	assert.Equal(t, float64(42), answers[0].Value)
+	assert.Equal(t, 0.8, answers[0].Confidence)
+	assert.Equal(t, "counted", answers[0].Reasoning)
 }
 
 func TestParseExtractionAnswer_BoolValue(t *testing.T) {
 	q := model.Question{ID: "q1", FieldKey: "active"}
 	text := `{"value": true, "confidence": 0.95, "reasoning": "stated", "source_url": "https://acme.com"}`
 
-	answer := parseExtractionAnswer(text, q, 2)
+	answers := parseExtractionAnswer(text, q, 2)
 
-	assert.Equal(t, true, answer.Value)
-	assert.Equal(t, 0.95, answer.Confidence)
-	assert.Equal(t, 2, answer.Tier)
+	require.Len(t, answers, 1)
+	assert.Equal(t, true, answers[0].Value)
+	assert.Equal(t, 0.95, answers[0].Confidence)
+	assert.Equal(t, 2, answers[0].Tier)
 }
 
 func TestParseExtractionAnswer_NullValue(t *testing.T) {
 	q := model.Question{ID: "q1", FieldKey: "field"}
 	text := `{"value": null, "confidence": 0.1, "reasoning": "not found", "source_url": ""}`
 
-	answer := parseExtractionAnswer(text, q, 1)
+	answers := parseExtractionAnswer(text, q, 1)
 
-	assert.Nil(t, answer.Value)
-	assert.Equal(t, 0.1, answer.Confidence)
+	require.Len(t, answers, 1)
+	assert.Nil(t, answers[0].Value)
+	assert.Equal(t, 0.1, answers[0].Confidence)
 }

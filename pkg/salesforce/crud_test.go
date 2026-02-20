@@ -9,6 +9,93 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCreateAccount(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		var capturedObject string
+		var capturedFields map[string]any
+		mc := &mockClient{
+			insertOneFn: func(_ context.Context, sObject string, record map[string]any) (string, error) {
+				capturedObject = sObject
+				capturedFields = record
+				return "001NEW", nil
+			},
+		}
+
+		fields := map[string]any{"Name": "Acme Corp", "Website": "https://acme.com"}
+		id, err := CreateAccount(context.Background(), mc, fields)
+		require.NoError(t, err)
+		assert.Equal(t, "001NEW", id)
+		assert.Equal(t, "Account", capturedObject)
+		assert.Equal(t, "Acme Corp", capturedFields["Name"])
+		assert.Equal(t, "https://acme.com", capturedFields["Website"])
+	})
+
+	t.Run("missing name", func(t *testing.T) {
+		mc := &mockClient{}
+		_, err := CreateAccount(context.Background(), mc, map[string]any{"Website": "https://acme.com"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Name is required")
+	})
+
+	t.Run("empty name", func(t *testing.T) {
+		mc := &mockClient{}
+		_, err := CreateAccount(context.Background(), mc, map[string]any{"Name": ""})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Name is required")
+	})
+
+	t.Run("propagates error", func(t *testing.T) {
+		mc := &mockClient{
+			insertOneFn: func(_ context.Context, _ string, _ map[string]any) (string, error) {
+				return "", errors.New("api error")
+			},
+		}
+		_, err := CreateAccount(context.Background(), mc, map[string]any{"Name": "Test"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "create account")
+	})
+}
+
+func TestCreateContact(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		var capturedObject string
+		var capturedFields map[string]any
+		mc := &mockClient{
+			insertOneFn: func(_ context.Context, sObject string, record map[string]any) (string, error) {
+				capturedObject = sObject
+				capturedFields = record
+				return "003NEW", nil
+			},
+		}
+
+		fields := map[string]any{"LastName": "Doe", "FirstName": "Jane"}
+		id, err := CreateContact(context.Background(), mc, "001ACCT", fields)
+		require.NoError(t, err)
+		assert.Equal(t, "003NEW", id)
+		assert.Equal(t, "Contact", capturedObject)
+		assert.Equal(t, "001ACCT", capturedFields["AccountId"])
+		assert.Equal(t, "Doe", capturedFields["LastName"])
+	})
+
+	t.Run("empty account id", func(t *testing.T) {
+		mc := &mockClient{}
+		_, err := CreateContact(context.Background(), mc, "", map[string]any{"LastName": "Doe"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "account id is required")
+	})
+
+	t.Run("propagates error", func(t *testing.T) {
+		mc := &mockClient{
+			insertOneFn: func(_ context.Context, _ string, _ map[string]any) (string, error) {
+				return "", errors.New("api error")
+			},
+		}
+		_, err := CreateContact(context.Background(), mc, "001ACCT", map[string]any{"LastName": "Doe"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "create contact")
+	})
+}
+
 func TestUpdateAccount(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		var capturedID string

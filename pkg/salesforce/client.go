@@ -53,6 +53,12 @@ type SObjectDescription struct {
 }
 
 // sfClient wraps the go-salesforce/v3 Salesforce struct.
+//
+// NOTE: The underlying go-salesforce/v3 library does not accept context.Context,
+// so all methods discard the ctx parameter. This means Salesforce calls cannot
+// be cancelled or timed out via context. For critical paths (e.g., gate phase
+// writes), callers should consider wrapping calls with a goroutine + select on
+// the context if cancellation is required.
 type sfClient struct {
 	sf *salesforce.Salesforce
 }

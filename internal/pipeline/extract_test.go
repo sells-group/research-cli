@@ -153,39 +153,314 @@ func TestExtractTier3_WithSummarization(t *testing.T) {
 	aiClient.AssertExpectations(t)
 }
 
+func TestExtractTier1_RichPrompt_MultiField(t *testing.T) {
+	ctx := context.Background()
+
+	// Multi-field question with Instructions triggers the rich prompt template.
+	routed := []model.RoutedQuestion{
+		{
+			Question: model.Question{
+				ID:           "q-grouped",
+				Text:         "Company basics",
+				FieldKey:     "company_name, year_established, owner_name",
+				Instructions: "Extract the company name, year established, and owner name.",
+				OutputFormat: `{"company_name": "string", "year_established": "number", "owner_name": "string", "confidence": 0.0}`,
+			},
+			Pages: []model.ClassifiedPage{{CrawledPage: model.CrawledPage{URL: "https://acme.com/about", Markdown: "Acme Corp was founded in 2010 by Jane Doe."}}},
+		},
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+
+	// Capture the request to verify rich template was used.
+	var capturedReq anthropic.MessageRequest
+	aiClient.On("CreateMessage", mock.Anything, mock.MatchedBy(func(req anthropic.MessageRequest) bool {
+		capturedReq = req
+		return true
+	})).Return(&anthropic.MessageResponse{
+		Content: []anthropic.ContentBlock{{Text: `{"company_name": "Acme Corp", "year_established": 2010, "owner_name": "Jane Doe", "confidence": 0.9}`}},
+		Usage:   anthropic.TokenUsage{InputTokens: 300, OutputTokens: 80},
+	}, nil).Once()
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+
+	result, err := ExtractTier1(ctx, routed, aiClient, aiCfg)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Tier)
+	// Multi-field → 3 answers split from one response.
+	assert.Len(t, result.Answers, 3)
+
+	// Verify the prompt used Instructions (not q.Text) as the primary content.
+	assert.Contains(t, capturedReq.Messages[0].Content, "Extract the company name")
+	assert.Contains(t, capturedReq.Messages[0].Content, "Output JSON schema:")
+
+	// Verify the rich system prompt was used.
+	require.NotEmpty(t, capturedReq.System)
+	assert.Contains(t, capturedReq.System[0].Text, "Return valid JSON matching the requested schema")
+
+	// Verify MaxTokens is at least the minimum for multi-field.
+	assert.GreaterOrEqual(t, capturedReq.MaxTokens, int64(512))
+
+	aiClient.AssertExpectations(t)
+}
+
+func TestExtractTier2_RichPrompt_MultiField(t *testing.T) {
+	ctx := context.Background()
+
+	routed := []model.RoutedQuestion{
+		{
+			Question: model.Question{
+				ID:           "q-grouped",
+				Text:         "Company details",
+				FieldKey:     "company_name, revenue",
+				Instructions: "Synthesize company name and revenue from all sources.",
+				OutputFormat: `{"company_name": "string", "revenue": "string", "confidence": 0.0}`,
+			},
+			Pages: []model.ClassifiedPage{
+				{CrawledPage: model.CrawledPage{URL: "https://acme.com", Markdown: "Acme Corp, Revenue $10M"}},
+			},
+		},
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+
+	var capturedReq anthropic.MessageRequest
+	aiClient.On("CreateMessage", mock.Anything, mock.MatchedBy(func(req anthropic.MessageRequest) bool {
+		capturedReq = req
+		return true
+	})).Return(&anthropic.MessageResponse{
+		Content: []anthropic.ContentBlock{{Text: `{"company_name": "Acme Corp", "revenue": "$10M", "confidence": 0.85}`}},
+		Usage:   anthropic.TokenUsage{InputTokens: 300, OutputTokens: 60},
+	}, nil).Once()
+
+	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
+
+	result, err := ExtractTier2(ctx, routed, nil, aiClient, aiCfg)
+
+	require.NoError(t, err)
+	assert.Len(t, result.Answers, 2)
+
+	// Verify rich prompt.
+	assert.Contains(t, capturedReq.Messages[0].Content, "Synthesize company name and revenue")
+	assert.Contains(t, capturedReq.Messages[0].Content, "Output JSON schema:")
+	require.NotEmpty(t, capturedReq.System)
+	assert.Contains(t, capturedReq.System[0].Text, "Return valid JSON matching the requested schema")
+
+	aiClient.AssertExpectations(t)
+}
+
 func TestParseExtractionAnswer_ValidJSON(t *testing.T) {
 	q := model.Question{ID: "q1", FieldKey: "industry"}
 	text := `{"value": "Technology", "confidence": 0.9, "reasoning": "stated", "source_url": "https://acme.com"}`
 
-	answer := parseExtractionAnswer(text, q, 1)
+	answers := parseExtractionAnswer(text, q, 1)
 
-	assert.Equal(t, "q1", answer.QuestionID)
-	assert.Equal(t, "industry", answer.FieldKey)
-	assert.Equal(t, "Technology", answer.Value)
-	assert.Equal(t, 0.9, answer.Confidence)
-	assert.Equal(t, 1, answer.Tier)
-	assert.Equal(t, "https://acme.com", answer.SourceURL)
+	require.Len(t, answers, 1)
+	assert.Equal(t, "q1", answers[0].QuestionID)
+	assert.Equal(t, "industry", answers[0].FieldKey)
+	assert.Equal(t, "Technology", answers[0].Value)
+	assert.Equal(t, 0.9, answers[0].Confidence)
+	assert.Equal(t, 1, answers[0].Tier)
+	assert.Equal(t, "https://acme.com", answers[0].SourceURL)
 }
 
 func TestParseExtractionAnswer_InvalidJSON(t *testing.T) {
 	q := model.Question{ID: "q1", FieldKey: "industry"}
 	text := "This is not JSON at all"
 
-	answer := parseExtractionAnswer(text, q, 1)
+	answers := parseExtractionAnswer(text, q, 1)
 
-	assert.Equal(t, "q1", answer.QuestionID)
-	assert.Nil(t, answer.Value, "malformed JSON should produce nil Value, not raw text")
-	assert.Equal(t, 0.0, answer.Confidence)
+	require.Len(t, answers, 1)
+	assert.Equal(t, "q1", answers[0].QuestionID)
+	assert.Nil(t, answers[0].Value, "malformed JSON should produce nil Value, not raw text")
+	assert.Equal(t, 0.0, answers[0].Confidence)
 }
 
 func TestParseExtractionAnswer_JSONWithCodeFence(t *testing.T) {
 	q := model.Question{ID: "q1", FieldKey: "employees"}
 	text := "```json\n{\"value\": 150, \"confidence\": 0.85, \"reasoning\": \"from page\", \"source_url\": \"https://acme.com\"}\n```"
 
-	answer := parseExtractionAnswer(text, q, 1)
+	answers := parseExtractionAnswer(text, q, 1)
 
-	assert.Equal(t, float64(150), answer.Value)
-	assert.Equal(t, 0.85, answer.Confidence)
+	require.Len(t, answers, 1)
+	assert.Equal(t, float64(150), answers[0].Value)
+	assert.Equal(t, 0.85, answers[0].Confidence)
+}
+
+func TestParseExtractionAnswer_MultiField(t *testing.T) {
+	q := model.Question{
+		ID:       "q-group1",
+		FieldKey: "company_name, year_established, owner_name",
+	}
+	text := `{"company_name": "Acme Corp", "year_established": 2010, "owner_name": "Jane Doe", "confidence": 0.85, "reasoning": "found on about page"}`
+
+	answers := parseExtractionAnswer(text, q, 1)
+
+	require.Len(t, answers, 3)
+
+	// Verify each field got its own answer.
+	byKey := make(map[string]model.ExtractionAnswer)
+	for _, a := range answers {
+		byKey[a.FieldKey] = a
+	}
+
+	assert.Equal(t, "Acme Corp", byKey["company_name"].Value)
+	assert.Equal(t, float64(2010), byKey["year_established"].Value)
+	assert.Equal(t, "Jane Doe", byKey["owner_name"].Value)
+
+	// Global confidence applied to all.
+	for _, a := range answers {
+		assert.Equal(t, 0.85, a.Confidence)
+		assert.Equal(t, "q-group1", a.QuestionID)
+		assert.Equal(t, 1, a.Tier)
+	}
+}
+
+func TestParseExtractionAnswer_MultiField_MissingFields(t *testing.T) {
+	q := model.Question{
+		ID:       "q-group2",
+		FieldKey: "company_name, year_established, owner_name",
+	}
+	// Only company_name is present; year_established and owner_name are absent.
+	text := `{"company_name": "Acme Corp", "confidence": 0.6}`
+
+	answers := parseExtractionAnswer(text, q, 1)
+
+	require.Len(t, answers, 1) // Only the one found field.
+	assert.Equal(t, "company_name", answers[0].FieldKey)
+	assert.Equal(t, "Acme Corp", answers[0].Value)
+}
+
+func TestParseExtractionAnswer_MultiField_NullValues(t *testing.T) {
+	q := model.Question{
+		ID:       "q-group3",
+		FieldKey: "company_name, year_established",
+	}
+	text := `{"company_name": "Acme", "year_established": null, "confidence": 0.7}`
+
+	answers := parseExtractionAnswer(text, q, 1)
+
+	// null values are still included (the key exists in the JSON).
+	require.Len(t, answers, 2)
+	byKey := make(map[string]model.ExtractionAnswer)
+	for _, a := range answers {
+		byKey[a.FieldKey] = a
+	}
+	assert.Equal(t, "Acme", byKey["company_name"].Value)
+	assert.Nil(t, byKey["year_established"].Value)
+}
+
+func TestParseExtractionAnswer_LegacySingleField(t *testing.T) {
+	// Even with comma in FieldKey, if there's a "value" key and only 1 field, use legacy.
+	q := model.Question{ID: "q1", FieldKey: "industry"}
+	text := `{"value": "Technology", "confidence": 0.9, "reasoning": "stated", "source_url": "https://acme.com"}`
+
+	answers := parseExtractionAnswer(text, q, 1)
+
+	require.Len(t, answers, 1)
+	assert.Equal(t, "Technology", answers[0].Value)
+	assert.Equal(t, 0.9, answers[0].Confidence)
+}
+
+func TestParseExtractionAnswer_MultiField_NoMatchingKeys(t *testing.T) {
+	q := model.Question{
+		ID:       "q-nomatch",
+		FieldKey: "x, y, z",
+	}
+	// JSON has keys a and b, but none of x, y, z.
+	text := `{"a": 1, "b": 2, "confidence": 0.5, "reasoning": "test"}`
+
+	answers := parseExtractionAnswer(text, q, 1)
+
+	// Fallback: single answer with original FieldKey, nil Value.
+	require.Len(t, answers, 1)
+	assert.Equal(t, "x, y, z", answers[0].FieldKey)
+	assert.Nil(t, answers[0].Value)
+	assert.Equal(t, 0.5, answers[0].Confidence)
+	assert.Equal(t, "test", answers[0].Reasoning)
+}
+
+func TestParseExtractionAnswer_SingleField_NoValueKey(t *testing.T) {
+	// Single-field question but JSON uses the field name as key, not "value".
+	q := model.Question{ID: "q-novalue", FieldKey: "industry"}
+	text := `{"industry": "Technology", "confidence": 0.8}`
+
+	answers := parseExtractionAnswer(text, q, 1)
+
+	// Should fall through to multi-field path and find "industry" key.
+	require.Len(t, answers, 1)
+	assert.Equal(t, "industry", answers[0].FieldKey)
+	assert.Equal(t, "Technology", answers[0].Value)
+	assert.Equal(t, 0.8, answers[0].Confidence)
+}
+
+func TestParseExtractionAnswer_MultiField_MetaKeysIgnored(t *testing.T) {
+	// Verify that meta keys (confidence, reasoning, source_url) in JSON don't
+	// become field values when they're not in the FieldKey list.
+	q := model.Question{
+		ID:       "q-meta",
+		FieldKey: "company_name, revenue",
+	}
+	text := `{"company_name": "Acme", "revenue": 5000000, "confidence": 0.9, "reasoning": "found", "source_url": "https://acme.com", "flags": ["verified"]}`
+
+	answers := parseExtractionAnswer(text, q, 1)
+
+	// Should only return 2 answers (company_name, revenue), not 6.
+	require.Len(t, answers, 2)
+	byKey := make(map[string]model.ExtractionAnswer)
+	for _, a := range answers {
+		byKey[a.FieldKey] = a
+	}
+	assert.Equal(t, "Acme", byKey["company_name"].Value)
+	assert.Equal(t, float64(5000000), byKey["revenue"].Value)
+}
+
+func TestToFloat64(t *testing.T) {
+	tests := []struct {
+		name string
+		val  any
+		want float64
+		ok   bool
+	}{
+		{"float64", float64(3.14), 3.14, true},
+		{"int", int(42), 42.0, true},
+		{"int64", int64(100), 100.0, true},
+		{"string", "3.14", 0, false},
+		{"nil", nil, 0, false},
+		{"bool", true, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := toFloat64(tt.val)
+			assert.Equal(t, tt.ok, ok)
+			if ok {
+				assert.Equal(t, tt.want, got)
+			}
+		})
+	}
+}
+
+func TestSplitFieldKeys(t *testing.T) {
+	assert.Equal(t, []string{"industry"}, splitFieldKeys("industry"))
+	assert.Equal(t, []string{"a", "b", "c"}, splitFieldKeys("a, b, c"))
+	assert.Equal(t, []string{"a", "b"}, splitFieldKeys("a,b"))
+	assert.Equal(t, []string{"solo"}, splitFieldKeys("  solo  "))
+	assert.Empty(t, splitFieldKeys(""))
+	assert.Empty(t, splitFieldKeys(", , ,"))
+}
+
+func TestMaxTokensForQuestion(t *testing.T) {
+	// Single field → 512.
+	assert.Equal(t, int64(512), maxTokensForQuestion(model.Question{FieldKey: "industry"}))
+	// 3 fields → 512 (min).
+	assert.Equal(t, int64(512), maxTokensForQuestion(model.Question{FieldKey: "a, b, c"}))
+	// 10 fields → 1000.
+	assert.Equal(t, int64(1000), maxTokensForQuestion(model.Question{FieldKey: "a,b,c,d,e,f,g,h,i,j"}))
+	// 50 fields → capped at 4096.
+	keys := strings.Repeat("f,", 50)
+	keys = keys[:len(keys)-1] // remove trailing comma
+	assert.Equal(t, int64(4096), maxTokensForQuestion(model.Question{FieldKey: keys}))
 }
 
 func TestExtractText(t *testing.T) {

@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/jomei/notionapi"
@@ -129,22 +130,23 @@ func TestLoadQuestionRegistry_QueryError(t *testing.T) {
 }
 
 // makeQuestionPage builds a fake notionapi.Page with Question Registry properties.
+// Property names match the existing Research Prompts Notion DB.
 func makeQuestionPage(id, text string, tier int, fieldKey string, pageTypes []string, instructions, outputFormat, status string) notionapi.Page {
 	props := make(notionapi.Properties)
 
-	props["Text"] = &notionapi.TitleProperty{
+	props["Question Key"] = &notionapi.TitleProperty{
 		Type: notionapi.PropertyTypeTitle,
 		Title: []notionapi.RichText{
 			{PlainText: text},
 		},
 	}
 
-	props["Tier"] = &notionapi.NumberProperty{
-		Type:   notionapi.PropertyTypeNumber,
-		Number: float64(tier),
+	props["Tier"] = &notionapi.SelectProperty{
+		Type:   notionapi.PropertyTypeSelect,
+		Select: notionapi.Option{Name: strconv.Itoa(tier)},
 	}
 
-	props["FieldKey"] = &notionapi.RichTextProperty{
+	props["Target SF Fields"] = &notionapi.RichTextProperty{
 		Type: notionapi.PropertyTypeRichText,
 		RichText: []notionapi.RichText{
 			{PlainText: fieldKey},
@@ -156,7 +158,7 @@ func makeQuestionPage(id, text string, tier int, fieldKey string, pageTypes []st
 		for i, pt := range pageTypes {
 			opts[i] = notionapi.Option{Name: pt}
 		}
-		props["PageTypes"] = &notionapi.MultiSelectProperty{
+		props["Relevant Page Types"] = &notionapi.MultiSelectProperty{
 			Type:        notionapi.PropertyTypeMultiSelect,
 			MultiSelect: opts,
 		}
@@ -169,9 +171,11 @@ func makeQuestionPage(id, text string, tier int, fieldKey string, pageTypes []st
 		},
 	}
 
-	props["OutputFormat"] = &notionapi.SelectProperty{
-		Type:   notionapi.PropertyTypeSelect,
-		Select: notionapi.Option{Name: outputFormat},
+	props["Output Schema"] = &notionapi.RichTextProperty{
+		Type: notionapi.PropertyTypeRichText,
+		RichText: []notionapi.RichText{
+			{PlainText: outputFormat},
+		},
 	}
 
 	props["Status"] = &notionapi.StatusProperty{
