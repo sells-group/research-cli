@@ -25,7 +25,7 @@ func TestExportGrataCSV_ColumnOrder(t *testing.T) {
 				"email":           {FieldKey: "email", Value: "info@example.com"},
 				"phone":           {FieldKey: "phone", Value: "555-1234"},
 				"year_founded":    {FieldKey: "year_founded", Value: 2010},
-				"employee_count":  {FieldKey: "employee_count", Value: 50},
+				"employees":       {FieldKey: "employees", Value: 50},
 				"naics_code":      {FieldKey: "naics_code", Value: "541512"},
 				"business_model":  {FieldKey: "business_model", Value: "Services"},
 				"exec_first_name": {FieldKey: "exec_first_name", Value: "John"},

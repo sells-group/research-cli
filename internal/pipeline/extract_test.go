@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -15,6 +16,7 @@ import (
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/pkg/anthropic"
 	anthropicmocks "github.com/sells-group/research-cli/pkg/anthropic/mocks"
+	"github.com/sells-group/research-cli/pkg/ppp"
 )
 
 func TestExtractTier1_DirectMode(t *testing.T) {
@@ -42,7 +44,7 @@ func TestExtractTier1_DirectMode(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	result, err := ExtractTier1(ctx, routed, aiClient, aiCfg)
+	result, err := ExtractTier1(ctx, routed, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Equal(t, 1, result.Tier)
@@ -57,7 +59,7 @@ func TestExtractTier1_EmptyRouted(t *testing.T) {
 	aiClient := anthropicmocks.NewMockClient(t)
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	result, err := ExtractTier1(ctx, nil, aiClient, aiCfg)
+	result, err := ExtractTier1(ctx, nil, nil, aiClient, aiCfg)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, result.Tier)
 	assert.Empty(t, result.Answers)
@@ -98,7 +100,7 @@ func TestExtractTier2_WithPrimer(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
 
-	result, err := ExtractTier2(ctx, routed, t1Answers, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, routed, t1Answers, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Equal(t, 2, result.Tier)
@@ -144,7 +146,7 @@ func TestExtractTier3_WithSummarization(t *testing.T) {
 		OpusModel:  "claude-opus-4-6",
 	}
 
-	result, err := ExtractTier3(ctx, routed, allAnswers, pages, aiClient, aiCfg)
+	result, err := ExtractTier3(ctx, routed, allAnswers, pages, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Equal(t, 3, result.Tier)
@@ -184,7 +186,7 @@ func TestExtractTier1_RichPrompt_MultiField(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	result, err := ExtractTier1(ctx, routed, aiClient, aiCfg)
+	result, err := ExtractTier1(ctx, routed, nil, aiClient, aiCfg)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, result.Tier)
@@ -236,7 +238,7 @@ func TestExtractTier2_RichPrompt_MultiField(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
 
-	result, err := ExtractTier2(ctx, routed, nil, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, routed, nil, nil, aiClient, aiCfg)
 
 	require.NoError(t, err)
 	assert.Len(t, result.Answers, 2)
@@ -327,9 +329,17 @@ func TestParseExtractionAnswer_MultiField_MissingFields(t *testing.T) {
 
 	answers := parseExtractionAnswer(text, q, 1)
 
-	require.Len(t, answers, 1) // Only the one found field.
-	assert.Equal(t, "company_name", answers[0].FieldKey)
-	assert.Equal(t, "Acme Corp", answers[0].Value)
+	require.Len(t, answers, 3) // All 3 fields: 1 found + 2 null.
+	byKey := make(map[string]model.ExtractionAnswer)
+	for _, a := range answers {
+		byKey[a.FieldKey] = a
+	}
+	assert.Equal(t, "Acme Corp", byKey["company_name"].Value)
+	assert.Equal(t, 0.6, byKey["company_name"].Confidence)
+	assert.Nil(t, byKey["year_established"].Value)
+	assert.Equal(t, 0.3, byKey["year_established"].Confidence) // Halved confidence.
+	assert.Nil(t, byKey["owner_name"].Value)
+	assert.Equal(t, 0.3, byKey["owner_name"].Confidence)
 }
 
 func TestParseExtractionAnswer_MultiField_NullValues(t *testing.T) {
@@ -373,12 +383,13 @@ func TestParseExtractionAnswer_MultiField_NoMatchingKeys(t *testing.T) {
 
 	answers := parseExtractionAnswer(text, q, 1)
 
-	// Fallback: single answer with original FieldKey, nil Value.
-	require.Len(t, answers, 1)
-	assert.Equal(t, "x, y, z", answers[0].FieldKey)
-	assert.Nil(t, answers[0].Value)
-	assert.Equal(t, 0.5, answers[0].Confidence)
-	assert.Equal(t, "test", answers[0].Reasoning)
+	// All 3 field keys emit null answers (none found in JSON).
+	require.Len(t, answers, 3)
+	for _, a := range answers {
+		assert.Nil(t, a.Value)
+		assert.Equal(t, 0.25, a.Confidence) // 0.5 * 0.5 halved.
+		assert.Equal(t, "q-nomatch", a.QuestionID)
+	}
 }
 
 func TestParseExtractionAnswer_SingleField_NoValueKey(t *testing.T) {
@@ -780,7 +791,7 @@ func TestExtractTier1_NoBatch(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001", NoBatch: true}
 
-	result, err := ExtractTier1(ctx, routed, aiClient, aiCfg)
+	result, err := ExtractTier1(ctx, routed, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Len(t, result.Answers, 5)
@@ -808,7 +819,7 @@ func TestExtractTier2_NoBatch_SkipsPrimer(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929", NoBatch: true}
 
-	result, err := ExtractTier2(ctx, routed, nil, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, routed, nil, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Len(t, result.Answers, 5)
@@ -854,7 +865,7 @@ func TestExtractTier1_AllRequestsUseCachedBlocks(t *testing.T) {
 	}, nil).Times(4) // 1 primer + 3 direct calls
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
-	result, err := ExtractTier1(ctx, routed, aiClient, aiCfg)
+	result, err := ExtractTier1(ctx, routed, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Len(t, result.Answers, 3)
@@ -1121,7 +1132,7 @@ func TestExtractTier2_FiltersHighConfidenceT1(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
 
-	result, err := ExtractTier2(ctx, routed, t1Answers, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, routed, t1Answers, nil, aiClient, aiCfg)
 
 	require.NoError(t, err)
 	assert.Len(t, result.Answers, 1)
@@ -1173,7 +1184,7 @@ func TestExtractTier2_AllHighConfidence_EmptyContext(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
 
-	result, err := ExtractTier2(ctx, routed, t1Answers, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, routed, t1Answers, nil, aiClient, aiCfg)
 
 	require.NoError(t, err)
 	assert.Len(t, result.Answers, 1)
@@ -1218,7 +1229,7 @@ func TestExtractTier2_AllLowConfidence_FullContext(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
 
-	result, err := ExtractTier2(ctx, routed, t1Answers, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, routed, t1Answers, nil, aiClient, aiCfg)
 
 	require.NoError(t, err)
 	assert.Len(t, result.Answers, 1)
@@ -1315,4 +1326,62 @@ func TestIsExternalPage(t *testing.T) {
 	assert.False(t, isExternalPage("Home"))
 	assert.False(t, isExternalPage("[unknown] Other"))
 	assert.False(t, isExternalPage(""))
+}
+
+// --- FormatPPPContext tests ---
+
+func TestFormatPPPContext(t *testing.T) {
+	loanDate := time.Date(2020, 6, 15, 0, 0, 0, 0, time.UTC)
+	matches := []ppp.LoanMatch{
+		{
+			BorrowerName:    "ACME CORP LLC",
+			CurrentApproval: 500_000,
+			JobsReported:    25,
+			NAICSCode:       "541511",
+			BusinessType:    "LLC",
+			BusinessAge:     "Existing or more than 2 years old",
+			DateApproved:    loanDate,
+			LoanStatus:      "Paid in Full",
+			MatchScore:      1.0,
+		},
+	}
+
+	result := FormatPPPContext(matches)
+
+	assert.Contains(t, result, "--- PPP Loan Record (Federal Database) ---")
+	assert.Contains(t, result, "Borrower: ACME CORP LLC")
+	assert.Contains(t, result, "Loan Amount: $500000")
+	assert.Contains(t, result, "Jobs Reported: 25")
+	assert.Contains(t, result, "NAICS: 541511")
+	assert.Contains(t, result, "Business Type: LLC")
+	assert.Contains(t, result, "Business Age: Existing or more than 2 years old")
+	assert.Contains(t, result, "Approved: 2020-06-15")
+	assert.Contains(t, result, "Status: Paid in Full")
+}
+
+func TestFormatPPPContext_Empty(t *testing.T) {
+	assert.Equal(t, "", FormatPPPContext(nil))
+	assert.Equal(t, "", FormatPPPContext([]ppp.LoanMatch{}))
+}
+
+func TestFormatPPPContext_PartialData(t *testing.T) {
+	matches := []ppp.LoanMatch{
+		{
+			BorrowerName:    "PARTIAL CORP",
+			CurrentApproval: 100_000,
+			// JobsReported: 0 → omitted
+			// NAICSCode: "" → omitted
+			BusinessType: "Corporation",
+			MatchScore:   0.8,
+		},
+	}
+
+	result := FormatPPPContext(matches)
+
+	assert.Contains(t, result, "Borrower: PARTIAL CORP")
+	assert.Contains(t, result, "Loan Amount: $100000")
+	assert.Contains(t, result, "Business Type: Corporation")
+	assert.NotContains(t, result, "Jobs Reported")
+	assert.NotContains(t, result, "NAICS")
+	assert.NotContains(t, result, "Business Age")
 }

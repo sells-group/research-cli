@@ -66,7 +66,7 @@ func TestComputeScore(t *testing.T) {
 		"employees": {FieldKey: "employees", Confidence: 0.8},
 	}
 
-	score := ComputeScore(fieldValues, fields)
+	score := ComputeScore(fieldValues, fields, nil)
 
 	// Required fields have weight 2, non-required weight 1.
 	// Total weight: 2 + 1 + 2 = 5
@@ -85,18 +85,18 @@ func TestComputeScore_AllFieldsPresent(t *testing.T) {
 		"b": {FieldKey: "b", Confidence: 1.0},
 	}
 
-	score := ComputeScore(fieldValues, fields)
+	score := ComputeScore(fieldValues, fields, nil)
 	assert.Equal(t, 1.0, score)
 }
 
 func TestComputeScore_NoFields(t *testing.T) {
 	fields := model.NewFieldRegistry(nil)
-	score := ComputeScore(nil, fields)
+	score := ComputeScore(nil, fields, nil)
 	assert.Equal(t, 0.0, score)
 }
 
 func TestComputeScore_NilRegistry(t *testing.T) {
-	score := ComputeScore(nil, nil)
+	score := ComputeScore(nil, nil, nil)
 	assert.Equal(t, 0.0, score)
 }
 

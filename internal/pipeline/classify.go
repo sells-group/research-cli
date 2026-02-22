@@ -211,19 +211,22 @@ func ClassifyPhase(ctx context.Context, pages []model.CrawledPage, aiClient anth
 		})
 	}
 
-	// If no-batch mode or only a few pages, use direct messages instead of batch.
+	// Use grouped classification (multiple pages per LLM call) for efficiency.
+	// Falls back to per-page classification for very small batches.
 	var llmIndex model.PageIndex
 	var err error
-	threshold := aiCfg.SmallBatchThreshold
-	if threshold <= 0 {
-		threshold = smallBatchThresholdClassify
-	}
-	// classifyBatch/classifyDirect accumulate tokens directly into totalUsage
-	// via the usage pointer parameter, so we discard the returned usage.
-	if aiCfg.NoBatch || len(batchItems) <= threshold {
-		llmIndex, _, err = classifyDirect(ctx, llmPages, batchItems, aiClient, totalUsage)
+	if len(llmPages) > 3 {
+		llmIndex, err = classifyGrouped(ctx, llmPages, aiClient, aiCfg, totalUsage)
 	} else {
-		llmIndex, _, err = classifyBatch(ctx, llmPages, batchItems, aiClient, totalUsage)
+		threshold := aiCfg.SmallBatchThreshold
+		if threshold <= 0 {
+			threshold = smallBatchThresholdClassify
+		}
+		if aiCfg.NoBatch || len(batchItems) <= threshold {
+			llmIndex, _, err = classifyDirect(ctx, llmPages, batchItems, aiClient, totalUsage)
+		} else {
+			llmIndex, _, err = classifyBatch(ctx, llmPages, batchItems, aiClient, totalUsage)
+		}
 	}
 	if err != nil {
 		return nil, totalUsage, err
@@ -402,6 +405,168 @@ func classifyBatch(ctx context.Context, pages []model.CrawledPage, items []anthr
 	}
 
 	return index, usage, nil
+}
+
+const classifyGroupedSystemPrompt = `Classify each web page into exactly one of these categories: homepage, about, services, products, pricing, careers, contact, team, blog, news, faq, testimonials, case_studies, partners, legal, investors, other. Respond with a valid JSON array of objects, one per page: [{"url": "<page URL>", "page_type": "<category>", "confidence": <0.0-1.0>}, ...]`
+
+const classifyGroupedUserPrompt = `Classify each page below:
+
+%s
+
+Return a JSON array with one object per page.`
+
+// classifyGrouped sends multiple pages per LLM call, reducing the total
+// number of API calls from N to N/pagesPerGroup. Each group of ~8 pages
+// is classified in a single Haiku call, and groups run concurrently.
+func classifyGrouped(ctx context.Context, pages []model.CrawledPage, aiClient anthropic.Client, aiCfg config.AnthropicConfig, usage *model.TokenUsage) (model.PageIndex, error) {
+	index := make(model.PageIndex)
+
+	const pagesPerGroup = 8
+
+	// Build groups.
+	var groups [][]model.CrawledPage
+	for i := 0; i < len(pages); i += pagesPerGroup {
+		end := i + pagesPerGroup
+		if end > len(pages) {
+			end = len(pages)
+		}
+		groups = append(groups, pages[i:end])
+	}
+
+	type groupResult struct {
+		classifications map[string]model.PageClassification // URL → classification
+		usage           anthropic.TokenUsage
+	}
+
+	results := make([]groupResult, len(groups))
+
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(maxDirectConcurrency)
+
+	systemBlocks := anthropic.BuildCachedSystemBlocks(classifyGroupedSystemPrompt)
+
+	for idx, group := range groups {
+		g.Go(func() error {
+			// Build the pages section of the prompt.
+			var pagesList strings.Builder
+			for j, page := range group {
+				content := page.Markdown
+				if len(content) > 500 {
+					content = content[:500]
+				}
+				pagesList.WriteString(fmt.Sprintf("Page %d:\nURL: %s\nTitle: %s\nContent preview: %s\n\n",
+					j+1, page.URL, page.Title, content))
+			}
+
+			prompt := fmt.Sprintf(classifyGroupedUserPrompt, pagesList.String())
+
+			resp, err := aiClient.CreateMessage(gCtx, anthropic.MessageRequest{
+				Model:     aiCfg.HaikuModel,
+				MaxTokens: int64(128 * len(group)),
+				System:    systemBlocks,
+				Messages: []anthropic.Message{
+					{Role: "user", Content: prompt},
+				},
+			})
+			if err != nil {
+				zap.L().Warn("classify: grouped classification failed",
+					zap.Int("group", idx),
+					zap.Int("pages", len(group)),
+					zap.Error(err),
+				)
+				// Fall back to "other" for all pages in this group.
+				cls := make(map[string]model.PageClassification, len(group))
+				for _, p := range group {
+					cls[p.URL] = model.PageClassification{
+						PageType:   model.PageTypeOther,
+						Confidence: 0.0,
+					}
+				}
+				results[idx] = groupResult{classifications: cls}
+				return nil
+			}
+
+			cls := parseGroupedClassification(extractText(resp), group)
+			results[idx] = groupResult{
+				classifications: cls,
+				usage:           resp.Usage,
+			}
+			return nil
+		})
+	}
+
+	_ = g.Wait()
+
+	// Aggregate results into the page index.
+	for i, r := range results {
+		usage.InputTokens += int(r.usage.InputTokens)
+		usage.OutputTokens += int(r.usage.OutputTokens)
+		usage.CacheCreationTokens += int(r.usage.CacheCreationInputTokens)
+		usage.CacheReadTokens += int(r.usage.CacheReadInputTokens)
+
+		for _, page := range groups[i] {
+			cls, ok := r.classifications[page.URL]
+			if !ok {
+				cls = model.PageClassification{PageType: model.PageTypeOther, Confidence: 0.0}
+			}
+			cp := model.ClassifiedPage{
+				CrawledPage:    page,
+				Classification: cls,
+			}
+			index[cls.PageType] = append(index[cls.PageType], cp)
+		}
+	}
+
+	return index, nil
+}
+
+// parseGroupedClassification parses the JSON array response from a grouped
+// classification call. Returns a map from URL to classification.
+func parseGroupedClassification(text string, pages []model.CrawledPage) map[string]model.PageClassification {
+	result := make(map[string]model.PageClassification, len(pages))
+
+	// Default all pages to "other" in case parsing fails.
+	for _, p := range pages {
+		result[p.URL] = model.PageClassification{PageType: model.PageTypeOther, Confidence: 0.0}
+	}
+
+	cleaned := cleanJSON(text)
+
+	// Try parsing as a JSON array.
+	var items []struct {
+		URL        string  `json:"url"`
+		PageType   string  `json:"page_type"`
+		Confidence float64 `json:"confidence"`
+	}
+	if err := json.Unmarshal([]byte(cleaned), &items); err != nil {
+		// Try wrapping in array brackets if it looks like individual objects.
+		if err2 := json.Unmarshal([]byte("["+cleaned+"]"), &items); err2 != nil {
+			zap.L().Warn("classify: failed to parse grouped classification",
+				zap.Error(err),
+			)
+			return result
+		}
+	}
+
+	for _, item := range items {
+		pt := model.PageType(strings.ToLower(item.PageType))
+		valid := false
+		for _, t := range model.AllPageTypes() {
+			if t == pt {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			pt = model.PageTypeOther
+		}
+		result[item.URL] = model.PageClassification{
+			PageType:   pt,
+			Confidence: item.Confidence,
+		}
+	}
+
+	return result
 }
 
 func parseClassification(text string) model.PageClassification {

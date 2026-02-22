@@ -354,7 +354,7 @@ func TestCompareResults_MatchAndMismatch(t *testing.T) {
 			},
 			FieldValues: map[string]model.FieldValue{
 				"description":    {FieldKey: "description", Value: "A great company"},
-				"employee_count": {FieldKey: "employee_count", Value: 50},
+				"employees":      {FieldKey: "employees", Value: 50},
 				"review_count":   {FieldKey: "review_count", Value: 200}, // Mismatch
 				"naics_code":     {FieldKey: "naics_code", Value: "541512"},
 				"email":          {FieldKey: "email", Value: "info@example.com"},

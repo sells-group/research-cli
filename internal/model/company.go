@@ -22,15 +22,16 @@ const (
 
 // Company represents a company to be enriched.
 type Company struct {
-	URL          string `json:"url"`
-	Name         string `json:"name"`
-	SalesforceID string `json:"salesforce_id"`
-	NotionPageID string `json:"notion_page_id"`
-	Location     string `json:"location"`
-	City         string `json:"city,omitempty"`
-	State        string `json:"state,omitempty"`
-	ZipCode      string `json:"zip_code,omitempty"`
-	Street       string `json:"street,omitempty"`
+	URL          string         `json:"url"`
+	Name         string         `json:"name"`
+	SalesforceID string         `json:"salesforce_id"`
+	NotionPageID string         `json:"notion_page_id"`
+	Location     string         `json:"location"`
+	City         string         `json:"city,omitempty"`
+	State        string         `json:"state,omitempty"`
+	ZipCode      string         `json:"zip_code,omitempty"`
+	Street       string         `json:"street,omitempty"`
+	PreSeeded    map[string]any `json:"pre_seeded,omitempty"` // CSV-sourced field values for gap-filling
 }
 
 // Run represents a single enrichment run for a company.

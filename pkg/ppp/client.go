@@ -165,7 +165,7 @@ SELECT loannumber, borrowername, borroweraddress, borrowercity, borrowerstate, b
        similarity(UPPER(borrowername), $2) AS sim_score
 FROM fed_data.ppp_loans
 WHERE borrowerstate = $1
-  AND borrowername %% $2
+  AND borrowername % $2
   AND ($3::text IS NULL OR borrowercity ILIKE $3)
 ORDER BY sim_score DESC
 LIMIT $4`

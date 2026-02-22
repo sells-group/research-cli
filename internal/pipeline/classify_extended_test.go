@@ -21,10 +21,10 @@ func testPageContent(i int) string {
 	return fmt.Sprintf("Content for page %d. %s", i, strings.Repeat("This is substantial content for testing purposes. ", 3))
 }
 
-func TestClassifyPhase_BatchMode(t *testing.T) {
+func TestClassifyPhase_GroupedMode(t *testing.T) {
 	ctx := context.Background()
 
-	// 5 pages with unique content >= 100 chars: triggers batch mode (> threshold after dedup).
+	// 5 pages with unique content >= 100 chars: triggers grouped classification (> 3 pages).
 	pages := make([]model.CrawledPage, 5)
 	for i := 0; i < 5; i++ {
 		pages[i] = model.CrawledPage{
@@ -36,46 +36,34 @@ func TestClassifyPhase_BatchMode(t *testing.T) {
 
 	aiClient := anthropicmocks.NewMockClient(t)
 
-	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
-		Return(&anthropic.BatchResponse{
-			ID:               "batch-classify",
-			ProcessingStatus: "ended",
-		}, nil)
-
-	aiClient.On("GetBatch", mock.Anything, "batch-classify").
-		Return(&anthropic.BatchResponse{
-			ID:               "batch-classify",
-			ProcessingStatus: "ended",
-		}, nil)
-
-	var resultItems []anthropic.BatchResultItem
+	// Grouped classification sends all 5 pages in 1 call (pagesPerGroup=8).
 	pageTypes := []string{"homepage", "about", "services", "contact", "other"}
+	var jsonArray string
 	for i := 0; i < 5; i++ {
-		resultItems = append(resultItems, anthropic.BatchResultItem{
-			CustomID: fmt.Sprintf("classify-%d", i),
-			Type:     "succeeded",
-			Message: &anthropic.MessageResponse{
-				Content: []anthropic.ContentBlock{{Text: fmt.Sprintf(`{"page_type": "%s", "confidence": 0.9}`, pageTypes[i])}},
-				Usage:   anthropic.TokenUsage{InputTokens: 50, OutputTokens: 10},
-			},
-		})
+		if i > 0 {
+			jsonArray += ","
+		}
+		jsonArray += fmt.Sprintf(`{"url":"https://acme.com/page%d","page_type":"%s","confidence":0.9}`, i, pageTypes[i])
 	}
 
-	aiClient.On("GetBatchResults", mock.Anything, "batch-classify").
-		Return(setupBatchIterator(t, resultItems), nil)
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(&anthropic.MessageResponse{
+			Content: []anthropic.ContentBlock{{Text: "[" + jsonArray + "]"}},
+			Usage:   anthropic.TokenUsage{InputTokens: 250, OutputTokens: 50},
+		}, nil).Once()
 
-	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001", SmallBatchThreshold: 3}
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
 	index, usage, err := ClassifyPhase(ctx, pages, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.NotEmpty(t, index)
-	assert.Equal(t, 250, usage.InputTokens) // 5 * 50
-	assert.Equal(t, 50, usage.OutputTokens) // 5 * 10
+	assert.Equal(t, 250, usage.InputTokens)
+	assert.Equal(t, 50, usage.OutputTokens)
 	aiClient.AssertExpectations(t)
 }
 
-func TestClassifyPhase_BatchMode_CreateError(t *testing.T) {
+func TestClassifyPhase_GroupedMode_APIError(t *testing.T) {
 	ctx := context.Background()
 
 	pages := make([]model.CrawledPage, 5)
@@ -84,16 +72,18 @@ func TestClassifyPhase_BatchMode_CreateError(t *testing.T) {
 	}
 
 	aiClient := anthropicmocks.NewMockClient(t)
-	aiClient.On("CreateBatch", ctx, mock.AnythingOfType("anthropic.BatchRequest")).
-		Return(nil, errors.New("rate limited"))
+	// Grouped mode falls back to "other" on error instead of returning an error.
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(nil, errors.New("rate limited")).Once()
 
-	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001", SmallBatchThreshold: 3}
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
 	index, _, err := ClassifyPhase(ctx, pages, aiClient, aiCfg)
 
-	assert.Nil(t, index)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "classify: create batch")
+	// Grouped mode gracefully degrades to "other" on error, no hard failure.
+	assert.NoError(t, err)
+	assert.NotEmpty(t, index)
+	assert.Len(t, index[model.PageTypeOther], 5)
 }
 
 func TestClassifyDirect_ErrorFallsToOther(t *testing.T) {

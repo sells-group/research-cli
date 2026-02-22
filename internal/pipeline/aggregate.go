@@ -13,6 +13,7 @@ import (
 	"github.com/sells-group/research-cli/internal/estimate"
 	"github.com/sells-group/research-cli/internal/fedsync/transform"
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/pkg/ppp"
 )
 
 // contradictionThreshold is the minimum confidence on both sides to flag
@@ -61,8 +62,10 @@ func MergeAnswers(t1, t2, t3 []model.ExtractionAnswer) []model.ExtractionAnswer 
 				}
 			}
 
-			// Higher tier wins if existing is null or new has at least half the existing confidence.
-			if a.Tier > existing.Tier && (existing.Value == nil || a.Confidence >= existing.Confidence*0.5) {
+			// Higher tier wins if:
+			// 1. Existing is null (any value is better than null), OR
+			// 2. Both are non-null and new has at least half the existing confidence.
+			if a.Tier > existing.Tier && (existing.Value == nil || (a.Value != nil && a.Confidence >= existing.Confidence*0.5)) {
 				best[a.FieldKey] = a
 				continue
 			}
@@ -186,7 +189,8 @@ func ValidateField(answer model.ExtractionAnswer, field *model.FieldMapping) *mo
 
 // BuildFieldValues validates all answers against the field registry and
 // returns a map of field key -> FieldValue. Logs a summary of validation failures.
-func BuildFieldValues(answers []model.ExtractionAnswer, fields *model.FieldRegistry) map[string]model.FieldValue {
+// If company has PreSeeded data, missing fields are gap-filled at lower confidence.
+func BuildFieldValues(answers []model.ExtractionAnswer, fields *model.FieldRegistry, company ...model.Company) map[string]model.FieldValue {
 	result := make(map[string]model.FieldValue)
 	var failures int
 
@@ -210,6 +214,48 @@ func BuildFieldValues(answers []model.ExtractionAnswer, fields *model.FieldRegis
 			zap.Int("fields_valid", len(result)),
 			zap.Int("answers_total", len(answers)),
 		)
+	}
+
+	// Auto-derive account_name from company_name if not already present.
+	// These are conceptually the same field — company_name is extracted,
+	// account_name maps to SF Account Name.
+	if _, ok := result["account_name"]; !ok {
+		if cn, ok := result["company_name"]; ok {
+			if nameField := fields.ByKey("account_name"); nameField != nil {
+				result["account_name"] = model.FieldValue{
+					FieldKey:   "account_name",
+					SFField:    nameField.SFField,
+					Value:      cn.Value,
+					Confidence: cn.Confidence,
+					Source:     cn.Source,
+					Tier:       cn.Tier,
+				}
+			}
+		}
+	}
+
+	// Fill gaps with pre-seeded CSV data (lower confidence than extraction).
+	if len(company) > 0 && len(company[0].PreSeeded) > 0 {
+		for key, val := range company[0].PreSeeded {
+			if _, ok := result[key]; ok {
+				continue // Already extracted, skip.
+			}
+			if val == nil || val == "" {
+				continue
+			}
+			if field := fields.ByKey(key); field != nil {
+				fv := ValidateField(model.ExtractionAnswer{
+					FieldKey:   key,
+					Value:      val,
+					Confidence: 0.6,
+					Tier:       0,
+				}, field)
+				if fv != nil {
+					fv.Source = "grata_csv"
+					result[key] = *fv
+				}
+			}
+		}
 	}
 
 	return result
@@ -303,7 +349,7 @@ func EnrichWithRevenueEstimate(ctx context.Context, answers []model.ExtractionAn
 
 	for _, a := range answers {
 		switch a.FieldKey {
-		case "employee_count", "employee_estimate":
+		case "employees", "employee_count", "employee_estimate":
 			if n, ok := toNumber(a.Value); ok && n > 0 {
 				empCount = n
 			}
@@ -359,6 +405,62 @@ func EnrichWithRevenueEstimate(ctx context.Context, answers []model.ExtractionAn
 		zap.Float64("confidence", est.Confidence),
 		zap.String("naics_used", est.NAICSUsed),
 	)
+
+	return answers
+}
+
+// EnrichFromPPP converts PPP loan matches into ExtractionAnswer entries for
+// revenue and employees. Uses the best match (index 0, highest approval amount).
+// Tier 0 answers won't override higher-tier LLM extractions in MergeAnswers.
+func EnrichFromPPP(answers []model.ExtractionAnswer, matches []ppp.LoanMatch) []model.ExtractionAnswer {
+	if len(matches) == 0 {
+		return answers
+	}
+
+	best := matches[0]
+
+	// Revenue estimate: loan amount × 20 multiplier, converted to millions.
+	if best.CurrentApproval > 0 {
+		revenueMil := best.CurrentApproval * 20 / 1_000_000
+		dateApproved := best.DateApproved
+		answers = append(answers, model.ExtractionAnswer{
+			FieldKey:   "revenue_estimate",
+			Value:      fmt.Sprintf("$%.1fM", revenueMil),
+			Confidence: best.MatchScore * 0.85,
+			Source:     "ppp_database",
+			Tier:       0,
+			Reasoning:  fmt.Sprintf("PPP loan estimate (loan $%.0f x20)", best.CurrentApproval),
+			DataAsOf:   &dateApproved,
+		})
+
+		zap.L().Info("aggregate: PPP revenue_estimate added",
+			zap.String("borrower", best.BorrowerName),
+			zap.Float64("loan_amount", best.CurrentApproval),
+			zap.String("revenue_estimate", fmt.Sprintf("$%.1fM", revenueMil)),
+			zap.Float64("confidence", best.MatchScore*0.85),
+			zap.Int("match_tier", best.MatchTier),
+		)
+	}
+
+	// Employee count from PPP jobs reported.
+	if best.JobsReported > 0 {
+		dateApproved := best.DateApproved
+		answers = append(answers, model.ExtractionAnswer{
+			FieldKey:   "employees",
+			Value:      best.JobsReported,
+			Confidence: best.MatchScore * 0.7,
+			Source:     "ppp_database",
+			Tier:       0,
+			Reasoning:  "PPP jobs reported",
+			DataAsOf:   &dateApproved,
+		})
+
+		zap.L().Info("aggregate: PPP employees added",
+			zap.String("borrower", best.BorrowerName),
+			zap.Int("jobs_reported", best.JobsReported),
+			zap.Float64("confidence", best.MatchScore*0.7),
+		)
+	}
 
 	return answers
 }

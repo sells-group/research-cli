@@ -15,6 +15,7 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/pkg/anthropic"
+	"github.com/sells-group/research-cli/pkg/ppp"
 )
 
 // maxDirectConcurrency limits concurrent CreateMessage calls in no-batch mode.
@@ -111,8 +112,45 @@ Provide a thorough, well-reasoned answer. Return valid JSON matching the schema 
 // richSystemText is the system prompt for multi-field (rich) extractions.
 const richSystemText = "You are a research analyst extracting structured data from web pages. Return valid JSON matching the requested schema. Use null for fields not found."
 
+// FormatPPPContext formats the best PPP loan match into a concise context block
+// for injection into extraction prompts. Returns "" if matches is empty.
+func FormatPPPContext(matches []ppp.LoanMatch) string {
+	if len(matches) == 0 {
+		return ""
+	}
+
+	best := matches[0]
+	var b strings.Builder
+	b.WriteString("--- PPP Loan Record (Federal Database) ---\n")
+	if best.BorrowerName != "" {
+		b.WriteString("Borrower: " + best.BorrowerName + "\n")
+	}
+	if best.CurrentApproval > 0 {
+		b.WriteString(fmt.Sprintf("Loan Amount: $%.0f\n", best.CurrentApproval))
+	}
+	if best.JobsReported > 0 {
+		b.WriteString(fmt.Sprintf("Jobs Reported: %d\n", best.JobsReported))
+	}
+	if best.NAICSCode != "" {
+		b.WriteString("NAICS: " + best.NAICSCode + "\n")
+	}
+	if best.BusinessType != "" {
+		b.WriteString("Business Type: " + best.BusinessType + "\n")
+	}
+	if best.BusinessAge != "" {
+		b.WriteString("Business Age: " + best.BusinessAge + "\n")
+	}
+	if !best.DateApproved.IsZero() {
+		b.WriteString("Approved: " + best.DateApproved.Format("2006-01-02") + "\n")
+	}
+	if best.LoanStatus != "" {
+		b.WriteString("Status: " + best.LoanStatus + "\n")
+	}
+	return b.String()
+}
+
 // ExtractTier1 runs Tier 1 extraction: single-page fact extraction using Haiku.
-func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
+func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, pppMatches []ppp.LoanMatch, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
 	start := time.Now()
 	result := &model.TierResult{Tier: 1}
 
@@ -152,6 +190,11 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient a
 		// Append pre-computed external source snippets.
 		if externalCtx, ok := externalSnippetCache[i]; ok && externalCtx != "" {
 			content += "\n\n--- Additional Sources ---\n" + externalCtx
+		}
+
+		// Append PPP loan context if available.
+		if pppCtx := FormatPPPContext(pppMatches); pppCtx != "" {
+			content += "\n\n" + pppCtx
 		}
 
 		// Choose prompt template and system blocks based on whether the
@@ -230,7 +273,7 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, aiClient a
 
 // ExtractTier2 runs Tier 2 extraction: multi-page synthesis using Sonnet.
 // Includes T1 answers as context (only low-confidence ones to reduce prompt size).
-func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers []model.ExtractionAnswer, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
+func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers []model.ExtractionAnswer, pppMatches []ppp.LoanMatch, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
 	start := time.Now()
 	result := &model.TierResult{Tier: 2}
 
@@ -263,6 +306,11 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 	var batchItems []anthropic.BatchRequestItem
 	for i, rq := range routed {
 		pagesContext := buildPagesContext(rq.Pages, 4000)
+
+		// Append PPP loan context if available.
+		if pppCtx := FormatPPPContext(pppMatches); pppCtx != "" {
+			pagesContext += "\n\n" + pppCtx
+		}
 
 		var prompt string
 		sysBlocks := systemBlocks
@@ -337,7 +385,7 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 
 // ExtractTier3 runs Tier 3 extraction: expert analysis using Opus with
 // prepared context (Haiku summarization).
-func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers []model.ExtractionAnswer, pages []model.CrawledPage, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
+func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers []model.ExtractionAnswer, pages []model.CrawledPage, pppMatches []ppp.LoanMatch, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
 	start := time.Now()
 	result := &model.TierResult{Tier: 3}
 
@@ -349,6 +397,11 @@ func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers
 	summaryCtx, summaryUsage, err := prepareTier3Context(ctx, pages, allAnswers, aiClient, aiCfg)
 	if err != nil {
 		return nil, eris.Wrap(err, "extract: tier 3 context preparation")
+	}
+
+	// Inject PPP context into the summary.
+	if pppCtx := FormatPPPContext(pppMatches); pppCtx != "" {
+		summaryCtx += "\n\n" + pppCtx
 	}
 
 	var totalUsage model.TokenUsage
@@ -844,8 +897,19 @@ func parseExtractionAnswer(text string, q model.Question, tier int) []model.Extr
 
 	var answers []model.ExtractionAnswer
 	for _, fk := range fieldKeys {
+		fk = strings.TrimSpace(fk)
 		val, found := rawMap[fk]
 		if !found {
+			// Emit null answer instead of skipping — marks the field as
+			// attempted but not found. Downstream escalation can decide
+			// whether to re-try at a higher tier.
+			answers = append(answers, model.ExtractionAnswer{
+				QuestionID: q.ID,
+				FieldKey:   fk,
+				Value:      nil,
+				Confidence: globalConf * 0.5, // Halve confidence for missing fields.
+				Tier:       tier,
+			})
 			continue
 		}
 		answers = append(answers, model.ExtractionAnswer{
@@ -857,18 +921,6 @@ func parseExtractionAnswer(text string, q model.Question, tier int) []model.Extr
 			SourceURL:  globalSourceURL,
 			Tier:       tier,
 		})
-	}
-
-	// If no field keys matched, fall back to a single answer with the whole map.
-	if len(answers) == 0 {
-		return []model.ExtractionAnswer{{
-			QuestionID: q.ID,
-			FieldKey:   q.FieldKey,
-			Tier:       tier,
-			Confidence: globalConf,
-			Reasoning:  globalReasoning,
-			SourceURL:  globalSourceURL,
-		}}
 	}
 
 	return answers

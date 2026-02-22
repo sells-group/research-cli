@@ -71,7 +71,7 @@ func buildGrataRow(r *model.EnrichmentResult) []string {
 		r.Company.Name,                                 // Name
 		fieldStr(fv, "description"),                    // Description
 		formatRevenue(fv),                              // Revenue Estimate
-		fieldStr(fv, "employee_count"),                 // Employee Estimate
+		fieldStr(fv, "employees"),                       // Employee Estimate
 		fieldStr(fv, "review_count"),                   // Total Review Count
 		fieldStr(fv, "review_rating"),                  // Aggregate Rating
 		fieldStr(fv, "naics_code"),                     // NAICS 6

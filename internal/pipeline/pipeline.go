@@ -455,7 +455,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		}
 
 		trackPhase("4_extract_t1", func() (*model.PhaseResult, error) {
-			t1Result, t1Err := ExtractTier1(g2Ctx, batches.Tier1, p.anthropic, p.cfg.Anthropic)
+			t1Result, t1Err := ExtractTier1(g2Ctx, batches.Tier1, pppMatches, p.anthropic, p.cfg.Anthropic)
 			if t1Err != nil {
 				return nil, t1Err
 			}
@@ -480,10 +480,18 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		return nil
 	})
 
-	// T2-native: questions routed directly to T2 (no T1 dependency).
+	// T2-native: questions routed directly to T2. Waits for T1 so it can
+	// receive T1 answers as supplementary context for better synthesis.
 	if len(batches.Tier2) > 0 {
 		g2.Go(func() error {
-			t2Result, t2Err := ExtractTier2(g2Ctx, batches.Tier2, nil, p.anthropic, p.cfg.Anthropic)
+			// Wait for T1 to finish so we can pass its answers as context.
+			select {
+			case <-t1Done:
+			case <-g2Ctx.Done():
+				return nil
+			}
+
+			t2Result, t2Err := ExtractTier2(g2Ctx, batches.Tier2, t1Answers, pppMatches, p.anthropic, p.cfg.Anthropic)
 			if t2Err != nil {
 				zap.L().Warn("pipeline: t2-native extraction failed", zap.Error(t2Err))
 				return nil
@@ -507,7 +515,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			return nil
 		}
 
-		t2Result, t2Err := ExtractTier2(g2Ctx, esc, t1Answers, p.anthropic, p.cfg.Anthropic)
+		t2Result, t2Err := ExtractTier2(g2Ctx, esc, t1Answers, pppMatches, p.anthropic, p.cfg.Anthropic)
 		if t2Err != nil {
 			zap.L().Warn("pipeline: t2-escalated extraction failed", zap.Error(t2Err))
 			return nil
@@ -585,7 +593,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 
 	if shouldRunT3 {
 		trackPhase("6_extract_t3", func() (*model.PhaseResult, error) {
-			t3Result, t3Err := ExtractTier3(ctx, batches.Tier3, MergeAnswers(t1Answers, t2Answers, nil), allPages, p.anthropic, p.cfg.Anthropic)
+			t3Result, t3Err := ExtractTier3(ctx, batches.Tier3, MergeAnswers(t1Answers, t2Answers, nil), allPages, pppMatches, p.anthropic, p.cfg.Anthropic)
 			if t3Err != nil {
 				return nil, t3Err
 			}
@@ -629,7 +637,9 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		}
 		// Enrich with CBP-based revenue estimate if available.
 		allAnswers = EnrichWithRevenueEstimate(ctx, allAnswers, company, p.estimator)
-		fieldValues = BuildFieldValues(allAnswers, p.fields)
+		// Enrich with PPP loan data (revenue + employees from database).
+		allAnswers = EnrichFromPPP(allAnswers, pppMatches)
+		fieldValues = BuildFieldValues(allAnswers, p.fields, company)
 		return &model.PhaseResult{
 			Metadata: map[string]any{
 				"total_answers":         len(allAnswers),
@@ -684,7 +694,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	setStatus(model.RunStatusWritingSF)
 
 	trackPhase("9_gate", func() (*model.PhaseResult, error) {
-		gate, gateErr := QualityGate(ctx, result, p.fields, p.salesforce, p.notion, p.cfg)
+		gate, gateErr := QualityGate(ctx, result, p.fields, p.questions, p.salesforce, p.notion, p.cfg)
 		if gateErr != nil {
 			return nil, gateErr
 		}

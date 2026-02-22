@@ -89,8 +89,9 @@ func findPagesForQuestion(q model.Question, index model.PageIndex) []model.Class
 	return result
 }
 
-// EscalateQuestions takes T1 answers with low confidence and re-queues
-// them into T2 batches. Returns new T2 routed questions.
+// EscalateQuestions takes T1 answers and escalates questions to T2 when
+// a majority of their fields are null or low-confidence. This avoids
+// re-running an entire multi-field question at T2 when most fields succeeded.
 func EscalateQuestions(answers []model.ExtractionAnswer, questions []model.Question, index model.PageIndex, threshold float64) []model.RoutedQuestion {
 	// Build a lookup from question ID to question.
 	qMap := make(map[string]model.Question, len(questions))
@@ -98,22 +99,48 @@ func EscalateQuestions(answers []model.ExtractionAnswer, questions []model.Quest
 		qMap[q.ID] = q
 	}
 
-	var escalated []model.RoutedQuestion
+	// Aggregate per-question success rates.
+	type qStats struct {
+		total   int
+		failed  int // null value or low confidence
+	}
+	byQ := make(map[string]*qStats)
 	for _, a := range answers {
-		if a.Confidence >= threshold {
+		st, ok := byQ[a.QuestionID]
+		if !ok {
+			st = &qStats{}
+			byQ[a.QuestionID] = st
+		}
+		st.total++
+		if a.Value == nil || a.Confidence < threshold {
+			st.failed++
+		}
+	}
+
+	// Escalate questions where >35% of fields failed (null or low confidence).
+	seen := make(map[string]bool)
+	var escalated []model.RoutedQuestion
+	for qid, stats := range byQ {
+		if stats.total == 0 {
 			continue
 		}
+		failRate := float64(stats.failed) / float64(stats.total)
+		if failRate <= 0.35 {
+			continue // Majority succeeded, don't re-run at T2.
+		}
+		if seen[qid] {
+			continue
+		}
+		seen[qid] = true
 
-		q, ok := qMap[a.QuestionID]
+		q, ok := qMap[qid]
 		if !ok {
 			continue
 		}
-
 		pages := findPagesForQuestion(q, index)
 		if len(pages) == 0 {
 			continue
 		}
-
 		escalated = append(escalated, model.RoutedQuestion{
 			Question: q,
 			Pages:    pages,

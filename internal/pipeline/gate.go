@@ -31,8 +31,8 @@ type GateResult struct {
 
 // QualityGate implements Phase 9: evaluate quality score, update Salesforce,
 // send to ToolJet for manual review if needed, and update Notion status.
-func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *model.FieldRegistry, sfClient salesforce.Client, notionClient notion.Client, cfg *config.Config) (*GateResult, error) {
-	score := ComputeScore(result.FieldValues, fields)
+func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *model.FieldRegistry, questions []model.Question, sfClient salesforce.Client, notionClient notion.Client, cfg *config.Config) (*GateResult, error) {
+	score := ComputeScore(result.FieldValues, fields, questions)
 	result.Score = score
 	threshold := cfg.Pipeline.QualityScoreThreshold
 

@@ -86,14 +86,49 @@ func ParseGrataCSV(csvPath string) ([]model.Company, error) {
 			}
 		}
 
+		// Pre-seed known fields from CSV data for gap-filling during aggregate.
+		preSeeded := make(map[string]any)
+		if phone := getCol(row, colIdx, "Primary Phone"); phone != "" {
+			preSeeded["phone"] = phone
+		}
+		if emp := getCol(row, colIdx, "Employee Estimate"); emp != "" {
+			if n, err := strconv.Atoi(strings.ReplaceAll(emp, ",", "")); err == nil && n > 0 {
+				preSeeded["employees"] = n
+			}
+		}
+		if rev := getCol(row, colIdx, "Revenue Estimate"); rev != "" {
+			preSeeded["revenue_range"] = rev
+		}
+		if li := getCol(row, colIdx, "Executive Linkedin"); li != "" {
+			preSeeded["linkedin_url"] = li
+		}
+		if naics := getCol(row, colIdx, "NAICS 6"); naics != "" {
+			preSeeded["naics_code"] = naics
+		}
+		if yr := getCol(row, colIdx, "Year Founded"); yr != "" {
+			preSeeded["year_founded"] = yr
+		}
+		if desc := getCol(row, colIdx, "Description"); desc != "" {
+			preSeeded["description"] = desc
+		}
+		if strings.TrimSpace(zipCode) != "" {
+			preSeeded["hq_zip"] = strings.TrimSpace(zipCode)
+		}
+
+		var preSeededMap map[string]any
+		if len(preSeeded) > 0 {
+			preSeededMap = preSeeded
+		}
+
 		companies = append(companies, model.Company{
-			URL:      url,
-			Name:     strings.TrimSpace(name),
-			Location: location,
-			City:     cityFormatted,
-			State:    stateAbbr,
-			ZipCode:  strings.TrimSpace(zipCode),
-			Street:   strings.TrimSpace(street),
+			URL:       url,
+			Name:      strings.TrimSpace(name),
+			Location:  location,
+			City:      cityFormatted,
+			State:     stateAbbr,
+			ZipCode:   strings.TrimSpace(zipCode),
+			Street:    strings.TrimSpace(street),
+			PreSeeded: preSeededMap,
 		})
 	}
 
@@ -395,7 +430,7 @@ func CompareResults(grataCompanies []GrataCompany, results []*model.EnrichmentRe
 		}{
 			{"description", gc.Description, fieldStr(r.FieldValues, "description")},
 			{"revenue_estimate", gc.RevenueEstimate, fieldStr(r.FieldValues, "revenue_estimate")},
-			{"employee_count", intStr(gc.EmployeeEstimate), fieldStr(r.FieldValues, "employee_count")},
+			{"employee_count", intStr(gc.EmployeeEstimate), fieldStr(r.FieldValues, "employees")},
 			{"review_count", intStr(gc.ReviewCount), fieldStr(r.FieldValues, "review_count")},
 			{"review_rating", floatStr(gc.Rating), fieldStr(r.FieldValues, "review_rating")},
 			{"naics_code", gc.NAICS6, fieldStr(r.FieldValues, "naics_code")},

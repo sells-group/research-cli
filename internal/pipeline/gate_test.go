@@ -48,7 +48,7 @@ func TestQualityGate_PassesAndUpdatesSF(t *testing.T) {
 		},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	assert.NoError(t, err)
 	assert.True(t, gate.Passed)
@@ -96,7 +96,7 @@ func TestQualityGate_FailsSendsToManualReview(t *testing.T) {
 		},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	assert.NoError(t, err)
 	assert.False(t, gate.Passed)
@@ -138,7 +138,7 @@ func TestQualityGate_NoSalesforceID_CreatesAccount(t *testing.T) {
 		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	assert.NoError(t, err)
 	assert.True(t, gate.Passed)
@@ -174,7 +174,7 @@ func TestQualityGate_NoSFClient(t *testing.T) {
 	}
 
 	// Pass nil sfClient — should not panic or attempt SF operations.
-	gate, err := QualityGate(ctx, result, fields, nil, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, nil, notionClient, cfg)
 
 	assert.NoError(t, err)
 	assert.True(t, gate.Passed)
@@ -221,7 +221,7 @@ func TestQualityGate_ContactCreation(t *testing.T) {
 		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	assert.NoError(t, err)
 	assert.True(t, gate.Passed)
@@ -324,7 +324,7 @@ func TestQualityGate_CreateAccountFails(t *testing.T) {
 		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	assert.Error(t, err)
 	assert.True(t, gate.Passed) // Score passed threshold.
@@ -369,7 +369,7 @@ func TestQualityGate_ContactCreationFails(t *testing.T) {
 		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	// Contact failure is non-fatal.
 	assert.NoError(t, err)
@@ -413,7 +413,7 @@ func TestQualityGate_CreateAccount_MinimumFieldsOnly(t *testing.T) {
 		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.0}, // 0 threshold so empty fields pass.
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	assert.NoError(t, err)
 	assert.True(t, gate.SFUpdated)

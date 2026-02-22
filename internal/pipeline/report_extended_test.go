@@ -48,6 +48,6 @@ func TestComputeScore_EmptyFieldValues(t *testing.T) {
 		{Key: "b", Required: false},
 	})
 
-	score := ComputeScore(map[string]model.FieldValue{}, fields)
+	score := ComputeScore(map[string]model.FieldValue{}, fields, nil)
 	assert.Equal(t, 0.0, score)
 }

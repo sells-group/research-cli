@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,25 +21,27 @@ type SQLiteStore struct {
 
 // NewSQLite opens a SQLite database at the given path and configures WAL mode.
 func NewSQLite(dsn string) (*SQLiteStore, error) {
+	// Embed pragmas in DSN so every pooled connection gets them.
+	if !strings.Contains(dsn, "?") {
+		dsn += "?"
+	} else {
+		dsn += "&"
+	}
+	dsn += "_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, eris.Wrap(err, "sqlite: open")
 	}
-	// WAL mode supports concurrent readers with a single writer.
-	// Allow multiple connections for parallel Phase 1 fan-out (1A/1B/1C/1D).
-	// busy_timeout handles writer contention.
-	db.SetMaxOpenConns(4)
+	// Allow enough connections for parallel pipelines + their fan-out phases.
+	db.SetMaxOpenConns(10)
 
-	for _, pragma := range []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA synchronous=NORMAL",
-	} {
-		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
-			return nil, eris.Wrapf(err, "sqlite: exec %s", pragma)
-		}
+	// Verify the connection is usable (sql.Open is lazy).
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, eris.Wrap(err, "sqlite: ping")
 	}
+
 	return &SQLiteStore{db: db}, nil
 }
 

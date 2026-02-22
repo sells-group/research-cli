@@ -49,7 +49,7 @@ func TestQualityGate_SFUpdateFails(t *testing.T) {
 		},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "gate: sf update")
@@ -87,7 +87,7 @@ func TestQualityGate_NoNotionPageID(t *testing.T) {
 		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	assert.NoError(t, err)
 	assert.True(t, gate.Passed)
@@ -129,7 +129,7 @@ func TestQualityGate_PassNoSFFieldValues(t *testing.T) {
 		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	assert.NoError(t, err)
 	assert.True(t, gate.Passed)
@@ -161,7 +161,7 @@ func TestQualityGate_FailNoWebhook(t *testing.T) {
 		ToolJet:  config.ToolJetConfig{WebhookURL: ""}, // No webhook configured.
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	assert.NoError(t, err)
 	assert.False(t, gate.Passed)
@@ -198,7 +198,7 @@ func TestQualityGate_NotionUpdateFails(t *testing.T) {
 		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	// Notion failure is a warning, not an error.
 	assert.NoError(t, err)
@@ -238,7 +238,7 @@ func TestQualityGate_WithReportInSFFields(t *testing.T) {
 		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	assert.NoError(t, err)
 	assert.True(t, gate.SFUpdated)
@@ -338,7 +338,7 @@ func TestQualityGate_SFSuccessNotionFailRetries(t *testing.T) {
 		},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	assert.NoError(t, err)
 	assert.True(t, gate.Passed)
@@ -386,7 +386,7 @@ func TestQualityGate_SFSuccessNotionFailRetryExhausted(t *testing.T) {
 		},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	// Gate should still return without error — Notion failure is non-blocking.
 	assert.NoError(t, err)
@@ -432,7 +432,7 @@ func TestQualityGate_NotionSuccessSFFailLogsInconsistency(t *testing.T) {
 		},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, sfClient, notionClient, cfg)
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
 
 	// The SF error should propagate from errgroup.Wait().
 	assert.Error(t, err)

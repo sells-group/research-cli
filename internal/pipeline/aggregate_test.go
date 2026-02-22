@@ -3,8 +3,10 @@ package pipeline
 import (
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/pkg/ppp"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -61,6 +63,22 @@ func TestMergeAnswers_NullT1_AnyT2Wins(t *testing.T) {
 	// T2 should win even with low confidence because T1 is null.
 	assert.Equal(t, 2011, merged[0].Value)
 	assert.Equal(t, 2, merged[0].Tier)
+}
+
+func TestMergeAnswers_HigherTierNullDoesNotOverride(t *testing.T) {
+	t1 := []model.ExtractionAnswer{
+		{QuestionID: "q1", FieldKey: "hq_address", Value: "5021 Verdugo Way", Confidence: 0.92, Tier: 1},
+	}
+	t2 := []model.ExtractionAnswer{
+		{QuestionID: "q1", FieldKey: "hq_address", Value: nil, Confidence: 0.75, Tier: 2},
+	}
+
+	merged := MergeAnswers(t1, t2, nil)
+	assert.Len(t, merged, 1)
+	// T1's non-null value should be preserved; T2 null should NOT override.
+	assert.Equal(t, "5021 Verdugo Way", merged[0].Value)
+	assert.Equal(t, 0.92, merged[0].Confidence)
+	assert.Equal(t, 1, merged[0].Tier)
 }
 
 func TestMergeAnswers_EmptyFieldKeySkipped(t *testing.T) {
@@ -257,4 +275,120 @@ func TestBuildFieldValues(t *testing.T) {
 	assert.Len(t, fvs, 2)
 	assert.Equal(t, "Tech", fvs["industry"].Value)
 	assert.Equal(t, 100, fvs["employees"].Value)
+}
+
+func TestEnrichFromPPP(t *testing.T) {
+	loanDate := time.Date(2020, 6, 15, 0, 0, 0, 0, time.UTC)
+
+	t.Run("empty matches returns unchanged answers", func(t *testing.T) {
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "industry", Value: "Tech", Confidence: 0.9, Tier: 1},
+		}
+		result := EnrichFromPPP(answers, nil)
+		assert.Len(t, result, 1)
+
+		result = EnrichFromPPP(answers, []ppp.LoanMatch{})
+		assert.Len(t, result, 1)
+	})
+
+	t.Run("single match adds revenue and employees", func(t *testing.T) {
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "industry", Value: "Tech", Confidence: 0.9, Tier: 1},
+		}
+		matches := []ppp.LoanMatch{
+			{
+				BorrowerName:    "ACME CORP",
+				CurrentApproval: 500_000,
+				JobsReported:    25,
+				DateApproved:    loanDate,
+				MatchTier:       1,
+				MatchScore:      1.0,
+			},
+		}
+
+		result := EnrichFromPPP(answers, matches)
+		assert.Len(t, result, 3) // original + revenue + employees
+
+		// Find revenue answer.
+		var revAnswer, empAnswer *model.ExtractionAnswer
+		for i := range result {
+			switch result[i].FieldKey {
+			case "revenue_estimate":
+				revAnswer = &result[i]
+			case "employees":
+				empAnswer = &result[i]
+			}
+		}
+
+		assert.NotNil(t, revAnswer)
+		assert.Equal(t, "$10.0M", revAnswer.Value) // 500k * 20 / 1M = 10
+		assert.InDelta(t, 0.85, revAnswer.Confidence, 0.001)
+		assert.Equal(t, "ppp_database", revAnswer.Source)
+		assert.Equal(t, 0, revAnswer.Tier)
+		assert.NotNil(t, revAnswer.DataAsOf)
+		assert.Equal(t, loanDate, *revAnswer.DataAsOf)
+
+		assert.NotNil(t, empAnswer)
+		assert.Equal(t, 25, empAnswer.Value)
+		assert.InDelta(t, 0.70, empAnswer.Confidence, 0.001)
+		assert.Equal(t, "ppp_database", empAnswer.Source)
+		assert.Equal(t, 0, empAnswer.Tier)
+		assert.NotNil(t, empAnswer.DataAsOf)
+		assert.Equal(t, loanDate, *empAnswer.DataAsOf)
+	})
+
+	t.Run("zero loan amount skips revenue", func(t *testing.T) {
+		matches := []ppp.LoanMatch{
+			{
+				CurrentApproval: 0,
+				JobsReported:    10,
+				DateApproved:    loanDate,
+				MatchScore:      1.0,
+			},
+		}
+
+		result := EnrichFromPPP(nil, matches)
+		assert.Len(t, result, 1) // only employees
+		assert.Equal(t, "employees", result[0].FieldKey)
+	})
+
+	t.Run("zero jobs skips employees", func(t *testing.T) {
+		matches := []ppp.LoanMatch{
+			{
+				CurrentApproval: 100_000,
+				JobsReported:    0,
+				DateApproved:    loanDate,
+				MatchScore:      0.8,
+			},
+		}
+
+		result := EnrichFromPPP(nil, matches)
+		assert.Len(t, result, 1) // only revenue
+		assert.Equal(t, "revenue_estimate", result[0].FieldKey)
+		assert.InDelta(t, 0.68, result[0].Confidence, 0.001) // 0.8 * 0.85
+	})
+
+	t.Run("fuzzy match scales confidence", func(t *testing.T) {
+		matches := []ppp.LoanMatch{
+			{
+				CurrentApproval: 200_000,
+				JobsReported:    15,
+				DateApproved:    loanDate,
+				MatchTier:       3,
+				MatchScore:      0.65,
+			},
+		}
+
+		result := EnrichFromPPP(nil, matches)
+		assert.Len(t, result, 2)
+
+		for _, a := range result {
+			switch a.FieldKey {
+			case "revenue_estimate":
+				assert.InDelta(t, 0.65*0.85, a.Confidence, 0.001)
+			case "employees":
+				assert.InDelta(t, 0.65*0.7, a.Confidence, 0.001)
+			}
+		}
+	})
 }
