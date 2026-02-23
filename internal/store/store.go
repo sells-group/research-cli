@@ -10,10 +10,11 @@ import (
 
 // RunFilter specifies criteria for listing runs.
 type RunFilter struct {
-	Status     model.RunStatus `json:"status,omitempty"`
-	CompanyURL string          `json:"company_url,omitempty"`
-	Limit      int             `json:"limit,omitempty"`
-	Offset     int             `json:"offset,omitempty"`
+	Status       model.RunStatus `json:"status,omitempty"`
+	CompanyURL   string          `json:"company_url,omitempty"`
+	CreatedAfter time.Time       `json:"created_after,omitempty"`
+	Limit        int             `json:"limit,omitempty"`
+	Offset       int             `json:"offset,omitempty"`
 }
 
 // Store defines the persistence interface for the enrichment pipeline.

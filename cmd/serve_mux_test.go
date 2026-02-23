@@ -16,7 +16,7 @@ import (
 )
 
 func TestBuildMux_HealthEndpoint(t *testing.T) {
-	mux, _ := buildMux(context.Background(), nil, nil, "")
+	mux, _ := buildMux(context.Background(), nil, nil, "", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
@@ -33,7 +33,7 @@ func TestBuildMux_HealthEndpoint(t *testing.T) {
 
 func TestBuildMux_WebhookEnrich_Valid_NilPipeline(t *testing.T) {
 	// With a nil pipeline, the goroutine skips enrichment gracefully.
-	mux, _ := buildMux(context.Background(), nil, nil, "")
+	mux, _ := buildMux(context.Background(), nil, nil, "", nil)
 
 	payload := map[string]string{
 		"url":           "https://acme.com",
@@ -61,7 +61,7 @@ func TestBuildMux_WebhookEnrich_Valid_NilPipeline(t *testing.T) {
 }
 
 func TestBuildMux_WebhookEnrich_MissingURL(t *testing.T) {
-	mux, _ := buildMux(context.Background(), nil, nil, "")
+	mux, _ := buildMux(context.Background(), nil, nil, "", nil)
 
 	payload := map[string]string{
 		"salesforce_id": "001ABC",
@@ -79,7 +79,7 @@ func TestBuildMux_WebhookEnrich_MissingURL(t *testing.T) {
 }
 
 func TestBuildMux_WebhookEnrich_InvalidJSON(t *testing.T) {
-	mux, _ := buildMux(context.Background(), nil, nil, "")
+	mux, _ := buildMux(context.Background(), nil, nil, "", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhook/enrich", bytes.NewReader([]byte("not json")))
 	req.Header.Set("Content-Type", "application/json")
@@ -91,7 +91,7 @@ func TestBuildMux_WebhookEnrich_InvalidJSON(t *testing.T) {
 }
 
 func TestBuildMux_WebhookEnrich_EmptyBody(t *testing.T) {
-	mux, _ := buildMux(context.Background(), nil, nil, "")
+	mux, _ := buildMux(context.Background(), nil, nil, "", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhook/enrich", bytes.NewReader([]byte("{}")))
 	req.Header.Set("Content-Type", "application/json")
@@ -103,7 +103,7 @@ func TestBuildMux_WebhookEnrich_EmptyBody(t *testing.T) {
 }
 
 func TestBuildMux_WebhookEnrich_URLOnly_NilPipeline(t *testing.T) {
-	mux, _ := buildMux(context.Background(), nil, nil, "")
+	mux, _ := buildMux(context.Background(), nil, nil, "", nil)
 
 	payload := map[string]string{
 		"url": "https://minimal.com",
@@ -127,7 +127,7 @@ func TestBuildMux_WebhookEnrich_URLOnly_NilPipeline(t *testing.T) {
 }
 
 func TestBuildMux_WebhookAuth_ValidKey(t *testing.T) {
-	mux, _ := buildMux(context.Background(), nil, nil, "test-secret-123")
+	mux, _ := buildMux(context.Background(), nil, nil, "test-secret-123", nil)
 
 	payload := []byte(`{"url":"https://acme.com"}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/enrich", bytes.NewReader(payload))
@@ -141,7 +141,7 @@ func TestBuildMux_WebhookAuth_ValidKey(t *testing.T) {
 }
 
 func TestBuildMux_WebhookAuth_InvalidKey(t *testing.T) {
-	mux, _ := buildMux(context.Background(), nil, nil, "test-secret-123")
+	mux, _ := buildMux(context.Background(), nil, nil, "test-secret-123", nil)
 
 	payload := []byte(`{"url":"https://acme.com"}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/enrich", bytes.NewReader(payload))
@@ -155,7 +155,7 @@ func TestBuildMux_WebhookAuth_InvalidKey(t *testing.T) {
 }
 
 func TestBuildMux_WebhookAuth_MissingHeader(t *testing.T) {
-	mux, _ := buildMux(context.Background(), nil, nil, "test-secret-123")
+	mux, _ := buildMux(context.Background(), nil, nil, "test-secret-123", nil)
 
 	payload := []byte(`{"url":"https://acme.com"}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/enrich", bytes.NewReader(payload))
@@ -168,7 +168,7 @@ func TestBuildMux_WebhookAuth_MissingHeader(t *testing.T) {
 
 func TestBuildMux_WebhookAuth_NoSecretConfigured(t *testing.T) {
 	// When no secret is configured, requests should pass through without auth.
-	mux, _ := buildMux(context.Background(), nil, nil, "")
+	mux, _ := buildMux(context.Background(), nil, nil, "", nil)
 
 	payload := []byte(`{"url":"https://acme.com"}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/enrich", bytes.NewReader(payload))

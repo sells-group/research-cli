@@ -211,6 +211,10 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, filter RunFilter) ([]model.R
 		query += ` AND json_extract(company, '$.url') = ?`
 		args = append(args, filter.CompanyURL)
 	}
+	if !filter.CreatedAfter.IsZero() {
+		query += ` AND created_at >= ?`
+		args = append(args, filter.CreatedAfter)
+	}
 	query += ` ORDER BY created_at DESC`
 
 	limit := filter.Limit
