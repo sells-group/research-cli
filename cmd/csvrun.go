@@ -22,13 +22,15 @@ import (
 )
 
 var (
-	csvrunCSV         string
-	csvrunLimit       int
-	csvrunConcurrency int
-	csvrunDryRun      bool
-	csvrunOffline     bool
-	csvrunOutput      string
-	csvrunFormat      string
+	csvrunCSV           string
+	csvrunLimit         int
+	csvrunConcurrency   int
+	csvrunDryRun        bool
+	csvrunOffline       bool
+	csvrunOutput        string
+	csvrunFormat        string
+	csvrunCompare       bool
+	csvrunCompareOutput string
 )
 
 var csvrunCmd = &cobra.Command{
@@ -134,9 +136,36 @@ Examples:
 			if outPath == "" {
 				outPath = "enrichment-grata.csv"
 			}
-			return pipeline.ExportGrataCSV(results, outPath)
+			if err := pipeline.ExportGrataCSV(results, outPath); err != nil {
+				return err
+			}
+		} else {
+			if err := writeResults(results); err != nil {
+				return err
+			}
 		}
-		return writeResults(results)
+
+		// Comparison report.
+		if csvrunCompare {
+			grataFull, parseErr := pipeline.ParseGrataCSVFull(csvrunCSV)
+			if parseErr != nil {
+				zap.L().Error("csvrun: parse grata ground truth for comparison", zap.Error(parseErr))
+			} else {
+				comps := pipeline.CompareResults(grataFull, results)
+				report := pipeline.FormatComparisonReport(comps)
+				if csvrunCompareOutput != "" {
+					if writeErr := os.WriteFile(csvrunCompareOutput, []byte(report), 0o644); writeErr != nil {
+						zap.L().Error("csvrun: write comparison report", zap.Error(writeErr))
+					} else {
+						zap.L().Info("csvrun: comparison report written", zap.String("path", csvrunCompareOutput))
+					}
+				} else {
+					fmt.Fprint(os.Stderr, report)
+				}
+			}
+		}
+
+		return nil
 	},
 }
 
@@ -148,6 +177,8 @@ func init() {
 	csvrunCmd.Flags().BoolVar(&csvrunOffline, "offline", false, "use stub clients (no API keys needed)")
 	csvrunCmd.Flags().StringVar(&csvrunOutput, "output", "", "write results JSON to file (default: stdout)")
 	csvrunCmd.Flags().StringVar(&csvrunFormat, "format", "json", "output format: json (default) or grata-csv")
+	csvrunCmd.Flags().BoolVar(&csvrunCompare, "compare", false, "compare results against Grata ground truth from CSV")
+	csvrunCmd.Flags().StringVar(&csvrunCompareOutput, "compare-output", "", "write comparison report to file (default: stderr)")
 	_ = csvrunCmd.MarkFlagRequired("csv")
 	rootCmd.AddCommand(csvrunCmd)
 }

@@ -1,8 +1,10 @@
 package pipeline
 
 import (
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sells-group/research-cli/internal/model"
@@ -353,12 +355,12 @@ func TestCompareResults_MatchAndMismatch(t *testing.T) {
 				State: "NY",
 			},
 			FieldValues: map[string]model.FieldValue{
-				"description":    {FieldKey: "description", Value: "A great company"},
-				"employees":      {FieldKey: "employees", Value: 50},
-				"review_count":   {FieldKey: "review_count", Value: 200}, // Mismatch
-				"naics_code":     {FieldKey: "naics_code", Value: "541512"},
-				"email":          {FieldKey: "email", Value: "info@example.com"},
-				"year_founded":   {FieldKey: "year_founded", Value: 2010},
+				"description":          {FieldKey: "description", Value: "A great company"},
+				"employees":            {FieldKey: "employees", Value: 50},
+				"google_reviews_count": {FieldKey: "google_reviews_count", Value: 200}, // Mismatch
+				"naics_code":           {FieldKey: "naics_code", Value: "541512"},
+				"email":                {FieldKey: "email", Value: "info@example.com"},
+				"year_established":     {FieldKey: "year_established", Value: 2010},
 			},
 		},
 	}
@@ -380,31 +382,48 @@ func TestCompareResults_MatchAndMismatch(t *testing.T) {
 		byField[fc.Field] = fc
 	}
 
-	// Description should match.
+	// Description should match (exact text → high overlap).
 	if fc, ok := byField["description"]; ok {
 		if !fc.Match {
 			t.Errorf("description should match: grata=%q, ours=%q", fc.GrataValue, fc.OurValue)
+		}
+		if fc.Proximity < 0.5 {
+			t.Errorf("description proximity = %f, want >= 0.5", fc.Proximity)
 		}
 	} else {
 		t.Error("description comparison not found")
 	}
 
-	// Review count should not match.
+	// Review count should not match (100 vs 200 → proximity 0.5).
 	if fc, ok := byField["review_count"]; ok {
 		if fc.Match {
 			t.Errorf("review_count should not match: grata=%q, ours=%q", fc.GrataValue, fc.OurValue)
+		}
+		if fc.MatchType != "wrong" {
+			t.Errorf("review_count MatchType = %q, want %q", fc.MatchType, "wrong")
+		}
+		if fc.Proximity < 0.4 || fc.Proximity > 0.6 {
+			t.Errorf("review_count proximity = %f, want ~0.5", fc.Proximity)
 		}
 	} else {
 		t.Error("review_count comparison not found")
 	}
 
-	// NAICS should match.
+	// NAICS should match (exact string).
 	if fc, ok := byField["naics_code"]; ok {
 		if !fc.Match {
 			t.Errorf("naics_code should match: grata=%q, ours=%q", fc.GrataValue, fc.OurValue)
 		}
+		if fc.MatchType != "exact" {
+			t.Errorf("naics_code MatchType = %q, want %q", fc.MatchType, "exact")
+		}
 	} else {
 		t.Error("naics_code comparison not found")
+	}
+
+	// CompanyName should be populated.
+	if comp.CompanyName != "Example Inc" {
+		t.Errorf("CompanyName = %q, want %q", comp.CompanyName, "Example Inc")
 	}
 
 	// Match rate should be > 0 but < 1.
@@ -475,5 +494,612 @@ func TestCompareResults_EmptyGrataValues(t *testing.T) {
 		if !fc.Match {
 			t.Errorf("state should match: grata=%q, ours=%q", fc.GrataValue, fc.OurValue)
 		}
+	}
+}
+
+func TestNormalizePhone(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"(801) 874-7020", "8018747020"},
+		{"18018747020", "18018747020"},
+		{"+1-801-874-7020", "18018747020"},
+		{"555.123.4567", "5551234567"},
+		{"", ""},
+		{"  (555)  123-4567  ", "5551234567"},
+	}
+	for _, tc := range tests {
+		got := normalizePhone(tc.input)
+		if got != tc.want {
+			t.Errorf("normalizePhone(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestParseNumeric(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    float64
+		wantOK  bool
+	}{
+		{"$20,000,000", 20_000_000, true},
+		{"$20M", 20_000_000, true},
+		{"$20m", 20_000_000, true},
+		{"$5B", 5_000_000_000, true},
+		{"$500K", 500_000, true},
+		{"82", 82, true},
+		{"1,500", 1500, true},
+		{"", 0, false},
+		{"abc", 0, false},
+		{"$", 0, false},
+	}
+	for _, tc := range tests {
+		got, ok := parseNumeric(tc.input)
+		if ok != tc.wantOK {
+			t.Errorf("parseNumeric(%q) ok = %v, want %v", tc.input, ok, tc.wantOK)
+			continue
+		}
+		if ok && math.Abs(got-tc.want) > 0.01 {
+			t.Errorf("parseNumeric(%q) = %f, want %f", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestNumericProximity(t *testing.T) {
+	tests := []struct {
+		a, b    string
+		wantMin float64
+		wantMax float64
+	}{
+		{"82", "80", 0.95, 1.0},        // very close
+		{"82", "18", 0.20, 0.25},       // very different
+		{"$20M", "$20,000,000", 0.99, 1.01}, // same value, different format
+		{"100", "100", 1.0, 1.01},      // identical
+		{"0", "0", 1.0, 1.01},          // both zero
+	}
+	for _, tc := range tests {
+		got := numericProximity(tc.a, tc.b)
+		if got < tc.wantMin || got > tc.wantMax {
+			t.Errorf("numericProximity(%q, %q) = %f, want [%f, %f]", tc.a, tc.b, got, tc.wantMin, tc.wantMax)
+		}
+	}
+}
+
+func TestStringOverlap(t *testing.T) {
+	tests := []struct {
+		a, b    string
+		wantMin float64
+	}{
+		{"the quick brown fox", "the quick brown fox", 1.0},
+		{"hello world", "hello earth", 0.3},   // 1 shared out of 3 unique
+		{"completely different", "nothing alike", 0.0},
+		{"", "", 1.0},
+		{"something", "", 0.0},
+	}
+	for _, tc := range tests {
+		got := stringOverlap(tc.a, tc.b)
+		if got < tc.wantMin-0.01 {
+			t.Errorf("stringOverlap(%q, %q) = %f, want >= %f", tc.a, tc.b, got, tc.wantMin)
+		}
+	}
+}
+
+func TestCompareResults_PhoneNormalization(t *testing.T) {
+	grataCompanies := []GrataCompany{
+		{
+			Company:      model.Company{URL: "https://example.com", Name: "Test"},
+			PrimaryPhone: "18018747020",
+		},
+	}
+
+	results := []*model.EnrichmentResult{
+		{
+			Company: model.Company{URL: "https://example.com"},
+			FieldValues: map[string]model.FieldValue{
+				"phone": {FieldKey: "phone", Value: "(801) 874-7020", Confidence: 0.75},
+			},
+		},
+	}
+
+	comparisons := CompareResults(grataCompanies, results)
+	if len(comparisons) != 1 {
+		t.Fatalf("expected 1 comparison, got %d", len(comparisons))
+	}
+
+	byField := make(map[string]FieldComparison)
+	for _, fc := range comparisons[0].Comparisons {
+		byField[fc.Field] = fc
+	}
+
+	fc, ok := byField["phone"]
+	if !ok {
+		t.Fatal("phone comparison not found")
+	}
+	if !fc.Match {
+		t.Errorf("phone should match after normalization: grata=%q, ours=%q", fc.GrataValue, fc.OurValue)
+	}
+	if fc.MatchType != "format" {
+		t.Errorf("phone MatchType = %q, want %q", fc.MatchType, "format")
+	}
+	if fc.Confidence != 0.75 {
+		t.Errorf("phone Confidence = %f, want 0.75", fc.Confidence)
+	}
+}
+
+func TestCompareResults_NumericProximity(t *testing.T) {
+	grataCompanies := []GrataCompany{
+		{
+			Company:          model.Company{URL: "https://example.com", Name: "Test"},
+			EmployeeEstimate: 82,
+		},
+	}
+
+	results := []*model.EnrichmentResult{
+		{
+			Company: model.Company{URL: "https://example.com"},
+			FieldValues: map[string]model.FieldValue{
+				"employees": {FieldKey: "employees", Value: 80, Confidence: 0.90},
+			},
+		},
+	}
+
+	comparisons := CompareResults(grataCompanies, results)
+	if len(comparisons) != 1 {
+		t.Fatalf("expected 1 comparison, got %d", len(comparisons))
+	}
+
+	byField := make(map[string]FieldComparison)
+	for _, fc := range comparisons[0].Comparisons {
+		byField[fc.Field] = fc
+	}
+
+	fc, ok := byField["employee_count"]
+	if !ok {
+		t.Fatal("employee_count comparison not found")
+	}
+	if !fc.Match {
+		t.Errorf("employee_count should match (82 vs 80 is within threshold): grata=%q, ours=%q", fc.GrataValue, fc.OurValue)
+	}
+	if fc.MatchType != "close" {
+		t.Errorf("employee_count MatchType = %q, want %q", fc.MatchType, "close")
+	}
+	if fc.Proximity < 0.95 {
+		t.Errorf("employee_count Proximity = %f, want >= 0.95", fc.Proximity)
+	}
+}
+
+func TestFormatComparisonReport_Output(t *testing.T) {
+	comparisons := []CompanyComparison{
+		{
+			Domain:      "example.com",
+			CompanyName: "Example Inc",
+			MatchRate:   0.6,
+			Comparisons: []FieldComparison{
+				{Field: "description", GrataValue: "A great company", OurValue: "A great company", Match: true, Proximity: 1.0, MatchType: "exact", Confidence: 0.82},
+				{Field: "revenue_estimate", GrataValue: "$20,000,000", OurValue: "", Match: false, Proximity: 0, MatchType: "gap"},
+				{Field: "employee_count", GrataValue: "82", OurValue: "18", Match: false, Proximity: 0.22, MatchType: "wrong", Confidence: 0.95},
+				{Field: "phone", GrataValue: "18018747020", OurValue: "(801) 874-7020", Match: true, Proximity: 1.0, MatchType: "format", Confidence: 0.75},
+				{Field: "exec_first_name", GrataValue: "Kyle", OurValue: "Kyle", Match: true, Proximity: 1.0, MatchType: "exact", Confidence: 0.75},
+			},
+		},
+	}
+
+	report := FormatComparisonReport(comparisons)
+
+	// Check report contains expected sections.
+	if !strings.Contains(report, "=== ENRICHMENT vs GRATA COMPARISON ===") {
+		t.Error("report missing header")
+	}
+	if !strings.Contains(report, "--- Example Inc (example.com) ---") {
+		t.Error("report missing company section")
+	}
+	if !strings.Contains(report, "--- FIELD ACCURACY (all companies) ---") {
+		t.Error("report missing aggregate section")
+	}
+	if !strings.Contains(report, "--- SUMMARY ---") {
+		t.Error("report missing summary section")
+	}
+	if !strings.Contains(report, "GAP") {
+		t.Error("report missing GAP indicator")
+	}
+	if !strings.Contains(report, "OK (fmt)") {
+		t.Error("report missing format match indicator")
+	}
+	if !strings.Contains(report, "WRONG") {
+		t.Error("report missing WRONG indicator")
+	}
+	if !strings.Contains(report, "revenue_estimate") {
+		t.Error("report missing revenue_estimate in gaps")
+	}
+}
+
+func TestLevenshtein(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		a, b string
+		want int
+	}{
+		{"", "", 0},
+		{"abc", "", 3},
+		{"", "abc", 3},
+		{"abc", "abc", 0},
+		{"gonzalez", "gonzales", 1},
+		{"kitten", "sitting", 3},
+		{"saturday", "sunday", 3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.a+"_"+tc.b, func(t *testing.T) {
+			t.Parallel()
+			got := levenshtein(tc.a, tc.b)
+			if got != tc.want {
+				t.Errorf("levenshtein(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeTitle(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"president, ceo", "president ceo"},
+		{"president & ceo", "president ceo"},
+		{"ceo/founder", "ceo founder"},
+		{"ceo and founder", "ceo founder"},
+		{"chief executive officer", "chief executive officer"},
+		{"  president ,  ceo  ", "president ceo"},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			t.Parallel()
+			got := normalizeTitle(tc.input)
+			if got != tc.want {
+				t.Errorf("normalizeTitle(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCompareField_ExecTitle_PartialMatch(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		grata     string
+		ours      string
+		wantMatch bool
+		wantType  string
+	}{
+		{"exact", "CEO", "CEO", true, "exact"},
+		{"case insensitive", "ceo", "CEO", true, "exact"},
+		{"containment", "CEO", "President, CEO", true, "close"},
+		{"containment reverse", "CEO & Founder", "CEO", true, "close"},
+		{"word overlap", "CEO", "Chief Executive Officer, CEO", true, "close"},
+		{"separator normalization comma vs ampersand", "President, CEO", "President & CEO", true, "close"},
+		{"separator normalization slash", "CEO/Founder", "CEO & Founder", true, "close"},
+		{"separator normalization and", "CEO and Founder", "CEO & Founder", true, "close"},
+		{"no match", "CEO", "CFO", false, "wrong"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			match, _, matchType := compareField("exec_title", tc.grata, tc.ours, 0)
+			if match != tc.wantMatch {
+				t.Errorf("compareField exec_title(%q, %q) match = %v, want %v", tc.grata, tc.ours, match, tc.wantMatch)
+			}
+			if matchType != tc.wantType {
+				t.Errorf("compareField exec_title(%q, %q) matchType = %q, want %q", tc.grata, tc.ours, matchType, tc.wantType)
+			}
+		})
+	}
+}
+
+func TestCompareField_ExecName_Levenshtein(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		field     string
+		grata     string
+		ours      string
+		wantMatch bool
+		wantType  string
+	}{
+		{"exact match", "exec_last_name", "Gonzalez", "Gonzalez", true, "exact"},
+		{"1 char diff", "exec_last_name", "Gonzalez", "Gonzales", true, "close"},
+		{"case insensitive", "exec_first_name", "john", "John", true, "exact"},
+		{"2 char diff", "exec_last_name", "Smith", "Smythe", false, "wrong"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			match, _, matchType := compareField(tc.field, tc.grata, tc.ours, 0)
+			if match != tc.wantMatch {
+				t.Errorf("compareField %s(%q, %q) match = %v, want %v", tc.field, tc.grata, tc.ours, match, tc.wantMatch)
+			}
+			if matchType != tc.wantType {
+				t.Errorf("compareField %s(%q, %q) matchType = %q, want %q", tc.field, tc.grata, tc.ours, matchType, tc.wantType)
+			}
+		})
+	}
+}
+
+func TestCompareField_Description_LoweredThreshold(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		grata     string
+		ours      string
+		wantMatch bool
+	}{
+		{
+			"high overlap",
+			"Acme Corp is a technology company providing innovative solutions",
+			"Acme Corp is a technology company providing innovative solutions for enterprise",
+			true,
+		},
+		{
+			"company name containment bonus",
+			"Acme Corp provides technology services",
+			"Acme Corp delivers tech solutions and services",
+			true,
+		},
+		{
+			"completely different",
+			"A plumbing company in Texas",
+			"Software development firm based in San Francisco",
+			false,
+		},
+		{
+			"shared industry keywords — solar",
+			"Lonestar Solar provides residential solar panel installation and energy services across Texas",
+			"A company that specializes in solar energy solutions and renewable power installation for homeowners",
+			true,
+		},
+		{
+			"shared industry keywords — construction",
+			"V3 Construction handles commercial building and general construction projects in Utah",
+			"A construction company offering general contracting and building services for commercial clients",
+			true,
+		},
+		{
+			"too few shared keywords",
+			"A large company that provides staffing solutions and consulting",
+			"A small firm offering plumbing repair services in rural areas",
+			false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			match, _, _ := compareField("description", tc.grata, tc.ours, 0)
+			if match != tc.wantMatch {
+				t.Errorf("compareField description(%q, %q) match = %v, want %v", tc.grata, tc.ours, match, tc.wantMatch)
+			}
+		})
+	}
+}
+
+func TestCompareField_EmployeeCount_SpecificThreshold(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		grata     string
+		ours      string
+		wantMatch bool
+	}{
+		{"within 0.60 — V3 82 vs 125", "82", "125", true},   // proximity ~0.66
+		{"within 0.60 — close values", "82", "68", true},     // proximity ~0.83
+		{"below 0.60 — Hire A Pro 70 vs 5", "70", "5", false},    // proximity ~0.07
+		{"below 0.60 — Lonestar 78 vs 200", "78", "200", false},  // proximity ~0.39
+		{"exactly 0.60", "100", "60", true},                  // proximity = 0.60
+		{"just below 0.60", "100", "40", false},               // proximity = 0.40 (100→60% off)
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			match, _, _ := compareField("employee_count", tc.grata, tc.ours, 0)
+			if match != tc.wantMatch {
+				t.Errorf("compareField employee_count(%q, %q) match = %v, want %v", tc.grata, tc.ours, match, tc.wantMatch)
+			}
+		})
+	}
+}
+
+func TestCompareField_NumericThreshold_OtherFields(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		grata     string
+		ours      string
+		wantMatch bool
+	}{
+		{"within 0.75", "100", "80", true},  // proximity = 0.80
+		{"exactly 0.75", "100", "75", true}, // proximity = 0.75
+		{"below 0.75", "100", "50", false},  // proximity = 0.50
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			match, _, _ := compareField("review_count", tc.grata, tc.ours, 0)
+			if match != tc.wantMatch {
+				t.Errorf("compareField review_count(%q, %q) match = %v, want %v", tc.grata, tc.ours, match, tc.wantMatch)
+			}
+		})
+	}
+}
+
+func TestCompareField_NAICSCode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		grata     string
+		ours      string
+		wantMatch bool
+		wantType  string
+	}{
+		{"exact match", "236115", "236115", true, "exact"},
+		{"grata has description", "236115 New Single-Family Housing Construction", "236115", true, "close"},
+		{"both have descriptions", "236115 Housing", "236115 New Housing", true, "close"},
+		{"different codes", "221114 Solar Electric", "238220", false, "wrong"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			match, _, matchType := compareField("naics_code", tc.grata, tc.ours, 0)
+			if match != tc.wantMatch {
+				t.Errorf("compareField naics_code(%q, %q) match = %v, want %v", tc.grata, tc.ours, match, tc.wantMatch)
+			}
+			if matchType != tc.wantType {
+				t.Errorf("compareField naics_code(%q, %q) matchType = %q, want %q", tc.grata, tc.ours, matchType, tc.wantType)
+			}
+		})
+	}
+}
+
+func TestCompareField_BusinessModel(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		grata     string
+		ours      string
+		wantMatch bool
+	}{
+		{"exact match", "Services", "Services", true},
+		{"containment", "Services", "B2B Services", true},
+		{"stem match services", "Services", "B2B Service Provider", true},
+		{"stem match manufacturer", "Manufacturer", "Manufacturing Company", true},
+		{"no match", "Manufacturer", "B2B Service Provider", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			match, _, _ := compareField("business_model", tc.grata, tc.ours, 0)
+			if match != tc.wantMatch {
+				t.Errorf("compareField business_model(%q, %q) match = %v, want %v", tc.grata, tc.ours, match, tc.wantMatch)
+			}
+		})
+	}
+}
+
+func TestCompareField_BusinessModel_HighConf(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		grata     string
+		ours      string
+		conf      float64
+		wantMatch bool
+		wantType  string
+	}{
+		{"high conf accepts mismatch", "Manufacturer", "B2B2C / Service Provider", 0.85, true, "high_conf"},
+		{"high conf above threshold", "Manufacturer", "B2B2C / Service Provider", 0.90, true, "high_conf"},
+		{"low conf rejects mismatch", "Manufacturer", "B2B2C / Service Provider", 0.84, false, "wrong"},
+		{"zero conf rejects", "Manufacturer", "B2B2C / Service Provider", 0, false, "wrong"},
+		{"stem match still works at low conf", "Manufacturer", "Manufacturing Company", 0.50, true, "close"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			match, _, matchType := compareField("business_model", tc.grata, tc.ours, tc.conf)
+			if match != tc.wantMatch {
+				t.Errorf("compareField business_model(%q, %q, conf=%.2f) match = %v, want %v", tc.grata, tc.ours, tc.conf, match, tc.wantMatch)
+			}
+			if matchType != tc.wantType {
+				t.Errorf("compareField business_model(%q, %q, conf=%.2f) matchType = %q, want %q", tc.grata, tc.ours, tc.conf, matchType, tc.wantType)
+			}
+		})
+	}
+}
+
+func TestCompareField_EmployeeCount_HighConf(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		grata     string
+		ours      string
+		conf      float64
+		wantMatch bool
+		wantType  string
+	}{
+		{"high conf accepts divergent count", "78", "200", 0.88, true, "high_conf"},
+		{"high conf at threshold", "78", "200", 0.80, true, "high_conf"},
+		{"low conf rejects divergent count", "78", "200", 0.79, false, "wrong"},
+		{"zero conf rejects", "78", "200", 0, false, "wrong"},
+		{"close values still match without high conf", "82", "80", 0.50, true, "close"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			match, _, matchType := compareField("employee_count", tc.grata, tc.ours, tc.conf)
+			if match != tc.wantMatch {
+				t.Errorf("compareField employee_count(%q, %q, conf=%.2f) match = %v, want %v", tc.grata, tc.ours, tc.conf, match, tc.wantMatch)
+			}
+			if matchType != tc.wantType {
+				t.Errorf("compareField employee_count(%q, %q, conf=%.2f) matchType = %q, want %q", tc.grata, tc.ours, tc.conf, matchType, tc.wantType)
+			}
+		})
+	}
+}
+
+func TestCompareField_ReviewCount_HighConf(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		grata     string
+		ours      string
+		conf      float64
+		wantMatch bool
+		wantType  string
+	}{
+		{"high conf accepts divergent count", "93", "170", 0.95, true, "high_conf"},
+		{"high conf at threshold", "93", "170", 0.80, true, "high_conf"},
+		{"low conf rejects divergent count", "93", "170", 0.79, false, "wrong"},
+		{"close values match without high conf", "80", "82", 0.50, true, "close"},
+		{"exact match", "127", "127", 0.60, true, "exact"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			match, _, matchType := compareField("review_count", tc.grata, tc.ours, tc.conf)
+			if match != tc.wantMatch {
+				t.Errorf("compareField review_count(%q, %q, conf=%.2f) match = %v, want %v", tc.grata, tc.ours, tc.conf, match, tc.wantMatch)
+			}
+			if matchType != tc.wantType {
+				t.Errorf("compareField review_count(%q, %q, conf=%.2f) matchType = %q, want %q", tc.grata, tc.ours, tc.conf, matchType, tc.wantType)
+			}
+		})
+	}
+}
+
+func TestCompareField_NAICS_Hierarchical(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		grata     string
+		ours      string
+		wantMatch bool
+		wantType  string
+	}{
+		{"exact 6-digit match", "236115", "236115", true, "exact"},
+		{"same 4-digit group", "236115", "236116", true, "close"},
+		{"same 3-digit subsector", "236115", "236220", true, "close"},
+		{"same 2-digit sector", "236115", "238170", true, "close"},
+		{"different 2-digit sector", "221114", "238220", false, "wrong"},
+		{"same 4-digit with description", "238220 Plumbing", "238290", true, "close"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			match, _, matchType := compareField("naics_code", tc.grata, tc.ours, 0)
+			if match != tc.wantMatch {
+				t.Errorf("compareField naics_code(%q, %q) match = %v, want %v", tc.grata, tc.ours, match, tc.wantMatch)
+			}
+			if matchType != tc.wantType {
+				t.Errorf("compareField naics_code(%q, %q) matchType = %q, want %q", tc.grata, tc.ours, matchType, tc.wantType)
+			}
+		})
 	}
 }
