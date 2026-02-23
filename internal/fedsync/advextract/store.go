@@ -452,6 +452,131 @@ func jsonValue(v any) json.RawMessage {
 	return json.RawMessage(b)
 }
 
+// ArchiveExistingAnswers copies current answers to history before re-extraction.
+func (s *Store) ArchiveExistingAnswers(ctx context.Context, crd int, runID int64) error {
+	query := `INSERT INTO fed_data.adv_answer_history
+		(crd_number, fund_id, question_key, value, confidence, tier, reasoning,
+		 source_doc, source_section, model, run_id, superseded_by)
+		SELECT crd_number, NULL, question_key, value, confidence, tier, reasoning,
+		       source_doc, source_section, model, run_id, $2
+		FROM fed_data.adv_advisor_answers
+		WHERE crd_number = $1`
+	_, err := s.pool.Exec(ctx, query, crd, runID)
+	if err != nil {
+		return eris.Wrapf(err, "advextract: archive advisor answers for CRD %d", crd)
+	}
+
+	// Also archive fund answers.
+	fundQuery := `INSERT INTO fed_data.adv_answer_history
+		(crd_number, fund_id, question_key, value, confidence, tier, reasoning,
+		 source_doc, source_section, model, run_id, superseded_by)
+		SELECT crd_number, fund_id, question_key, value, confidence, tier, reasoning,
+		       source_doc, source_section, model, run_id, $2
+		FROM fed_data.adv_fund_answers
+		WHERE crd_number = $1`
+	_, err = s.pool.Exec(ctx, fundQuery, crd, runID)
+	return eris.Wrapf(err, "advextract: archive fund answers for CRD %d", crd)
+}
+
+// SectionIndexEntry represents a document section for indexing.
+type SectionIndexEntry struct {
+	CRDNumber     int
+	DocType       string
+	DocID         string
+	SectionKey    string
+	SectionTitle  string
+	CharLength    int
+	TokenEstimate int
+}
+
+// WriteSectionIndex records what document sections are available for an advisor.
+func (s *Store) WriteSectionIndex(ctx context.Context, entries []SectionIndexEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	cols := []string{"crd_number", "doc_type", "doc_id", "section_key", "section_title", "char_length", "token_estimate"}
+	conflictKeys := []string{"crd_number", "doc_type", "doc_id", "section_key"}
+
+	rows := make([][]any, len(entries))
+	for i, e := range entries {
+		rows[i] = []any{e.CRDNumber, e.DocType, e.DocID, e.SectionKey, e.SectionTitle, e.CharLength, e.TokenEstimate}
+	}
+
+	_, err := db.BulkUpsert(ctx, s.pool, db.UpsertConfig{
+		Table:        "fed_data.adv_document_sections",
+		Columns:      cols,
+		ConflictKeys: conflictKeys,
+	}, rows)
+	return eris.Wrap(err, "advextract: write section index")
+}
+
+// WriteComputedMetrics upserts computed metrics for an advisor.
+func (s *Store) WriteComputedMetrics(ctx context.Context, m *ComputedMetrics) error {
+	query := `INSERT INTO fed_data.adv_computed_metrics
+		(crd_number, revenue_estimate, blended_fee_rate_bps, revenue_per_client,
+		 aum_growth_cagr_pct, client_growth_rate_pct, employee_growth_rate_pct,
+		 hnw_revenue_pct, institutional_revenue_pct, fund_aum_pct_total,
+		 compensation_diversity, business_complexity, drp_severity, acquisition_readiness,
+		 aum_1yr_growth_pct, aum_3yr_cagr_pct, aum_5yr_cagr_pct,
+		 client_3yr_cagr_pct, employee_3yr_cagr_pct,
+		 concentration_risk_score, key_person_dependency_score,
+		 hybrid_revenue_estimate, estimated_expense_ratio, estimated_operating_margin,
+		 revenue_per_employee, benchmark_aum_per_employee_pctile, benchmark_fee_rate_pctile,
+		 amendments_last_year, amendments_per_year_avg, has_frequent_amendments,
+		 regulatory_risk_score,
+		 computed_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+		        $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27,
+		        $28, $29, $30, $31, now())
+		ON CONFLICT (crd_number) DO UPDATE SET
+		 revenue_estimate = EXCLUDED.revenue_estimate,
+		 blended_fee_rate_bps = EXCLUDED.blended_fee_rate_bps,
+		 revenue_per_client = EXCLUDED.revenue_per_client,
+		 aum_growth_cagr_pct = EXCLUDED.aum_growth_cagr_pct,
+		 client_growth_rate_pct = EXCLUDED.client_growth_rate_pct,
+		 employee_growth_rate_pct = EXCLUDED.employee_growth_rate_pct,
+		 hnw_revenue_pct = EXCLUDED.hnw_revenue_pct,
+		 institutional_revenue_pct = EXCLUDED.institutional_revenue_pct,
+		 fund_aum_pct_total = EXCLUDED.fund_aum_pct_total,
+		 compensation_diversity = EXCLUDED.compensation_diversity,
+		 business_complexity = EXCLUDED.business_complexity,
+		 drp_severity = EXCLUDED.drp_severity,
+		 acquisition_readiness = EXCLUDED.acquisition_readiness,
+		 aum_1yr_growth_pct = EXCLUDED.aum_1yr_growth_pct,
+		 aum_3yr_cagr_pct = EXCLUDED.aum_3yr_cagr_pct,
+		 aum_5yr_cagr_pct = EXCLUDED.aum_5yr_cagr_pct,
+		 client_3yr_cagr_pct = EXCLUDED.client_3yr_cagr_pct,
+		 employee_3yr_cagr_pct = EXCLUDED.employee_3yr_cagr_pct,
+		 concentration_risk_score = EXCLUDED.concentration_risk_score,
+		 key_person_dependency_score = EXCLUDED.key_person_dependency_score,
+		 hybrid_revenue_estimate = EXCLUDED.hybrid_revenue_estimate,
+		 estimated_expense_ratio = EXCLUDED.estimated_expense_ratio,
+		 estimated_operating_margin = EXCLUDED.estimated_operating_margin,
+		 revenue_per_employee = EXCLUDED.revenue_per_employee,
+		 benchmark_aum_per_employee_pctile = EXCLUDED.benchmark_aum_per_employee_pctile,
+		 benchmark_fee_rate_pctile = EXCLUDED.benchmark_fee_rate_pctile,
+		 amendments_last_year = EXCLUDED.amendments_last_year,
+		 amendments_per_year_avg = EXCLUDED.amendments_per_year_avg,
+		 has_frequent_amendments = EXCLUDED.has_frequent_amendments,
+		 regulatory_risk_score = EXCLUDED.regulatory_risk_score,
+		 computed_at = now()`
+
+	_, err := s.pool.Exec(ctx, query, m.CRDNumber,
+		m.RevenueEstimate, m.BlendedFeeRateBPS, m.RevenuePerClient,
+		m.AUMGrowthCAGR, m.ClientGrowthRate, m.EmployeeGrowthRate,
+		m.HNWRevenuePct, m.InstitutionalRevenuePct, m.FundAUMPctTotal,
+		m.CompensationDiversity, m.BusinessComplexity, m.DRPSeverity, m.AcquisitionReadiness,
+		m.AUM1YrGrowth, m.AUM3YrCAGR, m.AUM5YrCAGR,
+		m.Client3YrCAGR, m.Employee3YrCAGR,
+		m.ConcentrationRiskScore, m.KeyPersonDependencyScore,
+		m.HybridRevenueEstimate, m.EstimatedExpenseRatio, m.EstimatedOperatingMargin,
+		m.RevenuePerEmployee, m.BenchmarkAUMPerEmployeePctile, m.BenchmarkFeeRatePctile,
+		m.AmendmentsLastYear, m.AmendmentsPerYearAvg, m.HasFrequentAmendments,
+		m.RegulatoryRiskScore)
+	return eris.Wrapf(err, "advextract: write computed metrics for CRD %d", m.CRDNumber)
+}
+
 // RefreshMaterializedView refreshes the M&A intelligence materialized view.
 func (s *Store) RefreshMaterializedView(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, "REFRESH MATERIALIZED VIEW CONCURRENTLY fed_data.mv_adv_intelligence")
