@@ -3,6 +3,7 @@ package pipeline
 import (
 	"testing"
 
+	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/stretchr/testify/assert"
 )
@@ -48,6 +49,6 @@ func TestComputeScore_EmptyFieldValues(t *testing.T) {
 		{Key: "b", Required: false},
 	})
 
-	score := ComputeScore(map[string]model.FieldValue{}, fields, nil)
-	assert.Equal(t, 0.0, score)
+	breakdown := ComputeScore(map[string]model.FieldValue{}, fields, nil, nil, config.QualityWeights{Confidence: 1.0})
+	assert.Equal(t, 0.0, breakdown.Final)
 }

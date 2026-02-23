@@ -819,10 +819,11 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		}
 		return &model.PhaseResult{
 			Metadata: map[string]any{
-				"score":         gate.Score,
-				"passed":        gate.Passed,
-				"sf_updated":    gate.SFUpdated,
-				"manual_review": gate.ManualReview,
+				"score":           gate.Score,
+				"score_breakdown": gate.ScoreBreakdown,
+				"passed":          gate.Passed,
+				"sf_updated":      gate.SFUpdated,
+				"manual_review":   gate.ManualReview,
 			},
 		}, nil
 	})

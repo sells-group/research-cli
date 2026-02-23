@@ -23,22 +23,25 @@ var webhookClient = &http.Client{Timeout: 10 * time.Second}
 
 // GateResult holds the outcome of the quality gate phase.
 type GateResult struct {
-	Score      float64 `json:"score"`
-	Passed     bool    `json:"passed"`
-	SFUpdated  bool    `json:"sf_updated"`
-	ManualReview bool  `json:"manual_review"`
+	Score          float64        `json:"score"`
+	ScoreBreakdown ScoreBreakdown `json:"score_breakdown"`
+	Passed         bool           `json:"passed"`
+	SFUpdated      bool           `json:"sf_updated"`
+	ManualReview   bool           `json:"manual_review"`
 }
 
 // QualityGate implements Phase 9: evaluate quality score, update Salesforce,
 // send to ToolJet for manual review if needed, and update Notion status.
 func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *model.FieldRegistry, questions []model.Question, sfClient salesforce.Client, notionClient notion.Client, cfg *config.Config) (*GateResult, error) {
-	score := ComputeScore(result.FieldValues, fields, questions)
+	breakdown := ComputeScore(result.FieldValues, fields, questions, result.Answers, cfg.Pipeline.QualityWeights)
+	score := breakdown.Final
 	result.Score = score
 	threshold := cfg.Pipeline.QualityScoreThreshold
 
 	gate := &GateResult{
-		Score:  score,
-		Passed: score >= threshold,
+		Score:          score,
+		ScoreBreakdown: breakdown,
+		Passed:         score >= threshold,
 	}
 
 	// Run SF/ToolJet and Notion updates concurrently — they are independent.
