@@ -90,7 +90,7 @@ func TestCostTracker_UnlimitedBudget(t *testing.T) {
 }
 
 func TestEstimateBatchCost(t *testing.T) {
-	estimate := EstimateBatchCost(10, 3)
+	estimate := EstimateBatchCost(10, 2)
 	if estimate == "" {
 		t.Error("expected non-empty estimate")
 	}
@@ -100,11 +100,11 @@ func TestEstimateBatchCost(t *testing.T) {
 	if !containsSubstr(estimate, "T1 Haiku") {
 		t.Error("estimate should mention T1")
 	}
-	if !containsSubstr(estimate, "T3 Opus") {
-		t.Error("estimate should mention T3 for max tier 3")
+	if !containsSubstr(estimate, "T2 Sonnet") {
+		t.Error("estimate should mention T2 for max tier 2")
 	}
 
-	// T1 only estimate should not mention T2/T3.
+	// T1 only estimate should not mention T2.
 	estimateT1 := EstimateBatchCost(10, 1)
 	if containsSubstr(estimateT1, "T2 Sonnet") {
 		t.Error("T1-only estimate should not mention T2")
