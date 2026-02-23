@@ -386,8 +386,13 @@ func InjectPageMetadata(answers []model.ExtractionAnswer, pages []model.CrawledP
 
 		// Differentiate confidence by metadata source.
 		conf := 0.95
-		if p.Metadata.Source == "perplexity" {
+		switch p.Metadata.Source {
+		case "perplexity":
 			conf = 0.70
+		case "jina_search":
+			conf = 0.85
+		case "google_api":
+			conf = 0.98
 		}
 
 		if p.Metadata.ReviewCount > 0 {

@@ -17,6 +17,7 @@ import (
 	"github.com/sells-group/research-cli/internal/waterfall/provider"
 	anthropicpkg "github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
+	"github.com/sells-group/research-cli/pkg/google"
 	"github.com/sells-group/research-cli/pkg/jina"
 	"github.com/sells-group/research-cli/pkg/notion"
 	"github.com/sells-group/research-cli/pkg/perplexity"
@@ -75,6 +76,15 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 	if err != nil {
 		st.Close()
 		return nil, err
+	}
+
+	// Google Places API client (optional — ultimate fallback for reviews).
+	var googleClient google.Client
+	if cfg.Google.Key != "" {
+		googleClient = google.NewClient(cfg.Google.Key)
+		zap.L().Info("google places api enabled")
+	} else {
+		zap.L().Debug("RESEARCH_GOOGLE_KEY not set, Google Places API fallback disabled")
 	}
 
 	var pppClient ppp.Querier
@@ -173,7 +183,7 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 		)
 	}
 
-	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, pppClient, revenueEstimator, waterfallExec, questions, fields)
+	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, googleClient, pppClient, revenueEstimator, waterfallExec, questions, fields)
 
 	return &pipelineEnv{
 		Store:     st,
