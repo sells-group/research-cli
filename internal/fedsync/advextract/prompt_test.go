@@ -23,7 +23,7 @@ func TestStructuredBypass_AUMCurrent(t *testing.T) {
 	}
 
 	q := Question{Key: "aum_current", StructuredBypass: true}
-	a := StructuredBypassAnswer(q, advisor, nil)
+	a := StructuredBypassAnswer(q, advisor, nil, nil)
 	if a == nil {
 		t.Fatal("expected non-nil answer for aum_current")
 	}
@@ -62,7 +62,7 @@ func TestStructuredBypass_AvgAccountSize(t *testing.T) {
 	}
 
 	q := Question{Key: "avg_account_size", StructuredBypass: true}
-	a := StructuredBypassAnswer(q, advisor, nil)
+	a := StructuredBypassAnswer(q, advisor, nil, nil)
 	if a == nil {
 		t.Fatal("expected non-nil answer")
 	}
@@ -91,7 +91,7 @@ func TestStructuredBypass_CompensationTypes(t *testing.T) {
 	}
 
 	q := Question{Key: "compensation_types", StructuredBypass: true}
-	a := StructuredBypassAnswer(q, advisor, nil)
+	a := StructuredBypassAnswer(q, advisor, nil, nil)
 	if a == nil {
 		t.Fatal("expected non-nil answer")
 	}
@@ -116,7 +116,7 @@ func TestStructuredBypass_DisciplinaryHistory(t *testing.T) {
 	}
 
 	q := Question{Key: "disciplinary_history", StructuredBypass: true}
-	a := StructuredBypassAnswer(q, advisor, nil)
+	a := StructuredBypassAnswer(q, advisor, nil, nil)
 	if a == nil {
 		t.Fatal("expected non-nil answer")
 	}
@@ -143,7 +143,7 @@ func TestStructuredBypass_FundAUM(t *testing.T) {
 	}
 
 	q := Question{Key: "fund_aum", StructuredBypass: true}
-	a := StructuredBypassAnswer(q, advisor, fund)
+	a := StructuredBypassAnswer(q, advisor, fund, nil)
 	if a == nil {
 		t.Fatal("expected non-nil answer for fund_aum")
 	}
@@ -156,7 +156,7 @@ func TestStructuredBypass_NoData(t *testing.T) {
 	advisor := &AdvisorRow{CRDNumber: 12345, Filing: map[string]any{}}
 
 	q := Question{Key: "aum_discretionary_split", StructuredBypass: true}
-	a := StructuredBypassAnswer(q, advisor, nil)
+	a := StructuredBypassAnswer(q, advisor, nil, nil)
 	if a == nil {
 		t.Fatal("expected non-nil answer")
 	}

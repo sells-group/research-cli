@@ -100,6 +100,12 @@ func (e *Extractor) RunAdvisor(ctx context.Context, crd int) error {
 		zap.Int("funds", len(funds)),
 	)
 
+	// Write section index for document coverage tracking.
+	sectionEntries := buildSectionIndex(docs, brochures, crs)
+	if err := e.store.WriteSectionIndex(ctx, sectionEntries); err != nil {
+		log.Warn("failed to write section index", zap.Error(err))
+	}
+
 	// Create extraction run.
 	scope := ScopeAdvisor
 	if e.fundsOnly {
@@ -108,6 +114,13 @@ func (e *Extractor) RunAdvisor(ctx context.Context, crd int) error {
 	runID, err := e.store.CreateRun(ctx, crd, scope, "")
 	if err != nil {
 		return eris.Wrapf(err, "advextract: create run %d", crd)
+	}
+
+	// Archive existing answers before re-extraction (for audit trail).
+	if e.force {
+		if archiveErr := e.store.ArchiveExistingAnswers(ctx, crd, runID); archiveErr != nil {
+			log.Warn("failed to archive existing answers", zap.Error(archiveErr))
+		}
 	}
 
 	var allAnswers []Answer
@@ -132,6 +145,21 @@ func (e *Extractor) RunAdvisor(ctx context.Context, crd int) error {
 			log.Warn("fund extraction had errors", zap.Error(fundErr))
 		}
 		allAnswers = append(allAnswers, fundAnswers...)
+	}
+
+	// Populate normalized relationship tables from extracted answers.
+	if err := PopulateRelationships(ctx, e.store.pool, crd, allAnswers); err != nil {
+		log.Warn("failed to populate relationships", zap.Error(err))
+	}
+
+	// Compute derived metrics.
+	metrics, metricsErr := ComputeAllMetrics(ctx, e.store.pool, crd, advisor, allAnswers)
+	if metricsErr != nil {
+		log.Warn("failed to compute metrics", zap.Error(metricsErr))
+	} else if metrics != nil {
+		if writeErr := e.store.WriteComputedMetrics(ctx, metrics); writeErr != nil {
+			log.Warn("failed to write computed metrics", zap.Error(writeErr))
+		}
 	}
 
 	// Complete run.
@@ -170,7 +198,7 @@ func (e *Extractor) extractAdvisor(ctx context.Context, docs *AdvisorDocs, runID
 	// Phase 0: Structured bypass.
 	for _, q := range advisorQuestions {
 		if q.StructuredBypass {
-			a := StructuredBypassAnswer(q, docs.Advisor, nil)
+			a := StructuredBypassAnswer(q, docs.Advisor, nil, docs.Funds)
 			if a != nil {
 				a.CRDNumber = docs.CRDNumber
 				a.RunID = runID
@@ -365,6 +393,11 @@ func (e *Extractor) RunBatch(ctx context.Context, crds []int) error {
 		return eris.Wrap(err, "advextract: batch run")
 	}
 
+	// Refresh materialized view after batch.
+	if refreshErr := e.store.RefreshMaterializedView(ctx); refreshErr != nil {
+		log.Warn("failed to refresh materialized view", zap.Error(refreshErr))
+	}
+
 	elapsed := time.Since(start)
 	log.Info("batch extraction complete",
 		zap.Int64("completed", completed),
@@ -374,6 +407,49 @@ func (e *Extractor) RunBatch(ctx context.Context, crds []int) error {
 	)
 
 	return nil
+}
+
+// buildSectionIndex creates section index entries from assembled documents.
+func buildSectionIndex(docs *AdvisorDocs, brochures []BrochureRow, crs []CRSRow) []SectionIndexEntry {
+	var entries []SectionIndexEntry
+
+	// Index brochure sections.
+	if len(brochures) > 0 {
+		brochureID := brochures[0].BrochureID
+		for key, text := range docs.BrochureSections {
+			if key == SectionFull {
+				continue
+			}
+			title := ""
+			if h, ok := itemHeaders[key]; ok {
+				title = h
+			}
+			entries = append(entries, SectionIndexEntry{
+				CRDNumber:     docs.CRDNumber,
+				DocType:       "part2",
+				DocID:         brochureID,
+				SectionKey:    key,
+				SectionTitle:  title,
+				CharLength:    len(text),
+				TokenEstimate: len(text) / 4, // rough estimate
+			})
+		}
+	}
+
+	// Index CRS as single section.
+	if len(crs) > 0 && docs.CRSText != "" {
+		entries = append(entries, SectionIndexEntry{
+			CRDNumber:     docs.CRDNumber,
+			DocType:       "part3",
+			DocID:         crs[0].CRSID,
+			SectionKey:    "full",
+			SectionTitle:  "Client Relationship Summary",
+			CharLength:    len(docs.CRSText),
+			TokenEstimate: len(docs.CRSText) / 4,
+		})
+	}
+
+	return entries
 }
 
 // mergeAnswers merges new answers into existing, preferring higher-tier answers
