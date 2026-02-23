@@ -37,7 +37,8 @@ const (
 // advFilingCols defines the full set of columns for adv_filings upserts.
 // Shared by streamBaseFile to extract all available columns from any CSV format.
 var advFilingCols = []string{
-	"crd_number", "filing_date", "aum", "raum", "num_accounts", "num_employees",
+	"crd_number", "filing_date", "filing_type",
+	"aum", "raum", "num_accounts", "num_employees",
 	"legal_name", "form_of_org", "num_other_offices",
 	"total_employees", "num_adviser_reps", "client_types",
 	// 5E: Compensation (7)
@@ -300,6 +301,9 @@ func buildFilingRow(record []string, colIdx map[string]int, crd int, filingDate 
 		numEmployees = parseIntOr(trimQuotes(getColN(record, colIdx, "5a")), 0)
 	}
 
+	// Filing type detection: look for amendment indicator column.
+	filingType := detectFilingType(record, colIdx)
+
 	// DRP flags — parse individually then aggregate.
 	drpCrimFirm := anyBoolYN(record, colIdx, "11a(1)")
 	drpCrimAff := anyBoolYN(record, colIdx, "11a(2)")
@@ -321,7 +325,7 @@ func buildFilingRow(record []string, colIdx map[string]int, crd int, filingDate 
 	clientTypes := buildClientTypesJSON(record, colIdx)
 
 	return []any{
-		crd, filingDate, aumVal, aumVal, numAccounts, numEmployees,
+		crd, filingDate, filingType, aumVal, aumVal, numAccounts, numEmployees,
 		// Legal name: FOIA="Legal Name", ERA/IA="1A", historical="1C-Legal"
 		sanitizeUTF8(firstNonEmpty(record, colIdx, "legal name", "1a", "1c-legal")),
 		firstNonEmpty(record, colIdx, "form of organization", "1c-formorg"),
@@ -1031,7 +1035,10 @@ func buildBaseBMap(path string) (map[int64]map[string]string, error) {
 
 // streamBaseFile streams a base CSV, filters to latest filings, upserts adv_firms (identity) + adv_filings (full detail).
 // baseBMap is optional Item 2 data from IA_ADV_Base_B (FilingID → normalized columns), nil if not available.
-func streamBaseFile(ctx context.Context, pool db.Pool, path string, latestFiling map[string]int64, websiteMap map[int64]string, baseBMap map[int64]map[string]string, log *zap.Logger) (firmCount, filingCount int64, err error) {
+// If retainAllFilings is true, all filings are upserted (not just the latest per CRD) — used for historical AUM time series.
+// Firm identity rows (adv_firms) always use latest-filing filtering regardless.
+func streamBaseFile(ctx context.Context, pool db.Pool, path string, latestFiling map[string]int64, websiteMap map[int64]string, baseBMap map[int64]map[string]string, log *zap.Logger, retainAllFilings ...bool) (firmCount, filingCount int64, err error) {
+	retainAll := len(retainAllFilings) > 0 && retainAllFilings[0]
 	f, err := os.Open(path)
 	if err != nil {
 		return 0, 0, eris.Wrap(err, "open base file")
@@ -1074,32 +1081,37 @@ func streamBaseFile(ctx context.Context, pool db.Pool, path string, latestFiling
 			continue
 		}
 
-		// Only emit rows for the latest filing per CRD.
-		if latestFiling[crd] != filingID {
+		isLatest := latestFiling[crd] == filingID
+
+		// Firm identity always uses latest-filing filtering.
+		if isLatest {
+			website := ""
+			if w, ok := websiteMap[filingID]; ok {
+				website = w
+			}
+
+			firmName := trimQuotes(getColN(record, colIdx, "1a"))
+			secNumber := trimQuotes(getColN(record, colIdx, "1d"))
+			city := firstNonEmpty(record, colIdx, "1f1-city", "1f1_city")
+			state := firstNonEmpty(record, colIdx, "1f1-state", "1f1_state")
+			country := firstNonEmpty(record, colIdx, "1f1-country", "1f1_country")
+
+			firmRow := []any{
+				parseIntOr(crd, 0),
+				sanitizeUTF8(firmName),
+				sanitizeUTF8(secNumber),
+				sanitizeUTF8(city),
+				sanitizeUTF8(state),
+				sanitizeUTF8(country),
+				sanitizeUTF8(website),
+			}
+			firmBatch = append(firmBatch, firmRow)
+		}
+
+		// Filings: retain all when retainAll is true, otherwise only latest.
+		if !isLatest && !retainAll {
 			continue
 		}
-
-		website := ""
-		if w, ok := websiteMap[filingID]; ok {
-			website = w
-		}
-
-		firmName := trimQuotes(getColN(record, colIdx, "1a"))
-		secNumber := trimQuotes(getColN(record, colIdx, "1d"))
-		city := firstNonEmpty(record, colIdx, "1f1-city", "1f1_city")
-		state := firstNonEmpty(record, colIdx, "1f1-state", "1f1_state")
-		country := firstNonEmpty(record, colIdx, "1f1-country", "1f1_country")
-
-		firmRow := []any{
-			parseIntOr(crd, 0),
-			sanitizeUTF8(firmName),
-			sanitizeUTF8(secNumber),
-			sanitizeUTF8(city),
-			sanitizeUTF8(state),
-			sanitizeUTF8(country),
-			sanitizeUTF8(website),
-		}
-		firmBatch = append(firmBatch, firmRow)
 
 		filingDate := parseDate(trimQuotes(getColN(record, colIdx, "datesubmitted")))
 		if filingDate != nil {
@@ -1271,6 +1283,7 @@ func streamOwnerFile(ctx context.Context, pool db.Pool, path string, latestFilin
 }
 
 // streamFundFile streams a Schedule D 7B1 CSV, filters to latest filings, upserts funds.
+// Also writes to adv_fund_filings for historical fund AUM tracking.
 func streamFundFile(ctx context.Context, pool db.Pool, path string, latestFiling map[string]int64, cols, conflictKeys []string, log *zap.Logger) (int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -1295,7 +1308,10 @@ func streamFundFile(ctx context.Context, pool db.Pool, path string, latestFiling
 		filingToCRD[fid] = crd
 	}
 
-	var batch [][]any
+	fundFilingCols := []string{"crd_number", "fund_id", "filing_date", "gross_asset_value", "net_asset_value", "fund_type"}
+	fundFilingConflict := []string{"crd_number", "fund_id", "filing_date"}
+
+	var batch, fundFilingBatch [][]any
 	var total int64
 
 	for {
@@ -1343,8 +1359,10 @@ func streamFundFile(ctx context.Context, pool db.Pool, path string, latestFiling
 			grossAV = parseInt64Or(trimQuotes(getCol(record, colIdx, "gross_asset_value")), 0)
 		}
 
+		crdInt := parseIntOr(crd, 0)
+
 		row := []any{
-			parseIntOr(crd, 0),
+			crdInt,
 			fundID,
 			fundName,
 			fundType,
@@ -1352,6 +1370,23 @@ func streamFundFile(ctx context.Context, pool db.Pool, path string, latestFiling
 			nil, // net_asset_value (not in source)
 		}
 		batch = append(batch, row)
+
+		// Also write to fund filing history for AUM tracking over time.
+		filingDate := parseDate(trimQuotes(getCol(record, colIdx, "datesubmitted")))
+		if filingDate == nil {
+			// Try alternate date column names.
+			filingDate = parseDate(trimQuotes(getCol(record, colIdx, "date_submitted")))
+		}
+		if filingDate != nil && grossAV > 0 {
+			fundFilingBatch = append(fundFilingBatch, []any{
+				crdInt,
+				fundID,
+				filingDate,
+				grossAV,
+				nil, // net_asset_value
+				fundType,
+			})
+		}
 
 		if len(batch) >= advBatchSize {
 			n, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{
@@ -1362,6 +1397,15 @@ func streamFundFile(ctx context.Context, pool db.Pool, path string, latestFiling
 			}
 			total += n
 			batch = batch[:0]
+		}
+
+		if len(fundFilingBatch) >= advBatchSize {
+			if _, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{
+				Table: "fed_data.adv_fund_filings", Columns: fundFilingCols, ConflictKeys: fundFilingConflict,
+			}, fundFilingBatch); err != nil {
+				log.Warn("failed to upsert fund filings", zap.Error(err))
+			}
+			fundFilingBatch = fundFilingBatch[:0]
 		}
 	}
 
@@ -1375,8 +1419,49 @@ func streamFundFile(ctx context.Context, pool db.Pool, path string, latestFiling
 		total += n
 	}
 
+	if len(fundFilingBatch) > 0 {
+		if _, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{
+			Table: "fed_data.adv_fund_filings", Columns: fundFilingCols, ConflictKeys: fundFilingConflict,
+		}, fundFilingBatch); err != nil {
+			log.Warn("failed to upsert fund filings final", zap.Error(err))
+		}
+	}
+
 	log.Info("loaded funds from file", zap.String("file", filepath.Base(path)), zap.Int64("rows", total))
 	return total, nil
+}
+
+// detectFilingType determines the filing type from CSV columns.
+// Looks for columns like "filing_type", "amend", or derives from file context.
+func detectFilingType(record []string, colIdx map[string]int) *string {
+	// Try explicit filing type column.
+	ft := trimQuotes(getColN(record, colIdx, "filing_type"))
+	if ft == "" {
+		ft = trimQuotes(getColN(record, colIdx, "filingtype"))
+	}
+	if ft == "" {
+		ft = trimQuotes(getColN(record, colIdx, "filing type"))
+	}
+	if ft != "" {
+		ft = strings.ToLower(strings.TrimSpace(ft))
+		return &ft
+	}
+
+	// Try amendment indicator.
+	amend := trimQuotes(getColN(record, colIdx, "amend"))
+	if amend == "" {
+		amend = trimQuotes(getColN(record, colIdx, "amendment"))
+	}
+	if strings.EqualFold(amend, "Y") || strings.EqualFold(amend, "true") || strings.EqualFold(amend, "1") {
+		s := "amendment"
+		return &s
+	}
+	if strings.EqualFold(amend, "N") || strings.EqualFold(amend, "false") || strings.EqualFold(amend, "0") {
+		s := "annual"
+		return &s
+	}
+
+	return nil
 }
 
 // parseOwnershipCode converts SEC ownership code to a numeric percentage.
