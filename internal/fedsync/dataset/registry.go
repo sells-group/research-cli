@@ -38,6 +38,7 @@ func NewRegistry(cfg *config.Config) *Registry {
 	// Phase 2: Extended Intelligence
 	r.Register(&ADVPart2{cfg: cfg})
 	r.Register(&BrokerCheck{})
+	r.Register(&SECEnforcement{})
 	r.Register(&FormBD{cfg: cfg})
 	r.Register(&OSHITA{})
 	r.Register(&EPAECHO{})
