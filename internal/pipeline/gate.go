@@ -53,7 +53,7 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 			if result.Report != "" {
 				accountFields["Enrichment_Report__c"] = result.Report
 			}
-			ensureMinimumSFFields(accountFields, result.Company)
+			ensureMinimumSFFields(accountFields, result.Company, result.FieldValues)
 
 			accountID := result.Company.SalesforceID
 
@@ -96,13 +96,23 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 				}
 			}
 
-			// Create Contact if we have contact fields.
-			if len(contactFields) > 0 && accountID != "" {
-				if _, err := salesforce.CreateContact(gCtx, sfClient, accountID, contactFields); err != nil {
-					zap.L().Warn("gate: salesforce create contact failed",
-						zap.String("company", result.Company.Name),
-						zap.Error(err),
-					)
+			// Create Contacts — up to 3 from the contacts field, with fallback to owner_* fields.
+			if accountID != "" {
+				contacts := extractContactsForSF(result.FieldValues, fields)
+				if contacts == nil && len(contactFields) > 0 {
+					contacts = []map[string]any{contactFields}
+				}
+				for i, cf := range contacts {
+					if len(cf) == 0 {
+						continue
+					}
+					if _, err := salesforce.CreateContact(gCtx, sfClient, accountID, cf); err != nil {
+						zap.L().Warn("gate: salesforce create contact failed",
+							zap.String("company", result.Company.Name),
+							zap.Int("contact_index", i),
+							zap.Error(err),
+						)
+					}
 				}
 			}
 		} else if !gate.Passed {
@@ -219,10 +229,28 @@ func buildSFFieldsByObject(fieldValues map[string]model.FieldValue, registry *mo
 
 // ensureMinimumSFFields sets Name and Website from the Company if not already
 // present in the enriched fields. Required for Account creation.
-func ensureMinimumSFFields(fields map[string]any, company model.Company) {
+// Uses a fallback chain: company.Name → fieldValues[company_name/account_name] → domain heuristic.
+func ensureMinimumSFFields(fields map[string]any, company model.Company, fieldValues map[string]model.FieldValue) {
 	if fields["Name"] == nil || fields["Name"] == "" {
 		if company.Name != "" {
 			fields["Name"] = company.Name
+		}
+	}
+	// Fallback: extracted company_name from T1/T2/T3.
+	if fields["Name"] == nil || fields["Name"] == "" {
+		for _, key := range []string{"company_name", "account_name"} {
+			if fv, ok := fieldValues[key]; ok && fv.Value != nil {
+				if s := fmt.Sprintf("%v", fv.Value); s != "" {
+					fields["Name"] = s
+					break
+				}
+			}
+		}
+	}
+	// Last resort: domain heuristic.
+	if fields["Name"] == nil || fields["Name"] == "" {
+		if dn := domainToName(company.URL); dn != "" {
+			fields["Name"] = dn
 		}
 	}
 	if fields["Website"] == nil || fields["Website"] == "" {
@@ -304,4 +332,70 @@ func updateNotionStatus(ctx context.Context, client notion.Client, pageID, statu
 		return eris.Wrap(err, fmt.Sprintf("gate: update notion page %s", pageID))
 	}
 	return nil
+}
+
+// extractContactsForSF builds up to 3 SF Contact field maps from the contacts
+// FieldValue. Returns nil if no contacts field is found or it's empty.
+func extractContactsForSF(fieldValues map[string]model.FieldValue, registry *model.FieldRegistry) []map[string]any {
+	fv, ok := fieldValues["contacts"]
+	if !ok {
+		return nil
+	}
+
+	var items []map[string]string
+
+	switch v := fv.Value.(type) {
+	case []map[string]string:
+		items = v
+	case []any:
+		for _, item := range v {
+			switch m := item.(type) {
+			case map[string]string:
+				items = append(items, m)
+			case map[string]any:
+				entry := make(map[string]string)
+				for k, val := range m {
+					if s, ok := val.(string); ok {
+						entry[k] = s
+					}
+				}
+				items = append(items, entry)
+			}
+		}
+	default:
+		return nil
+	}
+
+	if len(items) == 0 {
+		return nil
+	}
+
+	var contacts []map[string]any
+	for i, c := range items {
+		if i >= 3 {
+			break
+		}
+		sf := make(map[string]any)
+		mapField := func(jsonKey, sfField string) {
+			if v, ok := c[jsonKey]; ok && v != "" {
+				sf[sfField] = v
+			}
+		}
+		mapField("first_name", "FirstName")
+		mapField("last_name", "LastName")
+		mapField("title", "Title")
+		mapField("email", "Email")
+		mapField("phone", "Phone")
+		mapField("linkedin_url", "LinkedIn_URL__c")
+
+		// LastName is required for SF Contact.
+		if sf["LastName"] != nil {
+			contacts = append(contacts, sf)
+		}
+	}
+
+	if len(contacts) == 0 {
+		return nil
+	}
+	return contacts
 }

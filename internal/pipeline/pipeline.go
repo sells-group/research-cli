@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -183,8 +184,54 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		return phaseResult
 	}
 
-	// ===== Phase 1: Data Collection (1A, 1B, 1C, 1D in parallel) =====
+	// ===== Phase 0: Derive Company Info (URL-only mode) =====
+	var probeResult *model.ProbeResult
+
+	// Detect and log input mode.
+	company.InputMode = DetectInputMode(company)
+	log.Info("pipeline: input mode", zap.String("input_mode", string(company.InputMode)))
+
+	if company.Name == "" {
+		trackPhase("0_derive", func() (*model.PhaseResult, error) {
+			lc := NewLocalCrawlerWithMatcher(p.chain.PathMatcher)
+			probe, probeErr := lc.Probe(ctx, company.URL)
+			if probeErr != nil {
+				return nil, probeErr
+			}
+			probeResult = probe
+
+			if probe.Reachable && !probe.Blocked && len(probe.Body) > 0 {
+				name, city, state := DeriveCompanyInfo(probe.Body, probe.FinalURL)
+				if name != "" {
+					company.Name = name
+				}
+				if company.City == "" {
+					company.City = city
+				}
+				if company.State == "" {
+					company.State = state
+				}
+				if company.Location == "" && city != "" && state != "" {
+					company.Location = city + ", " + state
+				}
+			}
+
+			meta := map[string]any{
+				"derived_name": company.Name,
+				"reachable":    probe.Reachable,
+			}
+			if probe.Blocked {
+				meta["blocked"] = true
+				meta["block_type"] = probe.BlockType
+			}
+			return &model.PhaseResult{Metadata: meta}, nil
+		})
+		result.Company = company
+	}
+
+	// ===== Phase 1: Data Collection (1A, 1B, 1C, 1D conditionally in parallel) =====
 	setStatus(model.RunStatusCrawling)
+	hasName := company.Name != ""
 
 	var crawlResult *model.CrawlResult
 	var externalPages []model.CrawledPage
@@ -198,10 +245,10 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	var phase1Mu sync.Mutex
 	phase1Results := make(map[string]bool) // phase name → succeeded
 
-	// Phase 1A: Crawl
+	// Phase 1A: Crawl — always runs. Pass probe to skip re-probe when available.
 	g.Go(func() error {
 		pr := trackPhase("1a_crawl", func() (*model.PhaseResult, error) {
-			cr, crawlErr := CrawlPhase(gCtx, company, p.cfg.Crawl, p.store, p.chain, p.firecrawl)
+			cr, crawlErr := CrawlPhase(gCtx, company, p.cfg.Crawl, p.store, p.chain, p.firecrawl, probeResult)
 			if crawlErr != nil {
 				return nil, crawlErr
 			}
@@ -220,70 +267,106 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		return nil
 	})
 
-	// Phase 1B: External Scrape (search-then-scrape)
-	g.Go(func() error {
-		pr := trackPhase("1b_scrape", func() (*model.PhaseResult, error) {
-			ep, addrMatches, sourceResults := ScrapePhase(gCtx, company, p.jina, p.chain, p.cfg.Scrape)
-			externalPages = ep
-			metadata := map[string]any{
-				"external_pages": len(ep),
-				"source_results": sourceResults,
-			}
-			if len(addrMatches) > 0 {
-				metadata["address_matches"] = addrMatches
-			}
+	// Phase 1B: External Scrape — needs Name.
+	if hasName {
+		g.Go(func() error {
+			pr := trackPhase("1b_scrape", func() (*model.PhaseResult, error) {
+				ep, addrMatches, sourceResults := ScrapePhase(gCtx, company, p.jina, p.chain, p.perplexity, p.cfg.Scrape)
+				externalPages = ep
+				metadata := map[string]any{
+					"external_pages": len(ep),
+					"source_results": sourceResults,
+				}
+				if len(addrMatches) > 0 {
+					metadata["address_matches"] = addrMatches
+				}
+				return &model.PhaseResult{
+					Metadata: metadata,
+				}, nil
+			})
+			phase1Mu.Lock()
+			phase1Results["1b_scrape"] = pr.Status == model.PhaseStatusComplete
+			phase1Mu.Unlock()
+			return nil
+		})
+	} else {
+		trackPhase("1b_scrape", func() (*model.PhaseResult, error) {
 			return &model.PhaseResult{
-				Metadata: metadata,
+				Status:   model.PhaseStatusSkipped,
+				Metadata: map[string]any{"reason": "no_company_name"},
 			}, nil
 		})
-		phase1Mu.Lock()
-		phase1Results["1b_scrape"] = pr.Status == model.PhaseStatusComplete
-		phase1Mu.Unlock()
-		return nil
-	})
+	}
 
-	// Phase 1C: LinkedIn
-	g.Go(func() error {
-		pr := trackPhase("1c_linkedin", func() (*model.PhaseResult, error) {
-			ld, usage, liErr := LinkedInPhase(gCtx, company, p.chain, p.perplexity, p.anthropic, p.cfg.Anthropic, p.store)
-			if liErr != nil {
-				return nil, liErr
-			}
-			linkedInData = ld
-			if usage != nil {
-				totalUsage.Add(*usage)
-			}
+	// Phase 1C: LinkedIn — needs Name.
+	if hasName {
+		g.Go(func() error {
+			pr := trackPhase("1c_linkedin", func() (*model.PhaseResult, error) {
+				ld, usage, liErr := LinkedInPhase(gCtx, company, p.chain, p.perplexity, p.anthropic, p.cfg.Anthropic, p.store)
+				if liErr != nil {
+					return nil, liErr
+				}
+				linkedInData = ld
+				if usage != nil {
+					totalUsage.Add(*usage)
+				}
+				return &model.PhaseResult{
+					TokenUsage: *usage,
+				}, nil
+			})
+			phase1Mu.Lock()
+			phase1Results["1c_linkedin"] = pr.Status == model.PhaseStatusComplete
+			phase1Mu.Unlock()
+			return nil
+		})
+	} else {
+		trackPhase("1c_linkedin", func() (*model.PhaseResult, error) {
 			return &model.PhaseResult{
-				TokenUsage: *usage,
+				Status:   model.PhaseStatusSkipped,
+				Metadata: map[string]any{"reason": "no_company_name"},
 			}, nil
 		})
-		phase1Mu.Lock()
-		phase1Results["1c_linkedin"] = pr.Status == model.PhaseStatusComplete
-		phase1Mu.Unlock()
-		return nil
-	})
+	}
 
-	// Phase 1D: PPP Loan Lookup
-	g.Go(func() error {
-		pr := trackPhase("1d_ppp", func() (*model.PhaseResult, error) {
-			matches, pppErr := PPPPhase(gCtx, company, p.ppp)
-			if pppErr != nil {
-				return nil, pppErr
-			}
-			pppMatches = matches
+	// Phase 1D: PPP Loan Lookup — needs Name + Location.
+	if hasName && company.Location != "" {
+		g.Go(func() error {
+			pr := trackPhase("1d_ppp", func() (*model.PhaseResult, error) {
+				matches, pppErr := PPPPhase(gCtx, company, p.ppp)
+				if pppErr != nil {
+					return nil, pppErr
+				}
+				pppMatches = matches
+				return &model.PhaseResult{
+					Metadata: map[string]any{
+						"matches": len(matches),
+					},
+				}, nil
+			})
+			phase1Mu.Lock()
+			phase1Results["1d_ppp"] = pr.Status == model.PhaseStatusComplete
+			phase1Mu.Unlock()
+			return nil
+		})
+	} else {
+		trackPhase("1d_ppp", func() (*model.PhaseResult, error) {
 			return &model.PhaseResult{
-				Metadata: map[string]any{
-					"matches": len(matches),
-				},
+				Status:   model.PhaseStatusSkipped,
+				Metadata: map[string]any{"reason": "no_name_or_location"},
 			}, nil
 		})
-		phase1Mu.Lock()
-		phase1Results["1d_ppp"] = pr.Status == model.PhaseStatusComplete
-		phase1Mu.Unlock()
-		return nil
-	})
+	}
 
 	_ = g.Wait()
+
+	// Post-Phase-1 name recovery: if Phase 0 failed (or was skipped) but crawl succeeded.
+	if company.Name == "" && crawlResult != nil {
+		company.Name = deriveNameFromPages(crawlResult.Pages, company.URL)
+		result.Company = company
+		if company.Name != "" {
+			log.Info("pipeline: derived name from crawl pages", zap.String("derived_name", company.Name))
+		}
+	}
 
 	// Categorize Phase 1 errors: count data-producing phases that succeeded.
 	dataPhases := []string{"1a_crawl", "1b_scrape", "1c_linkedin"}
@@ -455,7 +538,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		}
 
 		trackPhase("4_extract_t1", func() (*model.PhaseResult, error) {
-			t1Result, t1Err := ExtractTier1(g2Ctx, batches.Tier1, pppMatches, p.anthropic, p.cfg.Anthropic)
+			t1Result, t1Err := ExtractTier1(g2Ctx, batches.Tier1, company, pppMatches, p.anthropic, p.cfg.Anthropic)
 			if t1Err != nil {
 				return nil, t1Err
 			}
@@ -491,7 +574,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 				return nil
 			}
 
-			t2Result, t2Err := ExtractTier2(g2Ctx, batches.Tier2, t1Answers, pppMatches, p.anthropic, p.cfg.Anthropic)
+			t2Result, t2Err := ExtractTier2(g2Ctx, batches.Tier2, t1Answers, company, pppMatches, p.anthropic, p.cfg.Anthropic)
 			if t2Err != nil {
 				zap.L().Warn("pipeline: t2-native extraction failed", zap.Error(t2Err))
 				return nil
@@ -515,7 +598,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			return nil
 		}
 
-		t2Result, t2Err := ExtractTier2(g2Ctx, esc, t1Answers, pppMatches, p.anthropic, p.cfg.Anthropic)
+		t2Result, t2Err := ExtractTier2(g2Ctx, esc, t1Answers, company, pppMatches, p.anthropic, p.cfg.Anthropic)
 		if t2Err != nil {
 			zap.L().Warn("pipeline: t2-escalated extraction failed", zap.Error(t2Err))
 			return nil
@@ -593,7 +676,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 
 	if shouldRunT3 {
 		trackPhase("6_extract_t3", func() (*model.PhaseResult, error) {
-			t3Result, t3Err := ExtractTier3(ctx, batches.Tier3, MergeAnswers(t1Answers, t2Answers, nil), allPages, pppMatches, p.anthropic, p.cfg.Anthropic)
+			t3Result, t3Err := ExtractTier3(ctx, batches.Tier3, MergeAnswers(t1Answers, t2Answers, nil), allPages, company, pppMatches, p.anthropic, p.cfg.Anthropic)
 			if t3Err != nil {
 				return nil, t3Err
 			}
@@ -635,11 +718,36 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		if len(existingAnswers) > 0 {
 			allAnswers = MergeAnswers(existingAnswers, allAnswers, nil)
 		}
+		// Inject LinkedIn executive contacts as a "contacts" answer.
+		if linkedInData != nil && len(linkedInData.ExecContacts) > 0 {
+			contacts := make([]map[string]string, 0, len(linkedInData.ExecContacts))
+			for _, c := range linkedInData.ExecContacts {
+				contacts = append(contacts, map[string]string{
+					"first_name":   c.FirstName,
+					"last_name":    c.LastName,
+					"title":        c.Title,
+					"email":        c.Email,
+					"phone":        c.Phone,
+					"linkedin_url": c.LinkedInURL,
+				})
+			}
+			allAnswers = appendOrUpgrade(allAnswers, "contacts",
+				contacts, 0.75, "linkedin")
+		}
+		// Merge contacts from multiple sources (LinkedIn + web extraction).
+		allAnswers = MergeContacts(allAnswers)
+		// Parse phone numbers from homepage/contact pages (deterministic).
+		parsePhoneFromPages(allPages, pageIndex)
+		// Inject review metadata directly from scraped pages (bypasses LLM).
+		allAnswers = InjectPageMetadata(allAnswers, allPages, company.PreSeeded)
+		// Cross-validate employee count against LinkedIn range.
+		allAnswers = CrossValidateEmployeeCount(allAnswers, linkedInData)
 		// Enrich with CBP-based revenue estimate if available.
 		allAnswers = EnrichWithRevenueEstimate(ctx, allAnswers, company, p.estimator)
 		// Enrich with PPP loan data (revenue + employees from database).
 		allAnswers = EnrichFromPPP(allAnswers, pppMatches)
 		fieldValues = BuildFieldValues(allAnswers, p.fields, company)
+		populateOwnerFromContacts(fieldValues, p.fields)
 		return &model.PhaseResult{
 			Metadata: map[string]any{
 				"total_answers":         len(allAnswers),
@@ -793,6 +901,39 @@ func filterRoutedQuestions(routed []model.RoutedQuestion, existingKeys map[strin
 	return filtered
 }
 
+// parsePhoneFromPages extracts phone numbers from homepage/contact pages
+// and attaches them as metadata for deterministic injection.
+func parsePhoneFromPages(pages []model.CrawledPage, pageIndex model.PageIndex) {
+	// Build a set of URLs classified as homepage, contact, about, or services.
+	// Phone numbers commonly appear on all of these page types.
+	targetURLs := make(map[string]bool)
+	for _, pt := range []model.PageType{
+		model.PageTypeHomepage,
+		model.PageTypeContact,
+		model.PageTypeAbout,
+		model.PageTypeServices,
+	} {
+		for _, cp := range pageIndex[pt] {
+			targetURLs[cp.URL] = true
+		}
+	}
+
+	for i := range pages {
+		if !targetURLs[pages[i].URL] {
+			continue
+		}
+		phone := ParsePhoneFromMarkdown(pages[i].Markdown)
+		if phone == "" {
+			continue
+		}
+		if pages[i].Metadata == nil {
+			pages[i].Metadata = &model.PageMetadata{}
+		}
+		pages[i].Metadata.Phone = phone
+		return // Use first phone found
+	}
+}
+
 // linkedInToPage converts LinkedIn data into a synthetic CrawledPage.
 func linkedInToPage(data *LinkedInData, company model.Company) model.CrawledPage {
 	var content strings.Builder
@@ -823,6 +964,29 @@ func linkedInToPage(data *LinkedInData, company model.Company) model.CrawledPage
 	}
 	if data.CompanyType != "" {
 		content.WriteString("**Company Type:** " + data.CompanyType + "\n")
+	}
+	// Render executive contacts.
+	if len(data.ExecContacts) > 0 {
+		for i, c := range data.ExecContacts {
+			content.WriteString(fmt.Sprintf("**Executive %d:** %s %s, %s\n", i+1, c.FirstName, c.LastName, c.Title))
+			if c.Email != "" {
+				content.WriteString("  Email: " + c.Email + "\n")
+			}
+			if c.LinkedInURL != "" {
+				content.WriteString("  LinkedIn: " + c.LinkedInURL + "\n")
+			}
+		}
+	} else {
+		// Fallback to flat exec fields for backward compat.
+		if data.ExecFirstName != "" {
+			content.WriteString("**CEO/Owner First Name:** " + data.ExecFirstName + "\n")
+		}
+		if data.ExecLastName != "" {
+			content.WriteString("**CEO/Owner Last Name:** " + data.ExecLastName + "\n")
+		}
+		if data.ExecTitle != "" {
+			content.WriteString("**CEO/Owner Title:** " + data.ExecTitle + "\n")
+		}
 	}
 
 	return model.CrawledPage{

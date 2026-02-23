@@ -20,6 +20,16 @@ const (
 	RunStatusFailed       RunStatus = "failed"
 )
 
+// InputMode describes what data was available at pipeline start.
+type InputMode string
+
+const (
+	InputModeURLOnly  InputMode = "url_only"   // Only URL
+	InputModeMinimal  InputMode = "minimal"    // URL + Name
+	InputModeStandard InputMode = "standard"   // URL + Name + Location
+	InputModePreSeeded InputMode = "pre_seeded" // URL + Name + Location + PreSeeded
+)
+
 // Company represents a company to be enriched.
 type Company struct {
 	URL          string         `json:"url"`
@@ -31,7 +41,8 @@ type Company struct {
 	State        string         `json:"state,omitempty"`
 	ZipCode      string         `json:"zip_code,omitempty"`
 	Street       string         `json:"street,omitempty"`
-	PreSeeded    map[string]any `json:"pre_seeded,omitempty"` // CSV-sourced field values for gap-filling
+	PreSeeded    map[string]any `json:"pre_seeded,omitempty"`  // CSV-sourced field values for gap-filling
+	InputMode    InputMode      `json:"input_mode,omitempty"`  // Observability: what data was available at start
 }
 
 // Run represents a single enrichment run for a company.

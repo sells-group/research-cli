@@ -308,3 +308,74 @@ func TestParseReviewMetadata_UnknownSource(t *testing.T) {
 	meta := ParseReviewMetadata("sos", "BBB Rating: A+\n4.8 stars (127 reviews)")
 	assert.Nil(t, meta)
 }
+
+func TestParseReviewMetadata_GoogleMaps_TagsRegexSource(t *testing.T) {
+	meta := ParseReviewMetadata("google_maps", "4.8 stars (127 reviews)")
+	assert.NotNil(t, meta)
+	assert.Equal(t, "regex", meta.Source)
+}
+
+func TestParsePhoneFromMarkdown(t *testing.T) {
+	tests := []struct {
+		name string
+		md   string
+		want string
+	}{
+		{
+			"tel link",
+			`Contact us: [Call Us](tel:5617936029)`,
+			"5617936029",
+		},
+		{
+			"tel link with country code",
+			`[Call](tel:+1-561-793-6029)`,
+			"15617936029",
+		},
+		{
+			"parenthesized phone",
+			`Phone: (561) 793-6029`,
+			"5617936029",
+		},
+		{
+			"dashed phone",
+			`Call us at 561-793-6029 today!`,
+			"5617936029",
+		},
+		{
+			"dotted phone",
+			`561.793.6029`,
+			"5617936029",
+		},
+		{
+			"phone with +1 prefix",
+			`+1 (561) 793-6029`,
+			"15617936029",
+		},
+		{
+			"no phone",
+			`Acme Corp, 123 Main Street, Springfield, IL 62701`,
+			"",
+		},
+		{
+			"too many matches skipped (directory page)",
+			"Call 111-222-3333\nCall 222-333-4444\nCall 333-444-5555\nCall 444-555-6666\nCall 555-666-7777\nCall 666-777-8888",
+			"",
+		},
+		{
+			"tel link preferred over inline",
+			"Phone: 999-888-7777\n[Call](tel:5617936029)",
+			"5617936029",
+		},
+		{
+			"short number ignored",
+			`Fax: 555-1234`,
+			"",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParsePhoneFromMarkdown(tc.md)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

@@ -112,6 +112,33 @@ Provide a thorough, well-reasoned answer. Return valid JSON matching the schema 
 // richSystemText is the system prompt for multi-field (rich) extractions.
 const richSystemText = "You are a research analyst extracting structured data from web pages. Return valid JSON matching the requested schema. Use null for fields not found."
 
+// FormatPageMetadata formats structured metadata from external pages
+// (Google Maps reviews, BBB rating) into a context block for injection
+// into extraction prompts. Returns "" if no metadata found.
+func FormatPageMetadata(pages []model.ClassifiedPage) string {
+	var b strings.Builder
+	for _, p := range pages {
+		if p.Metadata == nil {
+			continue
+		}
+		meta := p.Metadata
+		if meta.ReviewCount > 0 || meta.Rating > 0 || meta.BBBRating != "" {
+			b.WriteString("--- Structured Metadata: " + p.Title + " ---\n")
+			if meta.Rating > 0 {
+				b.WriteString(fmt.Sprintf("Google Rating: %.1f stars\n", meta.Rating))
+			}
+			if meta.ReviewCount > 0 {
+				b.WriteString(fmt.Sprintf("Google Review Count: %d\n", meta.ReviewCount))
+			}
+			if meta.BBBRating != "" {
+				b.WriteString("BBB Rating: " + meta.BBBRating + "\n")
+			}
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
 // FormatPPPContext formats the best PPP loan match into a concise context block
 // for injection into extraction prompts. Returns "" if matches is empty.
 func FormatPPPContext(matches []ppp.LoanMatch) string {
@@ -149,8 +176,48 @@ func FormatPPPContext(matches []ppp.LoanMatch) string {
 	return b.String()
 }
 
+// FormatPreSeededContext formats pre-seeded CSV data (Grata employee count,
+// NAICS, description, etc.) into a context block for injection into extraction
+// prompts. The LLM can verify/correct these against website evidence.
+// Returns "" if no pre-seeded data is available.
+func FormatPreSeededContext(preSeeded map[string]any) string {
+	if len(preSeeded) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("--- Industry Data (verify against website) ---\n")
+	if v, ok := preSeeded["employees"]; ok {
+		b.WriteString(fmt.Sprintf("Employee Count (industry estimate): %v — use this as baseline unless website explicitly states a different current headcount\n", v))
+	}
+	if v, ok := preSeeded["naics_code"]; ok {
+		b.WriteString(fmt.Sprintf("NAICS Code: %v\n", v))
+	}
+	if v, ok := preSeeded["description"]; ok {
+		b.WriteString(fmt.Sprintf("Business Description: %v\n", v))
+	}
+	if v, ok := preSeeded["revenue_range"]; ok {
+		b.WriteString(fmt.Sprintf("Revenue Estimate: %v\n", v))
+	}
+	if v, ok := preSeeded["year_established"]; ok {
+		b.WriteString(fmt.Sprintf("Year Founded: %v — use this unless website explicitly states a different founding year\n", v))
+	}
+	if v, ok := preSeeded["email"]; ok {
+		b.WriteString(fmt.Sprintf("Contact Email: %v\n", v))
+	}
+	if v, ok := preSeeded["exec_first_name"]; ok {
+		b.WriteString(fmt.Sprintf("Executive First Name: %v\n", v))
+	}
+	if v, ok := preSeeded["exec_last_name"]; ok {
+		b.WriteString(fmt.Sprintf("Executive Last Name: %v\n", v))
+	}
+	if v, ok := preSeeded["exec_title"]; ok {
+		b.WriteString(fmt.Sprintf("Executive Title: %v\n", v))
+	}
+	return b.String()
+}
+
 // ExtractTier1 runs Tier 1 extraction: single-page fact extraction using Haiku.
-func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, pppMatches []ppp.LoanMatch, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
+func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, company model.Company, pppMatches []ppp.LoanMatch, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
 	start := time.Now()
 	result := &model.TierResult{Tier: 1}
 
@@ -195,6 +262,16 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, pppMatches
 		// Append PPP loan context if available.
 		if pppCtx := FormatPPPContext(pppMatches); pppCtx != "" {
 			content += "\n\n" + pppCtx
+		}
+
+		// Append structured metadata from external pages (reviews, BBB rating).
+		if metaCtx := FormatPageMetadata(rq.Pages); metaCtx != "" {
+			content += "\n\n" + metaCtx
+		}
+
+		// Append pre-seeded CSV data (employee count, NAICS, etc.) as context.
+		if preCtx := FormatPreSeededContext(company.PreSeeded); preCtx != "" {
+			content += "\n\n" + preCtx
 		}
 
 		// Choose prompt template and system blocks based on whether the
@@ -273,7 +350,7 @@ func ExtractTier1(ctx context.Context, routed []model.RoutedQuestion, pppMatches
 
 // ExtractTier2 runs Tier 2 extraction: multi-page synthesis using Sonnet.
 // Includes T1 answers as context (only low-confidence ones to reduce prompt size).
-func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers []model.ExtractionAnswer, pppMatches []ppp.LoanMatch, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
+func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers []model.ExtractionAnswer, company model.Company, pppMatches []ppp.LoanMatch, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
 	start := time.Now()
 	result := &model.TierResult{Tier: 2}
 
@@ -310,6 +387,16 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 		// Append PPP loan context if available.
 		if pppCtx := FormatPPPContext(pppMatches); pppCtx != "" {
 			pagesContext += "\n\n" + pppCtx
+		}
+
+		// Append structured metadata from external pages (reviews, BBB rating).
+		if metaCtx := FormatPageMetadata(rq.Pages); metaCtx != "" {
+			pagesContext += "\n\n" + metaCtx
+		}
+
+		// Append pre-seeded CSV data (employee count, NAICS, etc.) as context.
+		if preCtx := FormatPreSeededContext(company.PreSeeded); preCtx != "" {
+			pagesContext += "\n\n" + preCtx
 		}
 
 		var prompt string
@@ -385,7 +472,7 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 
 // ExtractTier3 runs Tier 3 extraction: expert analysis using Opus with
 // prepared context (Haiku summarization).
-func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers []model.ExtractionAnswer, pages []model.CrawledPage, pppMatches []ppp.LoanMatch, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
+func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers []model.ExtractionAnswer, pages []model.CrawledPage, company model.Company, pppMatches []ppp.LoanMatch, aiClient anthropic.Client, aiCfg config.AnthropicConfig) (*model.TierResult, error) {
 	start := time.Now()
 	result := &model.TierResult{Tier: 3}
 
@@ -402,6 +489,20 @@ func ExtractTier3(ctx context.Context, routed []model.RoutedQuestion, allAnswers
 	// Inject PPP context into the summary.
 	if pppCtx := FormatPPPContext(pppMatches); pppCtx != "" {
 		summaryCtx += "\n\n" + pppCtx
+	}
+
+	// Inject page metadata into the summary context.
+	var allClassified []model.ClassifiedPage
+	for _, p := range pages {
+		allClassified = append(allClassified, model.ClassifiedPage{CrawledPage: p})
+	}
+	if metaCtx := FormatPageMetadata(allClassified); metaCtx != "" {
+		summaryCtx += "\n\n" + metaCtx
+	}
+
+	// Inject pre-seeded CSV data into T3 context.
+	if preCtx := FormatPreSeededContext(company.PreSeeded); preCtx != "" {
+		summaryCtx += "\n\n" + preCtx
 	}
 
 	var totalUsage model.TokenUsage

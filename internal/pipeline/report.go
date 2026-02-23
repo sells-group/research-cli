@@ -12,7 +12,11 @@ import (
 func FormatReport(company model.Company, answers []model.ExtractionAnswer, fieldValues map[string]model.FieldValue, phases []model.PhaseResult, totalUsage model.TokenUsage) string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("# Enrichment Report: %s\n", company.Name))
+	name := company.Name
+	if name == "" {
+		name = company.URL
+	}
+	b.WriteString(fmt.Sprintf("# Enrichment Report: %s\n", name))
 	b.WriteString(fmt.Sprintf("URL: %s\n", company.URL))
 	b.WriteString(fmt.Sprintf("Salesforce ID: %s\n\n", company.SalesforceID))
 

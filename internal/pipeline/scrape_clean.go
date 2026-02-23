@@ -148,7 +148,7 @@ func cleanGoogleMapsMarkdown(md string) string {
 // Review/rating regex patterns.
 var (
 	// Google Maps: "4.8 stars (127 reviews)", "4.5 stars · 89 reviews", "3.0 star (1 review)"
-	googleMapsReviewRe = regexp.MustCompile(`(\d+\.?\d*)\s+stars?\s*[\(·]\s*(\d[\d,]*)\s+reviews?\)?`)
+	googleMapsReviewRe = regexp.MustCompile(`(\d+\.?\d*)\s+stars?\s*(?:[\(·]\s*)?(\d[\d,]*)\s+reviews?\)?`)
 
 	// BBB rating: "BBB Rating: A+", "BBB Rating A-", "BBB Rating: F"
 	bbbRatingRe = regexp.MustCompile(`BBB\s+Rating:?\s+([A-F][+-]?)`)
@@ -184,6 +184,7 @@ func parseGoogleMapsMetadata(md string) *model.PageMetadata {
 	return &model.PageMetadata{
 		Rating:      rating,
 		ReviewCount: count,
+		Source:      "regex",
 	}
 }
 
@@ -221,4 +222,41 @@ func stripSection(md, sectionTitle string) string {
 	}
 
 	return md[:start] + md[idx+len(sectionTitle)+end:]
+}
+
+// Phone regex: matches tel: links and US phone patterns in markdown.
+var (
+	telLinkRe = regexp.MustCompile(`\[.*?\]\(tel:(\+?[\d-]+)\)`)
+	phoneRe   = regexp.MustCompile(`(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}`)
+)
+
+// ParsePhoneFromMarkdown extracts the first US phone number from page markdown.
+// Prefers tel: link hrefs (most reliable) over inline text patterns.
+func ParsePhoneFromMarkdown(md string) string {
+	// Priority 1: tel: links
+	if m := telLinkRe.FindStringSubmatch(md); m != nil {
+		digits := normalizePhoneDigits(m[1])
+		if len(digits) >= 10 {
+			return digits
+		}
+	}
+	// Priority 2: inline phone patterns (skip if too many matches — likely a directory)
+	matches := phoneRe.FindAllString(md, 10)
+	if len(matches) >= 1 && len(matches) <= 5 {
+		digits := normalizePhoneDigits(matches[0])
+		if len(digits) >= 10 {
+			return digits
+		}
+	}
+	return ""
+}
+
+func normalizePhoneDigits(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

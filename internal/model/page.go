@@ -83,6 +83,8 @@ type PageMetadata struct {
 	ReviewCount int     `json:"review_count,omitempty"`
 	Rating      float64 `json:"rating,omitempty"`
 	BBBRating   string  `json:"bbb_rating,omitempty"`
+	Source      string  `json:"source,omitempty"` // "regex" or "perplexity"
+	Phone       string  `json:"phone,omitempty"`
 }
 
 // CrawledPage represents a page fetched during crawling.
@@ -136,4 +138,5 @@ type ProbeResult struct {
 	Blocked    bool   `json:"blocked"`
 	BlockType  string `json:"block_type,omitempty"`
 	FinalURL   string `json:"final_url"`
+	Body       []byte `json:"-"` // Raw HTML body from probe, not serialized
 }

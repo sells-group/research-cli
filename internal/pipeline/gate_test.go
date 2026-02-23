@@ -271,7 +271,7 @@ func TestEnsureMinimumSFFields(t *testing.T) {
 	t.Run("fills missing Name and Website", func(t *testing.T) {
 		fields := map[string]any{"Industry": "Tech"}
 		company := model.Company{Name: "Acme", URL: "https://acme.com"}
-		ensureMinimumSFFields(fields, company)
+		ensureMinimumSFFields(fields, company, nil)
 		assert.Equal(t, "Acme", fields["Name"])
 		assert.Equal(t, "https://acme.com", fields["Website"])
 	})
@@ -279,18 +279,37 @@ func TestEnsureMinimumSFFields(t *testing.T) {
 	t.Run("does not overwrite existing values", func(t *testing.T) {
 		fields := map[string]any{"Name": "Custom Name", "Website": "https://custom.com"}
 		company := model.Company{Name: "Acme", URL: "https://acme.com"}
-		ensureMinimumSFFields(fields, company)
+		ensureMinimumSFFields(fields, company, nil)
 		assert.Equal(t, "Custom Name", fields["Name"])
 		assert.Equal(t, "https://custom.com", fields["Website"])
 	})
 
 	t.Run("empty company leaves fields unchanged", func(t *testing.T) {
 		fields := map[string]any{"Industry": "Tech"}
-		ensureMinimumSFFields(fields, model.Company{})
+		ensureMinimumSFFields(fields, model.Company{}, nil)
 		_, hasName := fields["Name"]
 		_, hasWebsite := fields["Website"]
 		assert.False(t, hasName)
 		assert.False(t, hasWebsite)
+	})
+
+	t.Run("falls back to fieldValues company_name when Name empty", func(t *testing.T) {
+		fields := map[string]any{"Industry": "Tech"}
+		company := model.Company{URL: "https://acme.com"} // No Name.
+		fieldValues := map[string]model.FieldValue{
+			"company_name": {FieldKey: "company_name", Value: "Extracted Acme Corp"},
+		}
+		ensureMinimumSFFields(fields, company, fieldValues)
+		assert.Equal(t, "Extracted Acme Corp", fields["Name"])
+		assert.Equal(t, "https://acme.com", fields["Website"])
+	})
+
+	t.Run("falls back to domain heuristic when all else empty", func(t *testing.T) {
+		fields := map[string]any{"Industry": "Tech"}
+		company := model.Company{URL: "https://acme-construction.com"} // No Name.
+		ensureMinimumSFFields(fields, company, nil)
+		assert.Equal(t, "Acme Construction", fields["Name"])
+		assert.Equal(t, "https://acme-construction.com", fields["Website"])
 	})
 }
 
@@ -422,6 +441,146 @@ func TestQualityGate_CreateAccount_MinimumFieldsOnly(t *testing.T) {
 	assert.Equal(t, "Minimum Co", capturedFields["Name"])
 	assert.Equal(t, "https://minimum.com", capturedFields["Website"])
 	sfClient.AssertExpectations(t)
+}
+
+func TestQualityGate_MultipleContacts(t *testing.T) {
+	ctx := context.Background()
+
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", SFObject: "Account"},
+		{Key: "contacts", DataType: "json"},
+	})
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{
+			Name:         "Multi Contact Co",
+			SalesforceID: "001MULTI",
+			NotionPageID: "page-multi",
+		},
+		FieldValues: map[string]model.FieldValue{
+			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Tech", Confidence: 0.9},
+			"contacts": {FieldKey: "contacts", Value: []map[string]string{
+				{"first_name": "Jane", "last_name": "Doe", "title": "CEO", "email": "jane@acme.com"},
+				{"first_name": "John", "last_name": "Smith", "title": "VP Ops"},
+				{"first_name": "Bob", "last_name": "Jones", "title": "Director"},
+			}, Confidence: 0.8},
+		},
+	}
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	// Account update.
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001MULTI", mock.AnythingOfType("map[string]interface {}")).
+		Return(nil)
+	// 3 Contact creations.
+	sfClient.On("InsertOne", mock.Anything, "Contact", mock.AnythingOfType("map[string]interface {}")).
+		Return("003NEW", nil).Times(3)
+
+	notionClient := notionmocks.NewMockClient(t)
+	notionClient.On("UpdatePage", mock.Anything, "page-multi", mock.Anything).
+		Return(nil, nil)
+
+	cfg := &config.Config{
+		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.0}, // Low threshold so it passes.
+	}
+
+	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
+
+	assert.NoError(t, err)
+	assert.True(t, gate.Passed)
+	assert.True(t, gate.SFUpdated)
+	sfClient.AssertExpectations(t)
+}
+
+func TestExtractContactsForSF_FromContacts(t *testing.T) {
+	registry := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "contacts", DataType: "json"},
+	})
+
+	fieldValues := map[string]model.FieldValue{
+		"contacts": {FieldKey: "contacts", Value: []map[string]string{
+			{"first_name": "Jane", "last_name": "Doe", "title": "CEO", "email": "jane@acme.com", "linkedin_url": "https://linkedin.com/in/janedoe"},
+			{"first_name": "John", "last_name": "Smith", "title": "VP"},
+		}},
+	}
+
+	contacts := extractContactsForSF(fieldValues, registry)
+
+	assert.Len(t, contacts, 2)
+	assert.Equal(t, "Doe", contacts[0]["LastName"])
+	assert.Equal(t, "Jane", contacts[0]["FirstName"])
+	assert.Equal(t, "CEO", contacts[0]["Title"])
+	assert.Equal(t, "jane@acme.com", contacts[0]["Email"])
+	assert.Equal(t, "https://linkedin.com/in/janedoe", contacts[0]["LinkedIn_URL__c"])
+	assert.Equal(t, "Smith", contacts[1]["LastName"])
+}
+
+func TestExtractContactsForSF_Fallback(t *testing.T) {
+	registry := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "contacts", DataType: "json"},
+	})
+
+	// No contacts field → returns nil.
+	fieldValues := map[string]model.FieldValue{
+		"industry": {FieldKey: "industry", SFField: "Industry", Value: "Tech"},
+	}
+
+	contacts := extractContactsForSF(fieldValues, registry)
+	assert.Nil(t, contacts)
+}
+
+func TestExtractContactsForSF_RequiresLastName(t *testing.T) {
+	registry := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "contacts", DataType: "json"},
+	})
+
+	fieldValues := map[string]model.FieldValue{
+		"contacts": {FieldKey: "contacts", Value: []map[string]string{
+			{"first_name": "Jane", "last_name": "", "title": "CEO"},        // No last name — skipped.
+			{"first_name": "John", "last_name": "Smith", "title": "VP"},    // Valid.
+		}},
+	}
+
+	contacts := extractContactsForSF(fieldValues, registry)
+
+	assert.Len(t, contacts, 1)
+	assert.Equal(t, "Smith", contacts[0]["LastName"])
+}
+
+func TestExtractContactsForSF_CapsAt3(t *testing.T) {
+	registry := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "contacts", DataType: "json"},
+	})
+
+	fieldValues := map[string]model.FieldValue{
+		"contacts": {FieldKey: "contacts", Value: []map[string]string{
+			{"first_name": "A", "last_name": "One", "title": "CEO"},
+			{"first_name": "B", "last_name": "Two", "title": "VP"},
+			{"first_name": "C", "last_name": "Three", "title": "Dir"},
+			{"first_name": "D", "last_name": "Four", "title": "CTO"},
+		}},
+	}
+
+	contacts := extractContactsForSF(fieldValues, registry)
+
+	assert.Len(t, contacts, 3)
+}
+
+func TestExtractContactsForSF_HandlesAnyType(t *testing.T) {
+	registry := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "contacts", DataType: "json"},
+	})
+
+	// Simulates JSON-unmarshaled data.
+	fieldValues := map[string]model.FieldValue{
+		"contacts": {FieldKey: "contacts", Value: []any{
+			map[string]any{"first_name": "Jane", "last_name": "Doe", "title": "CEO"},
+		}},
+	}
+
+	contacts := extractContactsForSF(fieldValues, registry)
+
+	assert.Len(t, contacts, 1)
+	assert.Equal(t, "Doe", contacts[0]["LastName"])
 }
 
 func TestWriteNotionSalesforceID(t *testing.T) {

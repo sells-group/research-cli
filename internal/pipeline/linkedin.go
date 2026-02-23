@@ -19,24 +19,40 @@ import (
 	"github.com/sells-group/research-cli/pkg/perplexity"
 )
 
+// LinkedInContact holds structured contact information for a key executive.
+type LinkedInContact struct {
+	FirstName   string `json:"first_name"`
+	LastName    string `json:"last_name"`
+	Title       string `json:"title"`
+	Email       string `json:"email,omitempty"`
+	Phone       string `json:"phone,omitempty"`
+	LinkedInURL string `json:"linkedin_url,omitempty"`
+}
+
 // LinkedInData holds structured LinkedIn profile information.
 type LinkedInData struct {
-	CompanyName   string `json:"company_name"`
-	Description   string `json:"description"`
-	Industry      string `json:"industry"`
-	EmployeeCount string `json:"employee_count"`
-	Headquarters  string `json:"headquarters"`
-	Founded       string `json:"founded"`
-	Specialties   string `json:"specialties"`
-	Website       string `json:"website"`
-	LinkedInURL   string `json:"linkedin_url"`
-	CompanyType   string `json:"company_type"`
+	CompanyName   string            `json:"company_name"`
+	Description   string            `json:"description"`
+	Industry      string            `json:"industry"`
+	EmployeeCount string            `json:"employee_count"`
+	Headquarters  string            `json:"headquarters"`
+	Founded       string            `json:"founded"`
+	Specialties   string            `json:"specialties"`
+	Website       string            `json:"website"`
+	LinkedInURL   string            `json:"linkedin_url"`
+	CompanyType   string            `json:"company_type"`
+	ExecFirstName string            `json:"exec_first_name"`
+	ExecLastName  string            `json:"exec_last_name"`
+	ExecTitle     string            `json:"exec_title"`
+	ExecContacts  []LinkedInContact `json:"exec_contacts,omitempty"`
 }
 
 const perplexityPrompt = `Find the LinkedIn company profile for "%s" (%s).
 Return all available company information including: company name, description, industry,
 employee count, headquarters location, founded year, specialties, website, LinkedIn URL,
-and company type. Return the raw information as text.`
+company type, and the names and titles of up to 3 key executives (CEO, president, owner,
+VP, partner, founder, etc.) with first name, last name, and title for each.
+Return the raw information as text.`
 
 const haikuLinkedInPrompt = `Extract structured company information from the following LinkedIn research data.
 Return a valid JSON object with these fields:
@@ -50,8 +66,12 @@ Return a valid JSON object with these fields:
 - website: string
 - linkedin_url: string
 - company_type: string (e.g. "Privately Held", "Public Company")
+- exec_first_name: string (first name of primary CEO/owner/president)
+- exec_last_name: string (last name of primary CEO/owner/president)
+- exec_title: string (title of primary CEO/owner/president, e.g. "President", "CEO & Founder")
+- exec_contacts: array of up to 3 objects, each with: first_name, last_name, title, linkedin_url (if found). Include CEO/owner/president as the first entry, then other key executives (VP, partner, director, etc.)
 
-If a field cannot be determined, use an empty string.
+If a field cannot be determined, use an empty string. If no executives are found, use an empty array for exec_contacts.
 
 Research data:
 %s`
@@ -71,6 +91,10 @@ func extractDomain(companyURL string) string {
 // LinkedInPhase implements Phase 1C: chain-first LinkedIn lookup with Perplexity fallback.
 // Results are cached by domain with a 7-day TTL to avoid redundant API calls on re-runs.
 func LinkedInPhase(ctx context.Context, company model.Company, chain *scrape.Chain, pplxClient perplexity.Client, aiClient anthropic.Client, aiCfg config.AnthropicConfig, st store.Store) (*LinkedInData, *model.TokenUsage, error) {
+	if company.Name == "" {
+		return nil, &model.TokenUsage{}, nil
+	}
+
 	log := zap.L().With(zap.String("company", company.Name), zap.String("phase", "1c_linkedin"))
 	usage := &model.TokenUsage{}
 
@@ -158,6 +182,20 @@ func LinkedInPhase(ctx context.Context, company model.Company, chain *scrape.Cha
 	if err := json.Unmarshal([]byte(cleanJSON(text)), &data); err != nil {
 		log.Warn("linkedin: failed to parse haiku json", zap.Error(err))
 		return nil, usage, eris.Wrap(err, "linkedin: parse haiku json")
+	}
+
+	// Auto-populate ExecFirstName/ExecLastName/ExecTitle from ExecContacts[0]
+	// for backward compatibility when the old flat fields are empty.
+	if len(data.ExecContacts) > 0 {
+		if data.ExecFirstName == "" {
+			data.ExecFirstName = data.ExecContacts[0].FirstName
+		}
+		if data.ExecLastName == "" {
+			data.ExecLastName = data.ExecContacts[0].LastName
+		}
+		if data.ExecTitle == "" {
+			data.ExecTitle = data.ExecContacts[0].Title
+		}
 	}
 
 	// Fill in LinkedIn URL if not extracted.

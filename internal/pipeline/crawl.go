@@ -16,7 +16,8 @@ import (
 
 // CrawlPhase implements Phase 1A: discover links with LocalCrawler,
 // fetch content via scrape chain (Jina primary, Firecrawl fallback).
-func CrawlPhase(ctx context.Context, company model.Company, cfg config.CrawlConfig, st store.Store, chain *scrape.Chain, fcClient firecrawl.Client) (*model.CrawlResult, error) {
+// If probe is non-nil, it reuses the prior probe result (from Phase 0) to avoid re-probing.
+func CrawlPhase(ctx context.Context, company model.Company, cfg config.CrawlConfig, st store.Store, chain *scrape.Chain, fcClient firecrawl.Client, probe *model.ProbeResult) (*model.CrawlResult, error) {
 	// Check cache first.
 	cached, err := st.GetCachedCrawl(ctx, company.URL)
 	if err != nil {
@@ -37,10 +38,12 @@ func CrawlPhase(ctx context.Context, company model.Company, cfg config.CrawlConf
 
 	lc := NewLocalCrawlerWithMatcher(chain.PathMatcher)
 
-	// Probe the site first.
-	probe, err := lc.Probe(ctx, company.URL)
-	if err != nil {
-		return nil, eris.Wrap(err, "crawl: probe failed")
+	// Use passed-in probe or probe fresh.
+	if probe == nil {
+		probe, err = lc.Probe(ctx, company.URL)
+		if err != nil {
+			return nil, eris.Wrap(err, "crawl: probe failed")
+		}
 	}
 
 	if !probe.Reachable {

@@ -114,7 +114,20 @@ func ValidateField(answer model.ExtractionAnswer, field *model.FieldMapping) *mo
 		}
 		coerced = s
 
-	case "number", "integer", "int":
+	case "number":
+		// "number" preserves fractional parts (e.g., ratings like 4.6).
+		// Use float when value has a decimal; int otherwise.
+		f, ok := toFloat(value)
+		if !ok {
+			return nil
+		}
+		if f == float64(int(f)) {
+			coerced = int(f)
+		} else {
+			coerced = f
+		}
+
+	case "integer", "int":
 		n, ok := toNumber(value)
 		if !ok {
 			return nil
@@ -171,6 +184,10 @@ func ValidateField(answer model.ExtractionAnswer, field *model.FieldMapping) *mo
 			return nil
 		}
 		coerced = cleaned
+
+	case "json":
+		// JSON DataType: accept arrays and objects as-is (no coercion needed).
+		coerced = value
 
 	default:
 		coerced = value
@@ -235,14 +252,31 @@ func BuildFieldValues(answers []model.ExtractionAnswer, fields *model.FieldRegis
 	}
 
 	// Fill gaps with pre-seeded CSV data (lower confidence than extraction).
+	// Also upgrade extracted values when pre-seeded data has more precision
+	// (e.g., decimal rating 4.6 vs extracted integer 4).
 	if len(company) > 0 && len(company[0].PreSeeded) > 0 {
 		for key, val := range company[0].PreSeeded {
-			if _, ok := result[key]; ok {
-				continue // Already extracted, skip.
-			}
 			if val == nil || val == "" {
 				continue
 			}
+
+			existing, alreadyExtracted := result[key]
+			if alreadyExtracted {
+				// Precision upgrade: if pre-seeded has a decimal value and
+				// the extracted value is its integer truncation, use the
+				// more precise pre-seeded value. Common for ratings (4.6 vs 4).
+				if psFloat, ok := val.(float64); ok && psFloat != float64(int64(psFloat)) {
+					if exFloat, ok := toFloat(existing.Value); ok {
+						if exFloat == float64(int64(exFloat)) && int64(exFloat) == int64(psFloat) {
+							existing.Value = psFloat
+							existing.Source += "+precision_upgrade"
+							result[key] = existing
+						}
+					}
+				}
+				continue
+			}
+
 			if field := fields.ByKey(key); field != nil {
 				fv := ValidateField(model.ExtractionAnswer{
 					FieldKey:   key,
@@ -332,6 +366,98 @@ func toBool(v any) (bool, bool) {
 	default:
 		return false, false
 	}
+}
+
+// InjectPageMetadata creates field values directly from parsed page metadata
+// (e.g. Google Maps review data, phone numbers), bypassing LLM extraction entirely.
+// Existing LLM-extracted answers with the same field key are NOT overridden.
+// If preSeeded data is provided, Perplexity-sourced values are cross-checked
+// against it — large divergences reduce confidence below the gap-fill threshold.
+func InjectPageMetadata(answers []model.ExtractionAnswer, pages []model.CrawledPage, preSeeded ...map[string]any) []model.ExtractionAnswer {
+	var ps map[string]any
+	if len(preSeeded) > 0 {
+		ps = preSeeded[0]
+	}
+
+	for _, p := range pages {
+		if p.Metadata == nil {
+			continue
+		}
+
+		// Differentiate confidence by metadata source.
+		conf := 0.95
+		if p.Metadata.Source == "perplexity" {
+			conf = 0.70
+		}
+
+		if p.Metadata.ReviewCount > 0 {
+			reviewConf := conf
+			// Cross-check Perplexity review count against pre-seeded data.
+			if p.Metadata.Source == "perplexity" && ps != nil {
+				if psVal, ok := ps["google_reviews_count"]; ok {
+					if psCount, ok2 := toNumber(psVal); ok2 && psCount > 0 {
+						prox := intProximity(psCount, p.Metadata.ReviewCount)
+						if prox < 0.5 {
+							reviewConf = 0.50 // Below gap-fill threshold (0.60)
+						}
+					}
+				}
+			}
+			answers = appendOrUpgrade(answers, "google_reviews_count",
+				p.Metadata.ReviewCount, reviewConf, "google_maps_metadata")
+		}
+		if p.Metadata.Rating > 0 {
+			answers = appendOrUpgrade(answers, "google_reviews_rating",
+				p.Metadata.Rating, conf, "google_maps_metadata")
+		}
+		if p.Metadata.Phone != "" {
+			answers = appendOrUpgrade(answers, "phone",
+				p.Metadata.Phone, 0.90, "website_metadata")
+		}
+	}
+	return answers
+}
+
+// intProximity returns 1 - |a-b|/max(a,b), or 1 if both are zero.
+func intProximity(a, b int) float64 {
+	if a == 0 && b == 0 {
+		return 1
+	}
+	max := a
+	if b > max {
+		max = b
+	}
+	diff := a - b
+	if diff < 0 {
+		diff = -diff
+	}
+	return 1 - float64(diff)/float64(max)
+}
+
+// appendOrUpgrade adds an answer if no existing answer has the same field key,
+// or replaces the existing answer if the new confidence is strictly higher.
+func appendOrUpgrade(answers []model.ExtractionAnswer, fieldKey string, value any, confidence float64, source string) []model.ExtractionAnswer {
+	for i, a := range answers {
+		if a.FieldKey == fieldKey {
+			if confidence > a.Confidence {
+				answers[i] = model.ExtractionAnswer{
+					FieldKey:   fieldKey,
+					Value:      value,
+					Confidence: confidence,
+					Source:     source,
+					Tier:       0,
+				}
+			}
+			return answers
+		}
+	}
+	return append(answers, model.ExtractionAnswer{
+		FieldKey:   fieldKey,
+		Value:      value,
+		Confidence: confidence,
+		Source:     source,
+		Tier:       0,
+	})
 }
 
 // EnrichWithRevenueEstimate adds a revenue estimate to the merged answers
@@ -463,4 +589,201 @@ func EnrichFromPPP(answers []model.ExtractionAnswer, matches []ppp.LoanMatch) []
 	}
 
 	return answers
+}
+
+// CrossValidateEmployeeCount checks if extracted employee count falls within
+// LinkedIn's reported range and boosts confidence if so.
+func CrossValidateEmployeeCount(answers []model.ExtractionAnswer, linkedInData *LinkedInData) []model.ExtractionAnswer {
+	if linkedInData == nil || linkedInData.EmployeeCount == "" {
+		return answers
+	}
+	lo, hi := parseLinkedInRange(linkedInData.EmployeeCount)
+	if lo == 0 && hi == 0 {
+		return answers
+	}
+	for i, a := range answers {
+		if a.FieldKey == "employees" {
+			n, ok := toNumber(a.Value)
+			if ok && n >= lo && n <= hi && a.Confidence < 0.85 {
+				answers[i].Confidence = 0.85
+				answers[i].Source += "+linkedin_validated"
+			}
+		}
+	}
+	return answers
+}
+
+// parseLinkedInRange parses LinkedIn employee ranges like "51-200", "201-500".
+func parseLinkedInRange(s string) (int, int) {
+	s = strings.TrimSpace(s)
+	// Handle "10,001+" style.
+	s = strings.ReplaceAll(s, ",", "")
+	if strings.HasSuffix(s, "+") {
+		n, err := strconv.Atoi(strings.TrimSuffix(s, "+"))
+		if err != nil {
+			return 0, 0
+		}
+		return n, 1_000_000 // unbounded upper
+	}
+	parts := strings.SplitN(s, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0
+	}
+	lo, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+	hi, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err1 != nil || err2 != nil {
+		return 0, 0
+	}
+	return lo, hi
+}
+
+// MergeContacts consolidates all "contacts" answers from multiple sources into
+// a single "contacts" answer. Deduplicates by last name (case-insensitive) and
+// caps the array at 3 entries.
+func MergeContacts(answers []model.ExtractionAnswer) []model.ExtractionAnswer {
+	var merged []map[string]string
+	seenLastNames := make(map[string]bool)
+	bestConfidence := 0.0
+	bestSource := ""
+	contactIdx := -1
+
+	for i, a := range answers {
+		if a.FieldKey != "contacts" {
+			continue
+		}
+		if contactIdx == -1 {
+			contactIdx = i
+		}
+		if a.Confidence > bestConfidence {
+			bestConfidence = a.Confidence
+			bestSource = a.Source
+		}
+
+		// Handle both []map[string]string and []any (from JSON unmarshaling).
+		var items []map[string]string
+		switch v := a.Value.(type) {
+		case []map[string]string:
+			items = v
+		case []any:
+			for _, item := range v {
+				switch m := item.(type) {
+				case map[string]string:
+					items = append(items, m)
+				case map[string]any:
+					entry := make(map[string]string)
+					for k, val := range m {
+						if s, ok := val.(string); ok {
+							entry[k] = s
+						}
+					}
+					items = append(items, entry)
+				}
+			}
+		}
+
+		for _, c := range items {
+			lastName := strings.ToLower(strings.TrimSpace(c["last_name"]))
+			if lastName == "" || seenLastNames[lastName] {
+				continue
+			}
+			seenLastNames[lastName] = true
+			merged = append(merged, c)
+		}
+	}
+
+	if len(merged) == 0 {
+		return answers
+	}
+
+	// Cap at 3 contacts.
+	if len(merged) > 3 {
+		merged = merged[:3]
+	}
+
+	// Remove all old "contacts" answers and replace with the merged one.
+	var result []model.ExtractionAnswer
+	replaced := false
+	for i, a := range answers {
+		if a.FieldKey == "contacts" {
+			if !replaced && i == contactIdx {
+				result = append(result, model.ExtractionAnswer{
+					FieldKey:   "contacts",
+					Value:      merged,
+					Confidence: bestConfidence,
+					Source:     bestSource,
+					Tier:       0,
+				})
+				replaced = true
+			}
+			continue
+		}
+		result = append(result, a)
+	}
+	return result
+}
+
+// populateOwnerFromContacts fills owner_* fields from contacts[0] when they
+// are missing. This ensures backward compatibility with the single-contact flow.
+func populateOwnerFromContacts(result map[string]model.FieldValue, fields *model.FieldRegistry) {
+	contactsFV, ok := result["contacts"]
+	if !ok {
+		return
+	}
+
+	// Extract the first contact from the array.
+	var first map[string]string
+	switch v := contactsFV.Value.(type) {
+	case []map[string]string:
+		if len(v) == 0 {
+			return
+		}
+		first = v[0]
+	case []any:
+		if len(v) == 0 {
+			return
+		}
+		switch m := v[0].(type) {
+		case map[string]string:
+			first = m
+		case map[string]any:
+			first = make(map[string]string)
+			for k, val := range m {
+				if s, ok := val.(string); ok {
+					first[k] = s
+				}
+			}
+		default:
+			return
+		}
+	default:
+		return
+	}
+
+	setIfMissing := func(key, contactKey string) {
+		if _, exists := result[key]; exists {
+			return
+		}
+		fm := fields.ByKey(key)
+		if fm == nil {
+			return
+		}
+		v, ok := first[contactKey]
+		if !ok || v == "" {
+			return
+		}
+		result[key] = model.FieldValue{
+			FieldKey:   key,
+			SFField:    fm.SFField,
+			Value:      v,
+			Confidence: contactsFV.Confidence,
+			Source:     "contacts[0]",
+			Tier:       contactsFV.Tier,
+		}
+	}
+	setIfMissing("owner_first_name", "first_name")
+	setIfMissing("owner_last_name", "last_name")
+	setIfMissing("owner_title", "title")
+	setIfMissing("owner_email", "email")
+	setIfMissing("owner_phone", "phone")
+	setIfMissing("owner_linkedin", "linkedin_url")
 }

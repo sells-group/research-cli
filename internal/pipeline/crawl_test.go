@@ -51,7 +51,7 @@ func TestCrawlPhase_CacheHit(t *testing.T) {
 	fcClient := firecrawlmocks.NewMockClient(t)
 	cfg := config.CrawlConfig{MaxPages: 50, MaxDepth: 2, CacheTTLHours: 24}
 
-	result, err := CrawlPhase(ctx, company, cfg, st, chain, fcClient)
+	result, err := CrawlPhase(ctx, company, cfg, st, chain, fcClient, nil)
 
 	assert.NoError(t, err)
 	assert.True(t, result.FromCache)
@@ -75,7 +75,7 @@ func TestCrawlPhase_CacheError(t *testing.T) {
 	fcClient := firecrawlmocks.NewMockClient(t)
 	cfg := config.CrawlConfig{MaxPages: 50, MaxDepth: 2}
 
-	result, err := CrawlPhase(ctx, company, cfg, st, chain, fcClient)
+	result, err := CrawlPhase(ctx, company, cfg, st, chain, fcClient, nil)
 
 	assert.Nil(t, result)
 	assert.Error(t, err)
@@ -95,7 +95,7 @@ func TestCrawlPhase_ProbeUnreachable(t *testing.T) {
 	fcClient := firecrawlmocks.NewMockClient(t)
 	cfg := config.CrawlConfig{}
 
-	result, err := CrawlPhase(ctx, company, cfg, st, chain, fcClient)
+	result, err := CrawlPhase(ctx, company, cfg, st, chain, fcClient, nil)
 
 	assert.Nil(t, result)
 	assert.Error(t, err)

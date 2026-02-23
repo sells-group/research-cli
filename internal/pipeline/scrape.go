@@ -16,6 +16,7 @@ import (
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/scrape"
 	"github.com/sells-group/research-cli/pkg/jina"
+	"github.com/sells-group/research-cli/pkg/perplexity"
 )
 
 // SourceResult captures the outcome of scraping a single external source.
@@ -91,7 +92,12 @@ func DefaultExternalSources() []ExternalSource {
 // For each source, it first searches for the profile URL using Jina Search,
 // then scrapes the discovered URL via the scrape chain.
 // Sources are fetched in parallel. Address cross-reference metadata is returned.
-func ScrapePhase(ctx context.Context, company model.Company, jinaClient jina.Client, chain *scrape.Chain, cfg config.ScrapeConfig) ([]model.CrawledPage, []AddressMatch, []SourceResult) {
+func ScrapePhase(ctx context.Context, company model.Company, jinaClient jina.Client, chain *scrape.Chain, pplxClient perplexity.Client, cfg config.ScrapeConfig) ([]model.CrawledPage, []AddressMatch, []SourceResult) {
+	if company.Name == "" {
+		zap.L().Warn("scrape: skipping external sources, no company name")
+		return nil, nil, nil
+	}
+
 	sources := DefaultExternalSources()
 
 	var (
@@ -104,7 +110,7 @@ func ScrapePhase(ctx context.Context, company model.Company, jinaClient jina.Cli
 	for _, src := range sources {
 		g.Go(func() error {
 			start := time.Now()
-			page, err := scrapeSource(gCtx, src, company, jinaClient, chain, cfg)
+			page, err := scrapeSource(gCtx, src, company, jinaClient, chain, pplxClient, cfg)
 			dur := time.Since(start)
 
 			sr := SourceResult{
@@ -179,7 +185,7 @@ func dedupPages(pages []model.CrawledPage) []model.CrawledPage {
 }
 
 // scrapeSource handles the search-then-scrape flow for a single external source.
-func scrapeSource(ctx context.Context, src ExternalSource, company model.Company, jinaClient jina.Client, chain *scrape.Chain, cfg config.ScrapeConfig) (*model.CrawledPage, error) {
+func scrapeSource(ctx context.Context, src ExternalSource, company model.Company, jinaClient jina.Client, chain *scrape.Chain, pplxClient perplexity.Client, cfg config.ScrapeConfig) (*model.CrawledPage, error) {
 	var targetURL string
 
 	if src.SearchQueryFunc != nil {
@@ -299,6 +305,11 @@ func scrapeSource(ctx context.Context, src ExternalSource, company model.Company
 	// Extract structured metadata (reviews, ratings) before title prefixing.
 	page.Metadata = ParseReviewMetadata(src.Name, page.Markdown)
 
+	// If Google Maps metadata wasn't parseable, try Perplexity fallback.
+	if src.Name == "google_maps" && page.Metadata == nil && pplxClient != nil {
+		page.Metadata = resolveGoogleMapsMetadata(ctx, company, pplxClient)
+	}
+
 	// Guard against double-prefixing the title.
 	prefix := fmt.Sprintf("[%s] ", src.Name)
 	if !strings.HasPrefix(page.Title, prefix) {
@@ -306,6 +317,31 @@ func scrapeSource(ctx context.Context, src ExternalSource, company model.Company
 	}
 
 	return &page, nil
+}
+
+// resolveGoogleMapsMetadata attempts a Perplexity fallback when the chain scrape
+// yields no parseable review metadata from Google Maps.
+func resolveGoogleMapsMetadata(ctx context.Context, company model.Company, pplxClient perplexity.Client) *model.PageMetadata {
+	prompt := fmt.Sprintf(
+		"What is the Google Maps star rating and total review count for %s in %s, %s? "+
+			"Reply with ONLY the rating and review count in this exact format: "+
+			"RATING stars REVIEWS reviews (e.g. '4.5 stars 127 reviews'). "+
+			"If you cannot find this information, reply 'not found'.",
+		company.Name, company.City, company.State,
+	)
+	temp := 0.1
+	resp, err := pplxClient.ChatCompletion(ctx, perplexity.ChatCompletionRequest{
+		Messages:    []perplexity.Message{{Role: "user", Content: prompt}},
+		Temperature: &temp,
+	})
+	if err != nil || len(resp.Choices) == 0 {
+		return nil
+	}
+	meta := parseGoogleMapsMetadata(resp.Choices[0].Message.Content)
+	if meta != nil {
+		meta.Source = "perplexity"
+	}
+	return meta
 }
 
 func intPtr(v int) *int { return &v }

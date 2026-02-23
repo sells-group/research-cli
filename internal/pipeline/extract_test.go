@@ -44,7 +44,7 @@ func TestExtractTier1_DirectMode(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	result, err := ExtractTier1(ctx, routed, nil, aiClient, aiCfg)
+	result, err := ExtractTier1(ctx, routed, model.Company{}, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Equal(t, 1, result.Tier)
@@ -59,7 +59,7 @@ func TestExtractTier1_EmptyRouted(t *testing.T) {
 	aiClient := anthropicmocks.NewMockClient(t)
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	result, err := ExtractTier1(ctx, nil, nil, aiClient, aiCfg)
+	result, err := ExtractTier1(ctx, nil, model.Company{}, nil, aiClient, aiCfg)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, result.Tier)
 	assert.Empty(t, result.Answers)
@@ -100,7 +100,7 @@ func TestExtractTier2_WithPrimer(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
 
-	result, err := ExtractTier2(ctx, routed, t1Answers, nil, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, routed, t1Answers, model.Company{}, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Equal(t, 2, result.Tier)
@@ -146,7 +146,7 @@ func TestExtractTier3_WithSummarization(t *testing.T) {
 		OpusModel:  "claude-opus-4-6",
 	}
 
-	result, err := ExtractTier3(ctx, routed, allAnswers, pages, nil, aiClient, aiCfg)
+	result, err := ExtractTier3(ctx, routed, allAnswers, pages, model.Company{}, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Equal(t, 3, result.Tier)
@@ -186,7 +186,7 @@ func TestExtractTier1_RichPrompt_MultiField(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	result, err := ExtractTier1(ctx, routed, nil, aiClient, aiCfg)
+	result, err := ExtractTier1(ctx, routed, model.Company{}, nil, aiClient, aiCfg)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, result.Tier)
@@ -238,7 +238,7 @@ func TestExtractTier2_RichPrompt_MultiField(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
 
-	result, err := ExtractTier2(ctx, routed, nil, nil, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, routed, nil, model.Company{}, nil, aiClient, aiCfg)
 
 	require.NoError(t, err)
 	assert.Len(t, result.Answers, 2)
@@ -425,6 +425,32 @@ func TestParseExtractionAnswer_MultiField_MetaKeysIgnored(t *testing.T) {
 	}
 	assert.Equal(t, "Acme", byKey["company_name"].Value)
 	assert.Equal(t, float64(5000000), byKey["revenue"].Value)
+}
+
+func TestParseExtractionAnswer_ContactsArrayValue(t *testing.T) {
+	// Single-key "contacts" question returns an array value — should preserve
+	// the array as the value (not split or unwrap).
+	q := model.Question{
+		ID:           "q-contacts",
+		FieldKey:     "contacts",
+		Instructions: "Extract up to 3 key contacts.",
+		OutputFormat: `{"contacts": [{"first_name": "string", "last_name": "string", "title": "string"}]}`,
+	}
+	text := `{"contacts": [{"first_name": "Jane", "last_name": "Doe", "title": "CEO"}, {"first_name": "John", "last_name": "Smith", "title": "VP"}], "confidence": 0.85}`
+
+	answers := parseExtractionAnswer(text, q, 1)
+
+	// Single key "contacts" → falls through to multi-field path which finds
+	// the "contacts" key in the JSON. The value should be the array.
+	require.Len(t, answers, 1)
+	assert.Equal(t, "contacts", answers[0].FieldKey)
+	assert.Equal(t, 0.85, answers[0].Confidence)
+	assert.Equal(t, 1, answers[0].Tier)
+
+	// Value should be the array, not unwrapped.
+	arr, ok := answers[0].Value.([]any)
+	assert.True(t, ok, "contacts value should be []any")
+	assert.Len(t, arr, 2)
 }
 
 func TestToFloat64(t *testing.T) {
@@ -791,7 +817,7 @@ func TestExtractTier1_NoBatch(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001", NoBatch: true}
 
-	result, err := ExtractTier1(ctx, routed, nil, aiClient, aiCfg)
+	result, err := ExtractTier1(ctx, routed, model.Company{}, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Len(t, result.Answers, 5)
@@ -819,7 +845,7 @@ func TestExtractTier2_NoBatch_SkipsPrimer(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929", NoBatch: true}
 
-	result, err := ExtractTier2(ctx, routed, nil, nil, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, routed, nil, model.Company{}, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Len(t, result.Answers, 5)
@@ -865,7 +891,7 @@ func TestExtractTier1_AllRequestsUseCachedBlocks(t *testing.T) {
 	}, nil).Times(4) // 1 primer + 3 direct calls
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
-	result, err := ExtractTier1(ctx, routed, nil, aiClient, aiCfg)
+	result, err := ExtractTier1(ctx, routed, model.Company{}, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Len(t, result.Answers, 3)
@@ -1132,7 +1158,7 @@ func TestExtractTier2_FiltersHighConfidenceT1(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
 
-	result, err := ExtractTier2(ctx, routed, t1Answers, nil, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, routed, t1Answers, model.Company{}, nil, aiClient, aiCfg)
 
 	require.NoError(t, err)
 	assert.Len(t, result.Answers, 1)
@@ -1184,7 +1210,7 @@ func TestExtractTier2_AllHighConfidence_EmptyContext(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
 
-	result, err := ExtractTier2(ctx, routed, t1Answers, nil, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, routed, t1Answers, model.Company{}, nil, aiClient, aiCfg)
 
 	require.NoError(t, err)
 	assert.Len(t, result.Answers, 1)
@@ -1229,7 +1255,7 @@ func TestExtractTier2_AllLowConfidence_FullContext(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
 
-	result, err := ExtractTier2(ctx, routed, t1Answers, nil, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, routed, t1Answers, model.Company{}, nil, aiClient, aiCfg)
 
 	require.NoError(t, err)
 	assert.Len(t, result.Answers, 1)
@@ -1364,6 +1390,92 @@ func TestFormatPPPContext_Empty(t *testing.T) {
 	assert.Equal(t, "", FormatPPPContext([]ppp.LoanMatch{}))
 }
 
+// --- FormatPageMetadata tests ---
+
+func TestFormatPageMetadata_GoogleMaps(t *testing.T) {
+	pages := []model.ClassifiedPage{
+		{CrawledPage: model.CrawledPage{
+			Title: "[Google_Maps] Acme Corp",
+			Metadata: &model.PageMetadata{
+				Rating:      4.5,
+				ReviewCount: 120,
+			},
+		}},
+	}
+
+	result := FormatPageMetadata(pages)
+
+	assert.Contains(t, result, "--- Structured Metadata: [Google_Maps] Acme Corp ---")
+	assert.Contains(t, result, "Google Rating: 4.5 stars")
+	assert.Contains(t, result, "Google Review Count: 120")
+	assert.NotContains(t, result, "BBB Rating")
+}
+
+func TestFormatPageMetadata_BBB(t *testing.T) {
+	pages := []model.ClassifiedPage{
+		{CrawledPage: model.CrawledPage{
+			Title: "[BBB] Acme Corp",
+			Metadata: &model.PageMetadata{
+				BBBRating: "A+",
+			},
+		}},
+	}
+
+	result := FormatPageMetadata(pages)
+
+	assert.Contains(t, result, "--- Structured Metadata: [BBB] Acme Corp ---")
+	assert.Contains(t, result, "BBB Rating: A+")
+	assert.NotContains(t, result, "Google Rating")
+	assert.NotContains(t, result, "Google Review Count")
+}
+
+func TestFormatPageMetadata_Empty(t *testing.T) {
+	// No metadata at all.
+	pages := []model.ClassifiedPage{
+		{CrawledPage: model.CrawledPage{Title: "About Us"}},
+	}
+	assert.Equal(t, "", FormatPageMetadata(pages))
+
+	// Nil slice.
+	assert.Equal(t, "", FormatPageMetadata(nil))
+
+	// Empty metadata struct (all zero values).
+	pages2 := []model.ClassifiedPage{
+		{CrawledPage: model.CrawledPage{
+			Title:    "Page",
+			Metadata: &model.PageMetadata{},
+		}},
+	}
+	assert.Equal(t, "", FormatPageMetadata(pages2))
+}
+
+func TestFormatPageMetadata_Mixed(t *testing.T) {
+	pages := []model.ClassifiedPage{
+		{CrawledPage: model.CrawledPage{Title: "About Us"}},
+		{CrawledPage: model.CrawledPage{
+			Title: "[Google_Maps] Acme",
+			Metadata: &model.PageMetadata{
+				Rating:      4.2,
+				ReviewCount: 50,
+			},
+		}},
+		{CrawledPage: model.CrawledPage{
+			Title: "[BBB] Acme",
+			Metadata: &model.PageMetadata{
+				BBBRating: "A",
+			},
+		}},
+	}
+
+	result := FormatPageMetadata(pages)
+
+	assert.Contains(t, result, "Google Rating: 4.2 stars")
+	assert.Contains(t, result, "Google Review Count: 50")
+	assert.Contains(t, result, "BBB Rating: A")
+	// Should not contain anything about the "About Us" page.
+	assert.NotContains(t, result, "About Us")
+}
+
 func TestFormatPPPContext_PartialData(t *testing.T) {
 	matches := []ppp.LoanMatch{
 		{
@@ -1384,4 +1496,57 @@ func TestFormatPPPContext_PartialData(t *testing.T) {
 	assert.NotContains(t, result, "Jobs Reported")
 	assert.NotContains(t, result, "NAICS")
 	assert.NotContains(t, result, "Business Age")
+}
+
+// --- FormatPreSeededContext tests ---
+
+func TestFormatPreSeededContext_AllFields(t *testing.T) {
+	preSeeded := map[string]any{
+		"employees":        50,
+		"naics_code":       "541512",
+		"description":      "A great company",
+		"revenue_range":    "$5,000,000",
+		"year_established": "2010",
+		"email":            "info@example.com",
+		"exec_first_name":  "John",
+		"exec_last_name":   "Doe",
+		"exec_title":       "CEO",
+	}
+
+	result := FormatPreSeededContext(preSeeded)
+
+	assert.Contains(t, result, "--- Industry Data (verify against website) ---")
+	assert.Contains(t, result, "Employee Count (industry estimate): 50")
+	assert.Contains(t, result, "NAICS Code: 541512")
+	assert.Contains(t, result, "Business Description: A great company")
+	assert.Contains(t, result, "Revenue Estimate: $5,000,000")
+	assert.Contains(t, result, "Year Founded: 2010")
+	assert.Contains(t, result, "use this unless website explicitly states a different founding year")
+	assert.Contains(t, result, "Contact Email: info@example.com")
+	assert.Contains(t, result, "Executive First Name: John")
+	assert.Contains(t, result, "Executive Last Name: Doe")
+	assert.Contains(t, result, "Executive Title: CEO")
+}
+
+func TestFormatPreSeededContext_Empty(t *testing.T) {
+	assert.Equal(t, "", FormatPreSeededContext(nil))
+	assert.Equal(t, "", FormatPreSeededContext(map[string]any{}))
+}
+
+func TestFormatPreSeededContext_Partial(t *testing.T) {
+	preSeeded := map[string]any{
+		"employees": 25,
+	}
+
+	result := FormatPreSeededContext(preSeeded)
+
+	assert.Contains(t, result, "Employee Count (industry estimate): 25")
+	assert.NotContains(t, result, "NAICS Code")
+	assert.NotContains(t, result, "Business Description")
+	assert.NotContains(t, result, "Revenue Estimate")
+	assert.NotContains(t, result, "Year Founded")
+	assert.NotContains(t, result, "Contact Email")
+	assert.NotContains(t, result, "Executive First Name")
+	assert.NotContains(t, result, "Executive Last Name")
+	assert.NotContains(t, result, "Executive Title")
 }

@@ -57,7 +57,7 @@ func TestScrapePhase_SearchThenScrape(t *testing.T) {
 	).Maybe()
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	pages, addrMatches, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, defaultScrapeConfig)
+	pages, addrMatches, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, nil, defaultScrapeConfig)
 
 	assert.Len(t, pages, 3) // Google Maps, BBB, SoS (distinct content per URL)
 	for _, p := range pages {
@@ -97,7 +97,7 @@ func TestScrapePhase_ChainAllFail(t *testing.T) {
 	s.On("Scrape", mock.Anything, mock.Anything).Return(nil, errors.New("fail")).Maybe()
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	pages, _, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, defaultScrapeConfig)
+	pages, _, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, nil, defaultScrapeConfig)
 
 	assert.Len(t, pages, 0)
 	// All 3 source results should exist, each with an error.
@@ -114,7 +114,7 @@ func TestScrapePhase_SearchNoResults(t *testing.T) {
 
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil))
 
-	pages, addrMatches, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, defaultScrapeConfig)
+	pages, addrMatches, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, nil, defaultScrapeConfig)
 
 	assert.Len(t, pages, 0)
 	assert.Nil(t, addrMatches)
@@ -165,7 +165,7 @@ func TestScrapePhase_PartialFailure(t *testing.T) {
 	).Maybe()
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	pages, _, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, defaultScrapeConfig)
+	pages, _, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, nil, defaultScrapeConfig)
 
 	// At least 1 page from the successful source.
 	assert.GreaterOrEqual(t, len(pages), 1)
@@ -211,7 +211,7 @@ func TestScrapePhase_ContentDedup(t *testing.T) {
 	}, nil).Maybe()
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	pages, _, _ := ScrapePhase(ctx, company, jinaClient, chain, defaultScrapeConfig)
+	pages, _, _ := ScrapePhase(ctx, company, jinaClient, chain, nil, defaultScrapeConfig)
 
 	// All 3 sources return identical markdown → dedup to 1 page.
 	assert.Equal(t, 1, len(pages))
@@ -267,7 +267,7 @@ func TestScrapeSource_RetryOnFailure(t *testing.T) {
 	}
 
 	cfg := config.ScrapeConfig{SearchTimeoutSecs: 5, SearchRetries: 1}
-	page, err := scrapeSource(ctx, src, company, jinaClient, chain, cfg)
+	page, err := scrapeSource(ctx, src, company, jinaClient, chain, nil, cfg)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, page)
@@ -293,7 +293,7 @@ func TestScrapeSource_RetryExhausted(t *testing.T) {
 	}
 
 	cfg := config.ScrapeConfig{SearchTimeoutSecs: 5, SearchRetries: 1}
-	page, err := scrapeSource(ctx, src, company, jinaClient, chain, cfg)
+	page, err := scrapeSource(ctx, src, company, jinaClient, chain, nil, cfg)
 
 	assert.Error(t, err)
 	assert.Nil(t, page)
@@ -324,7 +324,7 @@ func TestScrapeSource_NoDuplicatePrefix(t *testing.T) {
 		},
 	}
 
-	page, err := scrapeSource(ctx, src, company, nil, chain, defaultScrapeConfig)
+	page, err := scrapeSource(ctx, src, company, nil, chain, nil, defaultScrapeConfig)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, page)
@@ -399,7 +399,7 @@ func TestScrapePhase_RetryTimerCleanup(t *testing.T) {
 	cfg := config.ScrapeConfig{SearchTimeoutSecs: 1, SearchRetries: 3}
 
 	start := time.Now()
-	_, err := scrapeSource(ctx, src, company, jinaClient, chain, cfg)
+	_, err := scrapeSource(ctx, src, company, jinaClient, chain, nil, cfg)
 	elapsed := time.Since(start)
 
 	// scrapeSource should return ctx.Err() because context was cancelled during
@@ -410,4 +410,15 @@ func TestScrapePhase_RetryTimerCleanup(t *testing.T) {
 	// NOT block for the 500ms+ backoff duration. This proves timer.Stop() works.
 	assert.Less(t, elapsed, 100*time.Millisecond,
 		"scrapeSource should return promptly on context cancellation during retry backoff, took %v", elapsed)
+}
+
+func TestScrapePhase_EmptyName_ReturnsNil(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{URL: "https://acme.com"} // No Name.
+
+	pages, addrMatches, sourceResults := ScrapePhase(ctx, company, nil, nil, nil, defaultScrapeConfig)
+
+	assert.Nil(t, pages)
+	assert.Nil(t, addrMatches)
+	assert.Nil(t, sourceResults)
 }

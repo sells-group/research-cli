@@ -42,7 +42,7 @@ func TestExtractTier1_WithInstructions(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	result, err := ExtractTier1(ctx, routed, nil, aiClient, aiCfg)
+	result, err := ExtractTier1(ctx, routed, model.Company{}, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Len(t, result.Answers, 1)
@@ -71,7 +71,7 @@ func TestExtractTier1_LongContent(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	result, err := ExtractTier1(ctx, routed, nil, aiClient, aiCfg)
+	result, err := ExtractTier1(ctx, routed, model.Company{}, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Len(t, result.Answers, 1)
@@ -82,7 +82,7 @@ func TestExtractTier2_EmptyRouted(t *testing.T) {
 	aiClient := anthropicmocks.NewMockClient(t)
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
 
-	result, err := ExtractTier2(ctx, nil, nil, nil, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, nil, nil, model.Company{}, nil, aiClient, aiCfg)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, result.Tier)
 	assert.Empty(t, result.Answers)
@@ -115,7 +115,7 @@ func TestExtractTier2_SingleQuestion(t *testing.T) {
 
 	aiCfg := config.AnthropicConfig{SonnetModel: "claude-sonnet-4-5-20250929"}
 
-	result, err := ExtractTier2(ctx, routed, t1Answers, nil, aiClient, aiCfg)
+	result, err := ExtractTier2(ctx, routed, t1Answers, model.Company{}, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Equal(t, 2, result.Tier)
@@ -127,7 +127,7 @@ func TestExtractTier3_EmptyRouted(t *testing.T) {
 	aiClient := anthropicmocks.NewMockClient(t)
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001", OpusModel: "claude-opus-4-6"}
 
-	result, err := ExtractTier3(ctx, nil, nil, nil, nil, aiClient, aiCfg)
+	result, err := ExtractTier3(ctx, nil, nil, nil, model.Company{}, nil, aiClient, aiCfg)
 	assert.NoError(t, err)
 	assert.Equal(t, 3, result.Tier)
 	assert.Empty(t, result.Answers)
@@ -209,7 +209,7 @@ func TestExtractTier3_MultipleQuestions_BatchPath(t *testing.T) {
 		SmallBatchThreshold: 3,
 	}
 
-	result, err := ExtractTier3(ctx, routed, allAnswers, pages, nil, aiClient, aiCfg)
+	result, err := ExtractTier3(ctx, routed, allAnswers, pages, model.Company{}, nil, aiClient, aiCfg)
 
 	assert.NoError(t, err)
 	assert.Equal(t, 3, result.Tier)
@@ -242,7 +242,7 @@ func TestExtractTier3_ContextPreparationFails(t *testing.T) {
 		OpusModel:  "claude-opus-4-6",
 	}
 
-	result, err := ExtractTier3(ctx, routed, nil, pages, nil, aiClient, aiCfg)
+	result, err := ExtractTier3(ctx, routed, nil, pages, model.Company{}, nil, aiClient, aiCfg)
 
 	assert.Nil(t, result)
 	assert.Error(t, err)

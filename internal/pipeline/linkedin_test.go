@@ -39,7 +39,7 @@ func TestLinkedInPhase_ChainSuccess(t *testing.T) {
 	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
 		Return(&anthropic.MessageResponse{
 			Content: []anthropic.ContentBlock{{
-				Text: `{"company_name": "Acme Corp", "description": "Technology company", "industry": "Technology", "employee_count": "200", "headquarters": "New York City", "founded": "2010", "specialties": "AI, ML", "website": "https://acme.com", "linkedin_url": "", "company_type": "Privately Held"}`,
+				Text: `{"company_name": "Acme Corp", "description": "Technology company", "industry": "Technology", "employee_count": "200", "headquarters": "New York City", "founded": "2010", "specialties": "AI, ML", "website": "https://acme.com", "linkedin_url": "", "company_type": "Privately Held", "exec_first_name": "Jane", "exec_last_name": "Doe", "exec_title": "CEO & Founder"}`,
 			}},
 			Usage: anthropic.TokenUsage{InputTokens: 200, OutputTokens: 100},
 		}, nil)
@@ -53,6 +53,9 @@ func TestLinkedInPhase_ChainSuccess(t *testing.T) {
 	assert.Equal(t, "Acme Corp", data.CompanyName)
 	assert.Equal(t, "Technology", data.Industry)
 	assert.NotEmpty(t, data.LinkedInURL) // Should be filled in
+	assert.Equal(t, "Jane", data.ExecFirstName)
+	assert.Equal(t, "Doe", data.ExecLastName)
+	assert.Equal(t, "CEO & Founder", data.ExecTitle)
 	assert.NotNil(t, usage)
 	pplxClient.AssertNotCalled(t, "ChatCompletion") // Perplexity not used
 	aiClient.AssertExpectations(t)
@@ -186,6 +189,18 @@ func TestLinkedInPhase_HaikuParseError(t *testing.T) {
 	assert.Contains(t, err.Error(), "parse haiku json")
 }
 
+func TestLinkedInPhase_EmptyName_ReturnsNil(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{URL: "https://acme.com"} // No Name.
+
+	data, usage, err := LinkedInPhase(ctx, company, nil, nil, nil, config.AnthropicConfig{}, nil)
+
+	assert.NoError(t, err)
+	assert.Nil(t, data)
+	assert.NotNil(t, usage)
+	assert.Equal(t, 0, usage.InputTokens)
+}
+
 func TestBuildLinkedInURL(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -203,6 +218,82 @@ func TestBuildLinkedInURL(t *testing.T) {
 			assert.Equal(t, tt.want, buildLinkedInURL(tt.name))
 		})
 	}
+}
+
+func TestLinkedInPhase_ExecContacts(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
+
+	pplxClient := perplexitymocks.NewMockClient(t)
+	pplxClient.On("ChatCompletion", ctx, mock.AnythingOfType("perplexity.ChatCompletionRequest")).
+		Return(&perplexity.ChatCompletionResponse{
+			Choices: []perplexity.Choice{
+				{Message: perplexity.Message{Content: "Acme Corp, CEO Jane Doe, VP John Smith, Director Bob Jones"}},
+			},
+			Usage: perplexity.Usage{PromptTokens: 100, CompletionTokens: 50},
+		}, nil)
+
+	aiClient := anthropicmocks.NewMockClient(t)
+	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(&anthropic.MessageResponse{
+			Content: []anthropic.ContentBlock{{
+				Text: `{"company_name": "Acme Corp", "description": "Tech", "industry": "Technology", "employee_count": "200", "headquarters": "NYC", "founded": "2010", "specialties": "", "website": "https://acme.com", "linkedin_url": "", "company_type": "Privately Held", "exec_first_name": "", "exec_last_name": "", "exec_title": "", "exec_contacts": [{"first_name": "Jane", "last_name": "Doe", "title": "CEO", "linkedin_url": "https://linkedin.com/in/janedoe"}, {"first_name": "John", "last_name": "Smith", "title": "VP Operations"}, {"first_name": "Bob", "last_name": "Jones", "title": "Director"}]}`,
+			}},
+			Usage: anthropic.TokenUsage{InputTokens: 200, OutputTokens: 100},
+		}, nil)
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+
+	data, _, err := LinkedInPhase(ctx, company, nil, pplxClient, aiClient, aiCfg, nil)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, data)
+	assert.Len(t, data.ExecContacts, 3)
+	assert.Equal(t, "Jane", data.ExecContacts[0].FirstName)
+	assert.Equal(t, "Doe", data.ExecContacts[0].LastName)
+	assert.Equal(t, "CEO", data.ExecContacts[0].Title)
+	assert.Equal(t, "https://linkedin.com/in/janedoe", data.ExecContacts[0].LinkedInURL)
+	assert.Equal(t, "John", data.ExecContacts[1].FirstName)
+	assert.Equal(t, "Bob", data.ExecContacts[2].FirstName)
+
+	// Backward compat: flat exec fields auto-populated from ExecContacts[0].
+	assert.Equal(t, "Jane", data.ExecFirstName)
+	assert.Equal(t, "Doe", data.ExecLastName)
+	assert.Equal(t, "CEO", data.ExecTitle)
+}
+
+func TestLinkedInPhase_ExecContacts_BackwardCompat(t *testing.T) {
+	// When Haiku returns both flat exec fields and ExecContacts, flat fields take priority.
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
+
+	pplxClient := perplexitymocks.NewMockClient(t)
+	pplxClient.On("ChatCompletion", ctx, mock.AnythingOfType("perplexity.ChatCompletionRequest")).
+		Return(&perplexity.ChatCompletionResponse{
+			Choices: []perplexity.Choice{
+				{Message: perplexity.Message{Content: "Acme Corp data"}},
+			},
+			Usage: perplexity.Usage{PromptTokens: 100, CompletionTokens: 50},
+		}, nil)
+
+	aiClient := anthropicmocks.NewMockClient(t)
+	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(&anthropic.MessageResponse{
+			Content: []anthropic.ContentBlock{{
+				Text: `{"company_name": "Acme Corp", "description": "", "industry": "", "employee_count": "", "headquarters": "", "founded": "", "specialties": "", "website": "", "linkedin_url": "", "company_type": "", "exec_first_name": "Alice", "exec_last_name": "Wonder", "exec_title": "President", "exec_contacts": [{"first_name": "Jane", "last_name": "Doe", "title": "CEO"}]}`,
+			}},
+			Usage: anthropic.TokenUsage{InputTokens: 200, OutputTokens: 100},
+		}, nil)
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+
+	data, _, err := LinkedInPhase(ctx, company, nil, pplxClient, aiClient, aiCfg, nil)
+
+	assert.NoError(t, err)
+	// Flat fields should NOT be overridden since they're already populated.
+	assert.Equal(t, "Alice", data.ExecFirstName)
+	assert.Equal(t, "Wonder", data.ExecLastName)
+	assert.Equal(t, "President", data.ExecTitle)
 }
 
 func TestIsLinkedInLoginWall(t *testing.T) {
