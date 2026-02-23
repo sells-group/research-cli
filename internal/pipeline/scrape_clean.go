@@ -145,10 +145,29 @@ func cleanGoogleMapsMarkdown(md string) string {
 	return strings.TrimSpace(md)
 }
 
+// reviewPattern defines a regex pattern for extracting review data, specifying
+// which capture groups hold the rating and review count.
+type reviewPattern struct {
+	re          *regexp.Regexp
+	ratingGroup int
+	countGroup  int
+}
+
 // Review/rating regex patterns.
 var (
-	// Google Maps: "4.8 stars (127 reviews)", "4.5 stars · 89 reviews", "3.0 star (1 review)"
-	googleMapsReviewRe = regexp.MustCompile(`(\d+\.?\d*)\s+stars?\s*(?:[\(·]\s*)?(\d[\d,]*)\s+reviews?\)?`)
+	// googleMapsReviewPatterns are tried in order; first match wins.
+	googleMapsReviewPatterns = []reviewPattern{
+		// "4.8 stars (127 reviews)", "4.5 stars · 89 reviews", "3.0 star (1 review)"
+		{regexp.MustCompile(`(\d+\.?\d*)\s+stars?\s*(?:[\(·]\s*)?(\d[\d,]*)\s+reviews?\)?`), 1, 2},
+		// Markdown bold rating: "**4.8** (127 reviews)"
+		{regexp.MustCompile(`\*\*(\d+\.?\d*)\*\*\s*\(?(\d[\d,]*)\s+reviews?\)?`), 1, 2},
+		// Slash-5 format: "4.8/5 (127 reviews)"
+		{regexp.MustCompile(`(\d+\.?\d*)/5\s*\(?(\d[\d,]*)\s+reviews?\)?`), 1, 2},
+		// "Rated 4.8 out of 5 · 127 reviews"
+		{regexp.MustCompile(`[Rr]ated\s+(\d+\.?\d*)\s+out\s+of\s+5\s*[·\-]\s*(\d[\d,]*)\s+reviews?`), 1, 2},
+		// Plain adjacent (most permissive): "4.8 127 reviews"
+		{regexp.MustCompile(`(\d+\.\d+)\s+(\d[\d,]*)\s+reviews?`), 1, 2},
+	}
 
 	// BBB rating: "BBB Rating: A+", "BBB Rating A-", "BBB Rating: F"
 	bbbRatingRe = regexp.MustCompile(`BBB\s+Rating:?\s+([A-F][+-]?)`)
@@ -168,24 +187,31 @@ func ParseReviewMetadata(source, md string) *model.PageMetadata {
 }
 
 func parseGoogleMapsMetadata(md string) *model.PageMetadata {
-	m := googleMapsReviewRe.FindStringSubmatch(md)
-	if m == nil {
-		return nil
+	for _, p := range googleMapsReviewPatterns {
+		m := p.re.FindStringSubmatch(md)
+		if m == nil {
+			continue
+		}
+		rating, err := strconv.ParseFloat(m[p.ratingGroup], 64)
+		if err != nil {
+			continue
+		}
+		// Bounds validation: Google ratings are 1.0–5.0.
+		if rating < 1.0 || rating > 5.0 {
+			continue
+		}
+		countStr := strings.ReplaceAll(m[p.countGroup], ",", "")
+		count, err := strconv.Atoi(countStr)
+		if err != nil {
+			continue
+		}
+		return &model.PageMetadata{
+			Rating:      rating,
+			ReviewCount: count,
+			Source:      "regex",
+		}
 	}
-	rating, err := strconv.ParseFloat(m[1], 64)
-	if err != nil {
-		return nil
-	}
-	countStr := strings.ReplaceAll(m[2], ",", "")
-	count, err := strconv.Atoi(countStr)
-	if err != nil {
-		return nil
-	}
-	return &model.PageMetadata{
-		Rating:      rating,
-		ReviewCount: count,
-		Source:      "regex",
-	}
+	return nil
 }
 
 func parseBBBMetadata(md string) *model.PageMetadata {

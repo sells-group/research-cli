@@ -222,6 +222,52 @@ func TestParseReviewMetadata_GoogleMaps(t *testing.T) {
 			wantCount:  10,
 		},
 		{
+			name:       "markdown bold rating",
+			md:         "Acme Corp\n**4.8** (127 reviews)\n123 Main St",
+			wantRating: 4.8,
+			wantCount:  127,
+		},
+		{
+			name:       "slash-5 format",
+			md:         "Acme Corp\n4.8/5 (127 reviews)\n123 Main St",
+			wantRating: 4.8,
+			wantCount:  127,
+		},
+		{
+			name:       "slash-5 no parens",
+			md:         "Acme Corp\n4.5/5 89 reviews",
+			wantRating: 4.5,
+			wantCount:  89,
+		},
+		{
+			name:       "rated out of 5",
+			md:         "Acme Corp\nRated 4.8 out of 5 · 127 reviews",
+			wantRating: 4.8,
+			wantCount:  127,
+		},
+		{
+			name:       "rated out of 5 dash separator",
+			md:         "Acme Corp\nrated 3.5 out of 5 - 42 reviews",
+			wantRating: 3.5,
+			wantCount:  42,
+		},
+		{
+			name:       "plain adjacent",
+			md:         "Acme Corp\n4.6 120 reviews\n123 Main St",
+			wantRating: 4.6,
+			wantCount:  120,
+		},
+		{
+			name:    "rating out of bounds high",
+			md:      "Score: 6.0 stars (10 reviews)",
+			wantNil: true,
+		},
+		{
+			name:    "rating out of bounds low",
+			md:      "Score: 0.5 stars (10 reviews)",
+			wantNil: true,
+		},
+		{
 			name:    "no match",
 			md:      "Acme Corp\n123 Main St\nSalt Lake City",
 			wantNil: true,
