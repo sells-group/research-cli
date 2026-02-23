@@ -753,6 +753,8 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		allAnswers = InjectPageMetadata(allAnswers, allPages, company.PreSeeded)
 		// Cross-validate employee count against LinkedIn range.
 		allAnswers = CrossValidateEmployeeCount(allAnswers, linkedInData)
+		// Validate NAICS codes against reference data and cross-reference with SoS filings.
+		allAnswers = ValidateAndCrossReferenceNAICS(allAnswers, allPages)
 		// Enrich with CBP-based revenue estimate if available.
 		allAnswers = EnrichWithRevenueEstimate(ctx, allAnswers, company, p.estimator)
 		// Enrich with PPP loan data (revenue + employees from database).
