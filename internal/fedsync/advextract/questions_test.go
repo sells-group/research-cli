@@ -6,8 +6,8 @@ import (
 
 func TestAllQuestions_Count(t *testing.T) {
 	qs := AllQuestions()
-	if len(qs) != 95 {
-		t.Errorf("expected 95 questions, got %d", len(qs))
+	if len(qs) != 238 {
+		t.Errorf("expected 238 questions, got %d", len(qs))
 	}
 }
 
@@ -24,7 +24,7 @@ func TestAllQuestions_UniqueKeys(t *testing.T) {
 
 func TestAllQuestions_ValidTiers(t *testing.T) {
 	for _, q := range AllQuestions() {
-		if q.Tier < 1 || q.Tier > 3 {
+		if q.Tier < 1 || q.Tier > 2 {
 			t.Errorf("question %s has invalid tier %d", q.Key, q.Tier)
 		}
 	}
@@ -43,7 +43,8 @@ func TestAllQuestions_ValidCategories(t *testing.T) {
 		CatFirmIdentity: true, CatAUMGrowth: true, CatInvestment: true,
 		CatFees: true, CatClients: true, CatCompliance: true,
 		CatOperations: true, CatPersonnel: true, CatFundDetail: true,
-		CatConflicts: true, CatGrowth: true,
+		CatConflicts: true, CatGrowth: true, CatCRS: true,
+		CatCrossDoc: true, CatSynthesis: true,
 	}
 	for _, q := range AllQuestions() {
 		if !validCats[q.Category] {
@@ -55,12 +56,18 @@ func TestAllQuestions_ValidCategories(t *testing.T) {
 func TestQuestionsByTier_Distribution(t *testing.T) {
 	t1 := QuestionsByTier(1)
 	t2 := QuestionsByTier(2)
-	t3 := QuestionsByTier(3)
 
-	total := len(t1) + len(t2) + len(t3)
-	if total != 95 {
-		t.Errorf("tier distribution should sum to 95, got %d (T1=%d, T2=%d, T3=%d)",
-			total, len(t1), len(t2), len(t3))
+	total := len(t1) + len(t2)
+	if total != 238 {
+		t.Errorf("tier distribution should sum to 238, got %d (T1=%d, T2=%d)",
+			total, len(t1), len(t2))
+	}
+
+	if len(t1) != 230 {
+		t.Errorf("expected 230 Tier 1 questions, got %d", len(t1))
+	}
+	if len(t2) != 8 {
+		t.Errorf("expected 8 Tier 2 questions, got %d", len(t2))
 	}
 }
 
@@ -69,20 +76,20 @@ func TestQuestionsByScope_Distribution(t *testing.T) {
 	fund := QuestionsByScope(ScopeFund)
 
 	total := len(advisor) + len(fund)
-	if total != 95 {
-		t.Errorf("scope distribution should sum to 95, got %d (advisor=%d, fund=%d)",
+	if total != 238 {
+		t.Errorf("scope distribution should sum to 238, got %d (advisor=%d, fund=%d)",
 			total, len(advisor), len(fund))
 	}
 
-	if len(fund) != 15 {
-		t.Errorf("expected 15 fund-level questions, got %d", len(fund))
+	if len(fund) != 31 {
+		t.Errorf("expected 31 fund-level questions, got %d", len(fund))
 	}
 }
 
 func TestStructuredBypassQuestions(t *testing.T) {
 	bypass := StructuredBypassQuestions()
-	if len(bypass) != 17 {
-		t.Errorf("expected 17 structured bypass questions, got %d", len(bypass))
+	if len(bypass) != 29 {
+		t.Errorf("expected 29 structured bypass questions, got %d", len(bypass))
 	}
 
 	// All bypass questions should have Part 1 as source.
@@ -102,19 +109,28 @@ func TestStructuredBypassQuestions(t *testing.T) {
 
 func TestQuestionMap(t *testing.T) {
 	m := QuestionMap()
-	if len(m) != 95 {
-		t.Errorf("expected 95 entries in question map, got %d", len(m))
+	if len(m) != 238 {
+		t.Errorf("expected 238 entries in question map, got %d", len(m))
 	}
 
-	// Check a known question.
-	q, ok := m["revenue_estimate"]
+	// Check a known Tier 2 (Sonnet) question.
+	q, ok := m["integration_complexity_assessment"]
 	if !ok {
-		t.Fatal("expected revenue_estimate in question map")
+		t.Fatal("expected integration_complexity_assessment in question map")
 	}
-	if q.Tier != 3 {
-		t.Errorf("revenue_estimate should be tier 3, got %d", q.Tier)
+	if q.Tier != 2 {
+		t.Errorf("integration_complexity_assessment should be tier 2, got %d", q.Tier)
 	}
-	if q.Category != CatAUMGrowth {
-		t.Errorf("revenue_estimate should be category B, got %s", q.Category)
+	if q.Category != CatSynthesis {
+		t.Errorf("integration_complexity_assessment should be category N, got %s", q.Category)
+	}
+
+	// Check a known bypass question.
+	qb, ok := m["aum_current"]
+	if !ok {
+		t.Fatal("expected aum_current in question map")
+	}
+	if !qb.StructuredBypass {
+		t.Error("aum_current should be a structured bypass question")
 	}
 }
