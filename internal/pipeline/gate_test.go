@@ -45,6 +45,7 @@ func TestQualityGate_PassesAndUpdatesSF(t *testing.T) {
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{
 			QualityScoreThreshold: 0.5,
+			QualityWeights: config.QualityWeights{Confidence: 1.0},
 		},
 	}
 
@@ -90,6 +91,7 @@ func TestQualityGate_FailsSendsToManualReview(t *testing.T) {
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{
 			QualityScoreThreshold: 0.6,
+			QualityWeights: config.QualityWeights{Confidence: 1.0},
 		},
 		ToolJet: config.ToolJetConfig{
 			WebhookURL: ts.URL,
@@ -429,7 +431,7 @@ func TestQualityGate_CreateAccount_MinimumFieldsOnly(t *testing.T) {
 		Return(nil, nil)
 
 	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.0}, // 0 threshold so empty fields pass.
+		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.0, QualityWeights: config.QualityWeights{Confidence: 1.0}}, // 0 threshold so empty fields pass.
 	}
 
 	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
@@ -480,7 +482,7 @@ func TestQualityGate_MultipleContacts(t *testing.T) {
 		Return(nil, nil)
 
 	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.0}, // Low threshold so it passes.
+		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.0, QualityWeights: config.QualityWeights{Confidence: 1.0}}, // Low threshold so it passes.
 	}
 
 	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)

@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 )
 
@@ -79,47 +81,13 @@ func FormatReport(company model.Company, answers []model.ExtractionAnswer, field
 	return b.String()
 }
 
-// ComputeScore calculates the quality score based on field coverage and
-// confidence. Only fields that have at least one question targeting them
-// (or are auto-derived like account_name) count toward the denominator.
-// Returns 0.0-1.0.
-func ComputeScore(fieldValues map[string]model.FieldValue, fields *model.FieldRegistry, questions []model.Question) float64 {
+// ComputeScore calculates a multi-dimension quality score based on confidence,
+// completeness, source diversity, and data freshness. Only fields that have at
+// least one question targeting them (or are auto-derived like account_name)
+// count toward the score. Returns a ScoreBreakdown with Final in 0.0-1.0.
+func ComputeScore(fieldValues map[string]model.FieldValue, fields *model.FieldRegistry, questions []model.Question, answers []model.ExtractionAnswer, weights config.QualityWeights) ScoreBreakdown {
 	if fields == nil || len(fields.Fields) == 0 {
-		return 0.0
+		return ScoreBreakdown{}
 	}
-
-	// Build set of field keys that have questions targeting them.
-	hasQuestion := make(map[string]bool)
-	for _, q := range questions {
-		for _, fk := range splitFieldKeys(q.FieldKey) {
-			hasQuestion[fk] = true
-		}
-	}
-	// Auto-derived fields are always scoreable.
-	hasQuestion["account_name"] = true
-
-	totalWeight := 0.0
-	score := 0.0
-
-	for _, f := range fields.Fields {
-		if len(questions) > 0 && !hasQuestion[f.Key] {
-			continue // Skip fields with no question mapping.
-		}
-		weight := 1.0
-		if f.Required {
-			weight = 2.0
-		}
-		totalWeight += weight
-
-		fv, ok := fieldValues[f.Key]
-		if ok {
-			score += weight * fv.Confidence
-		}
-	}
-
-	if totalWeight == 0 {
-		return 0.0
-	}
-
-	return score / totalWeight
+	return computeQualityScore(fieldValues, fields, questions, answers, weights, time.Now())
 }

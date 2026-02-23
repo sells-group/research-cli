@@ -39,6 +39,10 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5-20251001", cfg.Anthropic.HaikuModel)
 	assert.Equal(t, 100, cfg.Anthropic.MaxBatchSize)
 	assert.Equal(t, "https://login.salesforce.com", cfg.Salesforce.LoginURL)
+	assert.InDelta(t, 0.50, cfg.Pipeline.QualityWeights.Confidence, 0.001)
+	assert.InDelta(t, 0.25, cfg.Pipeline.QualityWeights.Completeness, 0.001)
+	assert.InDelta(t, 0.15, cfg.Pipeline.QualityWeights.Diversity, 0.001)
+	assert.InDelta(t, 0.10, cfg.Pipeline.QualityWeights.Freshness, 0.001)
 }
 
 func TestLoadFromYAML(t *testing.T) {
@@ -249,4 +253,24 @@ func TestValidateConfidenceThresholds(t *testing.T) {
 	err = cfg.Validate("serve")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "skip_confidence_threshold")
+}
+
+func TestValidateQualityWeights_Negative(t *testing.T) {
+	cfg := validDefaults()
+	cfg.Server.Port = 8080
+
+	cfg.Pipeline.QualityWeights.Confidence = -0.1
+	err := cfg.Validate("serve")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "quality_weights values must be >= 0")
+
+	cfg.Pipeline.QualityWeights.Confidence = 0.5
+	cfg.Pipeline.QualityWeights.Diversity = -1
+	err = cfg.Validate("serve")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "quality_weights values must be >= 0")
+
+	cfg.Pipeline.QualityWeights.Diversity = 0.15
+	err = cfg.Validate("serve")
+	assert.NoError(t, err)
 }

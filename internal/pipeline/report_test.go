@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/stretchr/testify/assert"
 )
@@ -66,12 +67,12 @@ func TestComputeScore(t *testing.T) {
 		"employees": {FieldKey: "employees", Confidence: 0.8},
 	}
 
-	score := ComputeScore(fieldValues, fields, nil)
+	breakdown := ComputeScore(fieldValues, fields, nil, nil, config.QualityWeights{Confidence: 1.0})
 
 	// Required fields have weight 2, non-required weight 1.
 	// Total weight: 2 + 1 + 2 = 5
 	// Score: (2*0.9 + 0 + 2*0.8) / 5 = (1.8 + 1.6) / 5 = 3.4/5 = 0.68
-	assert.InDelta(t, 0.68, score, 0.01)
+	assert.InDelta(t, 0.68, breakdown.Final, 0.01)
 }
 
 func TestComputeScore_AllFieldsPresent(t *testing.T) {
@@ -85,19 +86,19 @@ func TestComputeScore_AllFieldsPresent(t *testing.T) {
 		"b": {FieldKey: "b", Confidence: 1.0},
 	}
 
-	score := ComputeScore(fieldValues, fields, nil)
-	assert.Equal(t, 1.0, score)
+	breakdown := ComputeScore(fieldValues, fields, nil, nil, config.QualityWeights{Confidence: 1.0})
+	assert.Equal(t, 1.0, breakdown.Final)
 }
 
 func TestComputeScore_NoFields(t *testing.T) {
 	fields := model.NewFieldRegistry(nil)
-	score := ComputeScore(nil, fields, nil)
-	assert.Equal(t, 0.0, score)
+	breakdown := ComputeScore(nil, fields, nil, nil, config.QualityWeights{Confidence: 1.0})
+	assert.Equal(t, 0.0, breakdown.Final)
 }
 
 func TestComputeScore_NilRegistry(t *testing.T) {
-	score := ComputeScore(nil, nil, nil)
-	assert.Equal(t, 0.0, score)
+	breakdown := ComputeScore(nil, nil, nil, nil, config.QualityWeights{Confidence: 1.0})
+	assert.Equal(t, 0.0, breakdown.Final)
 }
 
 func TestFormatReport_HasHeaders(t *testing.T) {

@@ -200,13 +200,22 @@ type ScrapeConfig struct {
 	SearchRetries     int `yaml:"search_retries" mapstructure:"search_retries"`
 }
 
+// QualityWeights configures the multi-dimension quality scoring weights.
+type QualityWeights struct {
+	Confidence   float64 `yaml:"confidence" mapstructure:"confidence"`
+	Completeness float64 `yaml:"completeness" mapstructure:"completeness"`
+	Diversity    float64 `yaml:"diversity" mapstructure:"diversity"`
+	Freshness    float64 `yaml:"freshness" mapstructure:"freshness"`
+}
+
 // PipelineConfig configures extraction behavior.
 type PipelineConfig struct {
-	ConfidenceEscalationThreshold float64 `yaml:"confidence_escalation_threshold" mapstructure:"confidence_escalation_threshold"`
-	Tier3Gate                     string  `yaml:"tier3_gate" mapstructure:"tier3_gate"`
-	QualityScoreThreshold         float64 `yaml:"quality_score_threshold" mapstructure:"quality_score_threshold"`
-	MaxCostPerCompanyUSD          float64 `yaml:"max_cost_per_company_usd" mapstructure:"max_cost_per_company_usd"`
-	SkipConfidenceThreshold       float64 `yaml:"skip_confidence_threshold" mapstructure:"skip_confidence_threshold"`
+	ConfidenceEscalationThreshold float64        `yaml:"confidence_escalation_threshold" mapstructure:"confidence_escalation_threshold"`
+	Tier3Gate                     string         `yaml:"tier3_gate" mapstructure:"tier3_gate"`
+	QualityScoreThreshold         float64        `yaml:"quality_score_threshold" mapstructure:"quality_score_threshold"`
+	MaxCostPerCompanyUSD          float64        `yaml:"max_cost_per_company_usd" mapstructure:"max_cost_per_company_usd"`
+	SkipConfidenceThreshold       float64        `yaml:"skip_confidence_threshold" mapstructure:"skip_confidence_threshold"`
+	QualityWeights                QualityWeights `yaml:"quality_weights" mapstructure:"quality_weights"`
 }
 
 // BatchConfig configures batch processing.
@@ -280,6 +289,10 @@ func (c *Config) Validate(mode string) error {
 	if c.Pipeline.SkipConfidenceThreshold < 0 || c.Pipeline.SkipConfidenceThreshold > 1 {
 		errs = append(errs, "pipeline.skip_confidence_threshold must be between 0.0 and 1.0")
 	}
+	if c.Pipeline.QualityWeights.Confidence < 0 || c.Pipeline.QualityWeights.Completeness < 0 ||
+		c.Pipeline.QualityWeights.Diversity < 0 || c.Pipeline.QualityWeights.Freshness < 0 {
+		errs = append(errs, "pipeline.quality_weights values must be >= 0")
+	}
 
 	if len(errs) > 0 {
 		return eris.New(fmt.Sprintf("config: validation failed: %s", strings.Join(errs, "; ")))
@@ -321,6 +334,10 @@ func Load() (*Config, error) {
 	v.SetDefault("pipeline.quality_score_threshold", 0.6)
 	v.SetDefault("pipeline.max_cost_per_company_usd", 10.0)
 	v.SetDefault("pipeline.skip_confidence_threshold", 0.8)
+	v.SetDefault("pipeline.quality_weights.confidence", 0.50)
+	v.SetDefault("pipeline.quality_weights.completeness", 0.25)
+	v.SetDefault("pipeline.quality_weights.diversity", 0.15)
+	v.SetDefault("pipeline.quality_weights.freshness", 0.10)
 	v.SetDefault("jina.base_url", "https://r.jina.ai")
 	v.SetDefault("jina.search_base_url", "https://s.jina.ai")
 	v.SetDefault("firecrawl.base_url", "https://api.firecrawl.dev/v2")

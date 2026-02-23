@@ -46,6 +46,7 @@ func TestQualityGate_SFUpdateFails(t *testing.T) {
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{
 			QualityScoreThreshold: 0.5,
+			QualityWeights: config.QualityWeights{Confidence: 1.0},
 		},
 	}
 
@@ -84,7 +85,7 @@ func TestQualityGate_NoNotionPageID(t *testing.T) {
 	// UpdatePage should NOT be called since NotionPageID is empty.
 
 	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
+		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5, QualityWeights: config.QualityWeights{Confidence: 1.0}},
 	}
 
 	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
@@ -126,7 +127,7 @@ func TestQualityGate_PassNoSFFieldValues(t *testing.T) {
 	notionClient.On("UpdatePage", mock.Anything, "page-123", mock.Anything).Return(nil, nil)
 
 	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
+		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5, QualityWeights: config.QualityWeights{Confidence: 1.0}},
 	}
 
 	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
@@ -157,7 +158,7 @@ func TestQualityGate_FailNoWebhook(t *testing.T) {
 	notionClient.On("UpdatePage", mock.Anything, "page-789", mock.Anything).Return(nil, nil)
 
 	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.6},
+		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.6, QualityWeights: config.QualityWeights{Confidence: 1.0}},
 		ToolJet:  config.ToolJetConfig{WebhookURL: ""}, // No webhook configured.
 	}
 
@@ -195,7 +196,7 @@ func TestQualityGate_NotionUpdateFails(t *testing.T) {
 		Return(nil, errors.New("notion api error"))
 
 	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
+		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5, QualityWeights: config.QualityWeights{Confidence: 1.0}},
 	}
 
 	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
@@ -235,7 +236,7 @@ func TestQualityGate_WithReportInSFFields(t *testing.T) {
 	notionClient.On("UpdatePage", mock.Anything, "page-rep", mock.Anything).Return(nil, nil)
 
 	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
+		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5, QualityWeights: config.QualityWeights{Confidence: 1.0}},
 	}
 
 	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
@@ -335,6 +336,7 @@ func TestQualityGate_SFSuccessNotionFailRetries(t *testing.T) {
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{
 			QualityScoreThreshold: 0.5,
+			QualityWeights: config.QualityWeights{Confidence: 1.0},
 		},
 	}
 
@@ -383,6 +385,7 @@ func TestQualityGate_SFSuccessNotionFailRetryExhausted(t *testing.T) {
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{
 			QualityScoreThreshold: 0.5,
+			QualityWeights: config.QualityWeights{Confidence: 1.0},
 		},
 	}
 
@@ -429,6 +432,7 @@ func TestQualityGate_NotionSuccessSFFailLogsInconsistency(t *testing.T) {
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{
 			QualityScoreThreshold: 0.5,
+			QualityWeights: config.QualityWeights{Confidence: 1.0},
 		},
 	}
 
