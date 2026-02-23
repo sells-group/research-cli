@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/scrape"
+	"github.com/sells-group/research-cli/pkg/google"
 	"github.com/sells-group/research-cli/pkg/jina"
 	"github.com/sells-group/research-cli/pkg/perplexity"
 )
@@ -92,7 +95,7 @@ func DefaultExternalSources() []ExternalSource {
 // For each source, it first searches for the profile URL using Jina Search,
 // then scrapes the discovered URL via the scrape chain.
 // Sources are fetched in parallel. Address cross-reference metadata is returned.
-func ScrapePhase(ctx context.Context, company model.Company, jinaClient jina.Client, chain *scrape.Chain, pplxClient perplexity.Client, cfg config.ScrapeConfig) ([]model.CrawledPage, []AddressMatch, []SourceResult) {
+func ScrapePhase(ctx context.Context, company model.Company, jinaClient jina.Client, chain *scrape.Chain, pplxClient perplexity.Client, googleClient google.Client, cfg config.ScrapeConfig) ([]model.CrawledPage, []AddressMatch, []SourceResult) {
 	if company.Name == "" {
 		zap.L().Warn("scrape: skipping external sources, no company name")
 		return nil, nil, nil
@@ -110,7 +113,7 @@ func ScrapePhase(ctx context.Context, company model.Company, jinaClient jina.Cli
 	for _, src := range sources {
 		g.Go(func() error {
 			start := time.Now()
-			page, err := scrapeSource(gCtx, src, company, jinaClient, chain, pplxClient, cfg)
+			page, err := scrapeSource(gCtx, src, company, jinaClient, chain, pplxClient, googleClient, cfg)
 			dur := time.Since(start)
 
 			sr := SourceResult{
@@ -185,7 +188,7 @@ func dedupPages(pages []model.CrawledPage) []model.CrawledPage {
 }
 
 // scrapeSource handles the search-then-scrape flow for a single external source.
-func scrapeSource(ctx context.Context, src ExternalSource, company model.Company, jinaClient jina.Client, chain *scrape.Chain, pplxClient perplexity.Client, cfg config.ScrapeConfig) (*model.CrawledPage, error) {
+func scrapeSource(ctx context.Context, src ExternalSource, company model.Company, jinaClient jina.Client, chain *scrape.Chain, pplxClient perplexity.Client, googleClient google.Client, cfg config.ScrapeConfig) (*model.CrawledPage, error) {
 	var targetURL string
 
 	if src.SearchQueryFunc != nil {
@@ -289,9 +292,29 @@ func scrapeSource(ctx context.Context, src ExternalSource, company model.Company
 		return nil, nil
 	}
 
-	result, err := chain.Scrape(ctx, targetURL)
-	if err != nil {
-		return nil, fmt.Errorf("chain scrape failed for %s: %w", targetURL, err)
+	result, scrapeErr := chain.Scrape(ctx, targetURL)
+
+	// Google Maps fallback chain: if scrape failed entirely, try alternative
+	// sources to resolve review metadata before giving up.
+	if src.Name == "google_maps" && (scrapeErr != nil || result == nil) {
+		meta := resolveGoogleMapsFallbacks(ctx, company, jinaClient, pplxClient, googleClient)
+		if meta != nil {
+			return &model.CrawledPage{
+				URL:      targetURL,
+				Title:    fmt.Sprintf("[%s] %s", src.Name, company.Name),
+				Markdown: fmt.Sprintf("%s\n%.1f stars (%d reviews)", company.Name, meta.Rating, meta.ReviewCount),
+				Metadata: meta,
+			}, nil
+		}
+		// All fallbacks failed — return original error.
+		if scrapeErr != nil {
+			return nil, fmt.Errorf("chain scrape failed for %s: %w", targetURL, scrapeErr)
+		}
+		return nil, nil
+	}
+
+	if scrapeErr != nil {
+		return nil, fmt.Errorf("chain scrape failed for %s: %w", targetURL, scrapeErr)
 	}
 	if result == nil {
 		return nil, nil
@@ -305,9 +328,9 @@ func scrapeSource(ctx context.Context, src ExternalSource, company model.Company
 	// Extract structured metadata (reviews, ratings) before title prefixing.
 	page.Metadata = ParseReviewMetadata(src.Name, page.Markdown)
 
-	// If Google Maps metadata wasn't parseable, try Perplexity fallback.
-	if src.Name == "google_maps" && page.Metadata == nil && pplxClient != nil {
-		page.Metadata = resolveGoogleMapsMetadata(ctx, company, pplxClient)
+	// Google Maps fallback chain for when scrape succeeded but regex failed.
+	if src.Name == "google_maps" && page.Metadata == nil {
+		page.Metadata = resolveGoogleMapsFallbacks(ctx, company, jinaClient, pplxClient, googleClient)
 	}
 
 	// Guard against double-prefixing the title.
@@ -319,15 +342,70 @@ func scrapeSource(ctx context.Context, src ExternalSource, company model.Company
 	return &page, nil
 }
 
-// resolveGoogleMapsMetadata attempts a Perplexity fallback when the chain scrape
-// yields no parseable review metadata from Google Maps.
-func resolveGoogleMapsMetadata(ctx context.Context, company model.Company, pplxClient perplexity.Client) *model.PageMetadata {
+// resolveGoogleMapsFallbacks tries Jina Search, Perplexity, and Google Places
+// API in order until one succeeds at resolving review metadata.
+func resolveGoogleMapsFallbacks(ctx context.Context, company model.Company, jinaClient jina.Client, pplxClient perplexity.Client, googleClient google.Client) *model.PageMetadata {
+	// Fallback 1: Jina Search — parse review data from search snippets.
+	if jinaClient != nil {
+		if meta := resolveGoogleMapsViaSearch(ctx, company, jinaClient); meta != nil {
+			return meta
+		}
+	}
+
+	// Fallback 2: Perplexity — ask for review data directly.
+	if pplxClient != nil {
+		if meta := resolveGoogleMapsViaPerplexity(ctx, company, pplxClient); meta != nil {
+			return meta
+		}
+	}
+
+	// Fallback 3: Google Places API — ultimate fallback, highest confidence.
+	if googleClient != nil {
+		if meta := resolveGoogleMapsViaAPI(ctx, company, googleClient); meta != nil {
+			return meta
+		}
+	}
+
+	return nil
+}
+
+// resolveGoogleMapsViaSearch uses Jina Search to find review data from search
+// result snippets. Returns metadata with 0.85 confidence.
+func resolveGoogleMapsViaSearch(ctx context.Context, company model.Company, jinaClient jina.Client) *model.PageMetadata {
+	query := fmt.Sprintf("%s %s %s Google Maps reviews rating", company.Name, company.City, company.State)
+	resp, err := jinaClient.Search(ctx, query)
+	if err != nil || len(resp.Data) == 0 {
+		return nil
+	}
+
+	// Try parsing review data from each search result's content/description.
+	for _, r := range resp.Data {
+		for _, text := range []string{r.Content, r.Description, r.Title} {
+			if meta := parseGoogleMapsMetadata(text); meta != nil {
+				meta.Source = "jina_search"
+				zap.L().Debug("scrape: resolved Google Maps via Jina Search",
+					zap.String("company", company.Name),
+					zap.Float64("rating", meta.Rating),
+					zap.Int("reviews", meta.ReviewCount),
+				)
+				return meta
+			}
+		}
+	}
+	return nil
+}
+
+// resolveGoogleMapsViaPerplexity asks Perplexity for Google Maps review data.
+// Returns metadata with 0.70 confidence.
+func resolveGoogleMapsViaPerplexity(ctx context.Context, company model.Company, pplxClient perplexity.Client) *model.PageMetadata {
+	location := strings.TrimSpace(company.City + " " + company.State)
 	prompt := fmt.Sprintf(
-		"What is the Google Maps star rating and total review count for %s in %s, %s? "+
+		"What is the Google Maps star rating and total number of reviews for the business \"%s\" in %s? "+
+			"If this is a multi-location business, provide the rating for the primary/headquarters location. "+
 			"Reply with ONLY the rating and review count in this exact format: "+
-			"RATING stars REVIEWS reviews (e.g. '4.5 stars 127 reviews'). "+
+			"X.X stars N reviews (e.g. '4.5 stars 127 reviews'). "+
 			"If you cannot find this information, reply 'not found'.",
-		company.Name, company.City, company.State,
+		company.Name, location,
 	)
 	temp := 0.1
 	resp, err := pplxClient.ChatCompletion(ctx, perplexity.ChatCompletionRequest{
@@ -337,11 +415,92 @@ func resolveGoogleMapsMetadata(ctx context.Context, company model.Company, pplxC
 	if err != nil || len(resp.Choices) == 0 {
 		return nil
 	}
-	meta := parseGoogleMapsMetadata(resp.Choices[0].Message.Content)
+	content := resp.Choices[0].Message.Content
+
+	// Try standard regex parsing first.
+	meta := parseGoogleMapsMetadata(content)
+	if meta != nil {
+		meta.Source = "perplexity"
+		return meta
+	}
+
+	// Secondary parsing for non-standard responses like
+	// "The rating is 4.5 with 127 reviews" or "4.5 out of 5 stars, 127 reviews".
+	meta = parsePerplexityFreeform(content)
 	if meta != nil {
 		meta.Source = "perplexity"
 	}
 	return meta
+}
+
+// parsePerplexityFreeform attempts to extract rating/count from freeform text
+// responses that don't match the standard regex patterns.
+func parsePerplexityFreeform(text string) *model.PageMetadata {
+	// Match patterns like "rating is 4.5" or "rated 4.5" or "rating of 4.5"
+	ratingRe := regexp.MustCompile(`(?:rating|rated)\s+(?:is\s+|of\s+)?(\d+\.?\d*)`)
+	// Match patterns like "127 reviews" or "127 total reviews"
+	countRe := regexp.MustCompile(`(\d[\d,]*)\s+(?:total\s+)?reviews?`)
+
+	rm := ratingRe.FindStringSubmatch(strings.ToLower(text))
+	cm := countRe.FindStringSubmatch(strings.ToLower(text))
+	if rm == nil || cm == nil {
+		return nil
+	}
+
+	rating, err := strconv.ParseFloat(rm[1], 64)
+	if err != nil || rating < 1.0 || rating > 5.0 {
+		return nil
+	}
+	countStr := strings.ReplaceAll(cm[1], ",", "")
+	count, err := strconv.Atoi(countStr)
+	if err != nil || count <= 0 {
+		return nil
+	}
+
+	return &model.PageMetadata{
+		Rating:      rating,
+		ReviewCount: count,
+	}
+}
+
+// resolveGoogleMapsViaAPI uses the Google Places Text Search API to get
+// review data. Returns metadata with 0.98 confidence.
+func resolveGoogleMapsViaAPI(ctx context.Context, company model.Company, googleClient google.Client) *model.PageMetadata {
+	query := company.Name
+	if company.City != "" {
+		query += " " + company.City
+	}
+	if company.State != "" {
+		query += " " + company.State
+	}
+
+	resp, err := googleClient.TextSearch(ctx, query)
+	if err != nil || len(resp.Places) == 0 {
+		if err != nil {
+			zap.L().Debug("scrape: Google Places API failed",
+				zap.String("company", company.Name),
+				zap.Error(err),
+			)
+		}
+		return nil
+	}
+
+	p := resp.Places[0]
+	if p.Rating == 0 || p.UserRatingCount == 0 {
+		return nil
+	}
+
+	zap.L().Debug("scrape: resolved Google Maps via Places API",
+		zap.String("company", company.Name),
+		zap.Float64("rating", p.Rating),
+		zap.Int("reviews", p.UserRatingCount),
+	)
+
+	return &model.PageMetadata{
+		Rating:      p.Rating,
+		ReviewCount: p.UserRatingCount,
+		Source:      "google_api",
+	}
 }
 
 func intPtr(v int) *int { return &v }

@@ -14,8 +14,11 @@ import (
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/scrape"
 	scrapemocks "github.com/sells-group/research-cli/internal/scrape/mocks"
+	"github.com/sells-group/research-cli/pkg/google"
+	googlemocks "github.com/sells-group/research-cli/pkg/google/mocks"
 	"github.com/sells-group/research-cli/pkg/jina"
 	jinamocks "github.com/sells-group/research-cli/pkg/jina/mocks"
+	"github.com/sells-group/research-cli/pkg/perplexity"
 )
 
 var defaultScrapeConfig = config.ScrapeConfig{SearchTimeoutSecs: 15, SearchRetries: 0}
@@ -57,7 +60,7 @@ func TestScrapePhase_SearchThenScrape(t *testing.T) {
 	).Maybe()
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	pages, addrMatches, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, nil, defaultScrapeConfig)
+	pages, addrMatches, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, nil, nil, defaultScrapeConfig)
 
 	assert.Len(t, pages, 3) // Google Maps, BBB, SoS (distinct content per URL)
 	for _, p := range pages {
@@ -97,7 +100,7 @@ func TestScrapePhase_ChainAllFail(t *testing.T) {
 	s.On("Scrape", mock.Anything, mock.Anything).Return(nil, errors.New("fail")).Maybe()
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	pages, _, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, nil, defaultScrapeConfig)
+	pages, _, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, nil, nil, defaultScrapeConfig)
 
 	assert.Len(t, pages, 0)
 	// All 3 source results should exist, each with an error.
@@ -114,7 +117,7 @@ func TestScrapePhase_SearchNoResults(t *testing.T) {
 
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil))
 
-	pages, addrMatches, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, nil, defaultScrapeConfig)
+	pages, addrMatches, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, nil, nil, defaultScrapeConfig)
 
 	assert.Len(t, pages, 0)
 	assert.Nil(t, addrMatches)
@@ -165,7 +168,7 @@ func TestScrapePhase_PartialFailure(t *testing.T) {
 	).Maybe()
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	pages, _, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, nil, defaultScrapeConfig)
+	pages, _, sourceResults := ScrapePhase(ctx, company, jinaClient, chain, nil, nil, defaultScrapeConfig)
 
 	// At least 1 page from the successful source.
 	assert.GreaterOrEqual(t, len(pages), 1)
@@ -211,7 +214,7 @@ func TestScrapePhase_ContentDedup(t *testing.T) {
 	}, nil).Maybe()
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	pages, _, _ := ScrapePhase(ctx, company, jinaClient, chain, nil, defaultScrapeConfig)
+	pages, _, _ := ScrapePhase(ctx, company, jinaClient, chain, nil, nil, defaultScrapeConfig)
 
 	// All 3 sources return identical markdown → dedup to 1 page.
 	assert.Equal(t, 1, len(pages))
@@ -267,7 +270,7 @@ func TestScrapeSource_RetryOnFailure(t *testing.T) {
 	}
 
 	cfg := config.ScrapeConfig{SearchTimeoutSecs: 5, SearchRetries: 1}
-	page, err := scrapeSource(ctx, src, company, jinaClient, chain, nil, cfg)
+	page, err := scrapeSource(ctx, src, company, jinaClient, chain, nil, nil, cfg)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, page)
@@ -293,7 +296,7 @@ func TestScrapeSource_RetryExhausted(t *testing.T) {
 	}
 
 	cfg := config.ScrapeConfig{SearchTimeoutSecs: 5, SearchRetries: 1}
-	page, err := scrapeSource(ctx, src, company, jinaClient, chain, nil, cfg)
+	page, err := scrapeSource(ctx, src, company, jinaClient, chain, nil, nil, cfg)
 
 	assert.Error(t, err)
 	assert.Nil(t, page)
@@ -324,7 +327,7 @@ func TestScrapeSource_NoDuplicatePrefix(t *testing.T) {
 		},
 	}
 
-	page, err := scrapeSource(ctx, src, company, nil, chain, nil, defaultScrapeConfig)
+	page, err := scrapeSource(ctx, src, company, nil, chain, nil, nil, defaultScrapeConfig)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, page)
@@ -399,7 +402,7 @@ func TestScrapePhase_RetryTimerCleanup(t *testing.T) {
 	cfg := config.ScrapeConfig{SearchTimeoutSecs: 1, SearchRetries: 3}
 
 	start := time.Now()
-	_, err := scrapeSource(ctx, src, company, jinaClient, chain, nil, cfg)
+	_, err := scrapeSource(ctx, src, company, jinaClient, chain, nil, nil, cfg)
 	elapsed := time.Since(start)
 
 	// scrapeSource should return ctx.Err() because context was cancelled during
@@ -416,9 +419,267 @@ func TestScrapePhase_EmptyName_ReturnsNil(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{URL: "https://acme.com"} // No Name.
 
-	pages, addrMatches, sourceResults := ScrapePhase(ctx, company, nil, nil, nil, defaultScrapeConfig)
+	pages, addrMatches, sourceResults := ScrapePhase(ctx, company, nil, nil, nil, nil, defaultScrapeConfig)
 
 	assert.Nil(t, pages)
 	assert.Nil(t, addrMatches)
 	assert.Nil(t, sourceResults)
+}
+
+func TestResolveGoogleMapsViaSearch(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", City: "Springfield", State: "IL"}
+
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string")).
+		Return(&jina.SearchResponse{
+			Code: 200,
+			Data: []jina.SearchResult{
+				{
+					Title:   "Acme Corp Google Maps",
+					URL:     "https://maps.google.com/place/Acme+Corp",
+					Content: "Acme Corp is rated 4.5 stars (89 reviews). Open now.",
+				},
+			},
+		}, nil)
+
+	meta := resolveGoogleMapsViaSearch(ctx, company, jinaClient)
+
+	assert.NotNil(t, meta)
+	assert.InDelta(t, 4.5, meta.Rating, 0.001)
+	assert.Equal(t, 89, meta.ReviewCount)
+	assert.Equal(t, "jina_search", meta.Source)
+}
+
+func TestResolveGoogleMapsViaSearch_NoMatch(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", City: "Springfield", State: "IL"}
+
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string")).
+		Return(&jina.SearchResponse{
+			Code: 200,
+			Data: []jina.SearchResult{
+				{Title: "Unrelated", URL: "https://example.com", Content: "No review data here"},
+			},
+		}, nil)
+
+	meta := resolveGoogleMapsViaSearch(ctx, company, jinaClient)
+	assert.Nil(t, meta)
+}
+
+func TestResolveGoogleMapsViaPerplexity(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", City: "Springfield", State: "IL"}
+
+	pplxClient := &mockPerplexityClient{
+		response: "4.5 stars 89 reviews",
+	}
+
+	meta := resolveGoogleMapsViaPerplexity(ctx, company, pplxClient)
+
+	assert.NotNil(t, meta)
+	assert.InDelta(t, 4.5, meta.Rating, 0.001)
+	assert.Equal(t, 89, meta.ReviewCount)
+	assert.Equal(t, "perplexity", meta.Source)
+}
+
+func TestResolveGoogleMapsViaPerplexity_FreeformResponse(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", City: "Springfield", State: "IL"}
+
+	pplxClient := &mockPerplexityClient{
+		response: "The rating is 4.5 with 89 reviews on Google Maps.",
+	}
+
+	meta := resolveGoogleMapsViaPerplexity(ctx, company, pplxClient)
+
+	assert.NotNil(t, meta)
+	assert.InDelta(t, 4.5, meta.Rating, 0.001)
+	assert.Equal(t, 89, meta.ReviewCount)
+	assert.Equal(t, "perplexity", meta.Source)
+}
+
+func TestParsePerplexityFreeform(t *testing.T) {
+	tests := []struct {
+		name       string
+		text       string
+		wantRating float64
+		wantCount  int
+		wantNil    bool
+	}{
+		{
+			name:       "rating is X with N reviews",
+			text:       "The rating is 4.5 with 127 reviews.",
+			wantRating: 4.5,
+			wantCount:  127,
+		},
+		{
+			name:       "rated X, N total reviews",
+			text:       "The business is rated 4.2 on Google Maps. 89 total reviews.",
+			wantRating: 4.2,
+			wantCount:  89,
+		},
+		{
+			name:       "rating of X",
+			text:       "It has a rating of 3.8 and 42 reviews.",
+			wantRating: 3.8,
+			wantCount:  42,
+		},
+		{
+			name:    "no rating info",
+			text:    "I could not find review information for this business.",
+			wantNil: true,
+		},
+		{
+			name:    "not found",
+			text:    "not found",
+			wantNil: true,
+		},
+		{
+			name:    "rating out of range",
+			text:    "The rating is 6.0 with 10 reviews",
+			wantNil: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := parsePerplexityFreeform(tt.text)
+			if tt.wantNil {
+				assert.Nil(t, meta)
+				return
+			}
+			assert.NotNil(t, meta)
+			assert.InDelta(t, tt.wantRating, meta.Rating, 0.001)
+			assert.Equal(t, tt.wantCount, meta.ReviewCount)
+		})
+	}
+}
+
+func TestResolveGoogleMapsViaAPI(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", City: "Springfield", State: "IL"}
+
+	googleClient := googlemocks.NewMockClient(t)
+	googleClient.On("TextSearch", mock.Anything, "Acme Corp Springfield IL").
+		Return(&google.TextSearchResponse{
+			Places: []google.Place{
+				{
+					DisplayName:     google.DisplayName{Text: "Acme Corp"},
+					Rating:          4.5,
+					UserRatingCount: 127,
+				},
+			},
+		}, nil)
+
+	meta := resolveGoogleMapsViaAPI(ctx, company, googleClient)
+
+	assert.NotNil(t, meta)
+	assert.InDelta(t, 4.5, meta.Rating, 0.001)
+	assert.Equal(t, 127, meta.ReviewCount)
+	assert.Equal(t, "google_api", meta.Source)
+}
+
+func TestResolveGoogleMapsViaAPI_NoResults(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Unknown Corp"}
+
+	googleClient := googlemocks.NewMockClient(t)
+	googleClient.On("TextSearch", mock.Anything, mock.AnythingOfType("string")).
+		Return(&google.TextSearchResponse{}, nil)
+
+	meta := resolveGoogleMapsViaAPI(ctx, company, googleClient)
+	assert.Nil(t, meta)
+}
+
+func TestResolveGoogleMapsViaAPI_ZeroRating(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "New Corp"}
+
+	googleClient := googlemocks.NewMockClient(t)
+	googleClient.On("TextSearch", mock.Anything, mock.AnythingOfType("string")).
+		Return(&google.TextSearchResponse{
+			Places: []google.Place{
+				{DisplayName: google.DisplayName{Text: "New Corp"}, Rating: 0, UserRatingCount: 0},
+			},
+		}, nil)
+
+	meta := resolveGoogleMapsViaAPI(ctx, company, googleClient)
+	assert.Nil(t, meta)
+}
+
+func TestResolveGoogleMapsFallbacks_ChainOrder(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", City: "Springfield", State: "IL"}
+
+	// Jina Search fails (no matches), Perplexity succeeds.
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string")).
+		Return(&jina.SearchResponse{Code: 200, Data: []jina.SearchResult{}}, nil)
+
+	pplxClient := &mockPerplexityClient{
+		response: "4.2 stars 55 reviews",
+	}
+
+	meta := resolveGoogleMapsFallbacks(ctx, company, jinaClient, pplxClient, nil)
+
+	assert.NotNil(t, meta)
+	assert.Equal(t, "perplexity", meta.Source)
+	assert.InDelta(t, 4.2, meta.Rating, 0.001)
+	assert.Equal(t, 55, meta.ReviewCount)
+}
+
+func TestScrapeSource_GoogleMaps_FallbackOnScrapeFailure(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", City: "Springfield", State: "IL"}
+
+	// Scrape chain fails completely.
+	s := scrapemocks.NewMockScraper(t)
+	s.On("Name").Return("mock").Maybe()
+	s.On("Supports", mock.Anything).Return(true).Maybe()
+	s.On("Scrape", mock.Anything, mock.Anything).Return(nil, errors.New("blocked")).Maybe()
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
+
+	// Jina Search succeeds with review data in snippet.
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string")).
+		Return(&jina.SearchResponse{
+			Code: 200,
+			Data: []jina.SearchResult{
+				{Title: "Acme Corp", Content: "4.5 stars (89 reviews)"},
+			},
+		}, nil).Maybe()
+
+	src := ExternalSource{
+		Name: "google_maps",
+		URLFunc: func(c model.Company) string {
+			return "https://www.google.com/maps/search/Acme+Corp"
+		},
+	}
+
+	page, err := scrapeSource(ctx, src, company, jinaClient, chain, nil, nil, defaultScrapeConfig)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, page)
+	assert.NotNil(t, page.Metadata)
+	assert.InDelta(t, 4.5, page.Metadata.Rating, 0.001)
+	assert.Equal(t, 89, page.Metadata.ReviewCount)
+	assert.Equal(t, "jina_search", page.Metadata.Source)
+}
+
+// mockPerplexityClient is a simple mock for testing Perplexity fallback.
+type mockPerplexityClient struct {
+	response string
+	err      error
+}
+
+func (m *mockPerplexityClient) ChatCompletion(_ context.Context, _ perplexity.ChatCompletionRequest) (*perplexity.ChatCompletionResponse, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &perplexity.ChatCompletionResponse{
+		Choices: []perplexity.Choice{
+			{Message: perplexity.Message{Role: "assistant", Content: m.response}},
+		},
+	}, nil
 }

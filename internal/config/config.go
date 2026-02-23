@@ -22,6 +22,7 @@ type Config struct {
 	ToolJet    ToolJetConfig    `yaml:"tooljet" mapstructure:"tooljet"`
 	PPP        PPPConfig        `yaml:"ppp" mapstructure:"ppp"`
 	Pricing    PricingConfig    `yaml:"pricing" mapstructure:"pricing"`
+	Google     GoogleConfig     `yaml:"google" mapstructure:"google"`
 	Crawl      CrawlConfig      `yaml:"crawl" mapstructure:"crawl"`
 	Scrape     ScrapeConfig     `yaml:"scrape" mapstructure:"scrape"`
 	Pipeline   PipelineConfig   `yaml:"pipeline" mapstructure:"pipeline"`
@@ -159,6 +160,11 @@ type PerplexityPricing struct {
 type FirecrawlPricing struct {
 	PlanMonthly     float64 `yaml:"plan_monthly" mapstructure:"plan_monthly"`
 	CreditsIncluded float64 `yaml:"credits_included" mapstructure:"credits_included"`
+}
+
+// GoogleConfig holds Google API settings.
+type GoogleConfig struct {
+	Key string `yaml:"key" mapstructure:"key"`
 }
 
 // CrawlConfig configures the crawl phase.

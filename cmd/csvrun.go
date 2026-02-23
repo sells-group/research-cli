@@ -225,7 +225,7 @@ func initOfflinePipeline(ctx context.Context) (*pipelineEnv, error) {
 		scrape.NewJinaAdapter(jinaClient),
 	)
 
-	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, nil, nil, nil, questions, fields)
+	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, nil, nil, nil, nil, questions, fields)
 
 	return &pipelineEnv{
 		Store:     st,

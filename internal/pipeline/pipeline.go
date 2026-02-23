@@ -21,6 +21,7 @@ import (
 	"github.com/sells-group/research-cli/internal/waterfall"
 	"github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
+	"github.com/sells-group/research-cli/pkg/google"
 	"github.com/sells-group/research-cli/pkg/jina"
 	"github.com/sells-group/research-cli/pkg/notion"
 	"github.com/sells-group/research-cli/pkg/perplexity"
@@ -39,6 +40,7 @@ type Pipeline struct {
 	anthropic  anthropic.Client
 	salesforce salesforce.Client
 	notion     notion.Client
+	google     google.Client
 	ppp        ppp.Querier
 	costCalc       *cost.Calculator
 	estimator      *estimate.RevenueEstimator
@@ -58,6 +60,7 @@ func New(
 	aiClient anthropic.Client,
 	sfClient salesforce.Client,
 	notionClient notion.Client,
+	googleClient google.Client,
 	pppClient ppp.Querier,
 	estimator *estimate.RevenueEstimator,
 	waterfallExec *waterfall.Executor,
@@ -80,6 +83,7 @@ func New(
 		anthropic:  aiClient,
 		salesforce: sfClient,
 		notion:     notionClient,
+		google:     googleClient,
 		ppp:        pppClient,
 		costCalc:      cost.NewCalculator(rates),
 		estimator:     estimator,
@@ -271,7 +275,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	if hasName {
 		g.Go(func() error {
 			pr := trackPhase("1b_scrape", func() (*model.PhaseResult, error) {
-				ep, addrMatches, sourceResults := ScrapePhase(gCtx, company, p.jina, p.chain, p.perplexity, p.cfg.Scrape)
+				ep, addrMatches, sourceResults := ScrapePhase(gCtx, company, p.jina, p.chain, p.perplexity, p.google, p.cfg.Scrape)
 				externalPages = ep
 				metadata := map[string]any{
 					"external_pages": len(ep),

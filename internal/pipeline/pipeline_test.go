@@ -158,7 +158,7 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 		Return(nil, nil).Maybe()
 
 	// --- Run pipeline ---
-	p := New(cfg, st, chain, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, nil, nil, questions, fields)
+	p := New(cfg, st, chain, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, nil, pppClient, nil, nil, questions, fields)
 
 	result, err := p.Run(ctx, company)
 
@@ -202,7 +202,7 @@ func TestPipeline_New(t *testing.T) {
 	questions := []model.Question{{ID: "q1"}}
 	fields := model.NewFieldRegistry(nil)
 
-	p := New(cfg, st, chain, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, nil, nil, questions, fields)
+	p := New(cfg, st, chain, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, nil, pppClient, nil, nil, questions, fields)
 
 	assert.NotNil(t, p)
 	assert.Equal(t, cfg, p.cfg)
@@ -370,7 +370,7 @@ func TestPipeline_ExistingAnswerLookup_SkipsQuestions(t *testing.T) {
 	pppClient := pppmocks.NewMockQuerier(t)
 	pppClient.On("FindLoans", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil, nil).Maybe()
 
-	p := New(cfg, st, chain, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, nil, nil, questions, fields)
+	p := New(cfg, st, chain, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, nil, pppClient, nil, nil, questions, fields)
 
 	result, err := p.Run(ctx, company)
 
@@ -496,7 +496,7 @@ func TestPipeline_Checkpoint_ResumesFromT1(t *testing.T) {
 	pppClient := pppmocks.NewMockQuerier(t)
 	pppClient.On("FindLoans", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil, nil).Maybe()
 
-	p := New(cfg, st, chain, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, nil, nil, questions, fields)
+	p := New(cfg, st, chain, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, nil, pppClient, nil, nil, questions, fields)
 
 	result, err := p.Run(ctx, company)
 
@@ -678,7 +678,7 @@ func TestPipeline_WithWaterfall(t *testing.T) {
 		Return(nil, nil).Maybe()
 
 	// --- Run pipeline with waterfall ---
-	p := New(cfg, st, chain, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, pppClient, nil, wfExec, questions, fields)
+	p := New(cfg, st, chain, jinaClient, fcClient, pplxClient, aiClient, sfClient, notionClient, nil, pppClient, nil, wfExec, questions, fields)
 
 	result, err := p.Run(ctx, company)
 
