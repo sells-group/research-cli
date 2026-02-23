@@ -278,3 +278,103 @@ Each external API gets its own package in `pkg/`:
 | `RESEARCH_FEDSYNC_MISTRAL_API_KEY` | | Mistral OCR API key |
 | `RESEARCH_FEDSYNC_TEMP_DIR` | `/tmp/fedsync` | Temp directory for downloads |
 | `RESEARCH_FEDSYNC_OCR_PROVIDER` | `local` | `local` (pdftotext) or `mistral` |
+
+## Notion References
+
+**Design Page:** [Research CLI v1 — Go + Fly.io + Neon + Salesforce](https://www.notion.so/Research-CLI-v1-Go-Fly-io-Neon-Salesforce-30452e98776980358cecf4c879ecebf3)
+- Architecture, schema decisions, data model
+- Check before major feature work or architectural changes
+- Update when adding subsystems, changing schema, or making design decisions
+
+| Database | Env Var | When to Check | When to Update |
+|---|---|---|---|
+| **Lead Tracker** | `RESEARCH_NOTION_LEAD_DB` | Rarely — batch command reads it | Don't update directly; Phase 9 gate handles status |
+| **Question Registry** | `RESEARCH_NOTION_QUESTION_DB` | Modifying extraction logic, adding fields, debugging accuracy | Adding extraction questions or changing tier assignments |
+| **Field Registry** | `RESEARCH_NOTION_FIELD_DB` | Modifying aggregation, validation, or SF write logic | Adding SF fields or changing data types/validation |
+
+Key properties:
+- **Question Registry:** Name, Tier (1/2/3), Category, Pages (multi-select), Status (Active/Inactive), Prompt Template
+- **Field Registry:** Field Name, SF API Name, Data Type, Validation Rule, Source Questions (relation), Status
+
+## Linear Project Management
+
+All issues use the Linear MCP tools (`list_issues`, `get_issue`, `create_issue`, `update_issue`, `create_comment`).
+
+### Key IDs
+
+| Entity | Name | ID |
+|---|---|---|
+| Team | Development (SELDEV) | `a5576244-0374-499a-aaa8-6198f3e0a70a` |
+| Assignee | Blake Ashley | `72ea6cc0-8b38-44e7-ba3c-f76013ea9c63` |
+| Label | research-cli | `015370cf-bc89-474d-a5e9-e64c746f1869` |
+
+**Projects:**
+
+| Project | ID |
+|---|---|
+| Account Enrichment Pipeline | `2872cb51-ced2-4c0f-9a17-ef39af593d03` |
+| Federal Data Sync | `262e19da-9278-4051-b329-aba7b2ba38a6` |
+| Infrastructure & DevOps | `dcfd3843-59b1-4d2b-b6d3-0e10e46a02ad` |
+| Data Quality & Documentation | `9d6b88b8-d749-47bf-af48-66457eed4f74` |
+
+**Statuses:**
+
+| Status | Type | ID |
+|---|---|---|
+| Backlog | backlog | `ebce30c1-2eee-4bbe-acb0-bb8ee91c2352` |
+| Todo | unstarted | `8c51d43c-d3b0-4445-8c6a-036fe6aba4d9` |
+| In Progress | started | `2fb93edf-acc4-4cd5-a3b6-a6a5314d3c5c` |
+| Done | completed | `5ef89b40-6b09-4d2c-bdfd-cfc619b7c48b` |
+
+**Priorities:** 1=Urgent, 2=High, 3=Medium, 4=Low
+
+### Common Operations
+
+**Find next work:**
+```
+list_issues: team_id="a5576244-0374-499a-aaa8-6198f3e0a70a", label="research-cli", state="Todo"
+```
+Pick highest priority (lowest number). Check issue description with `get_issue` before starting.
+
+**Start work:**
+```
+update_issue: id=<issue_id>, state="In Progress"
+```
+
+**Complete work:**
+```
+update_issue: id=<issue_id>, state="Done"
+create_comment: issue_id=<issue_id>, body="<what was implemented, files changed, any follow-up needed>"
+```
+
+**Create new issue:**
+```
+create_issue:
+  team_id="a5576244-0374-499a-aaa8-6198f3e0a70a"
+  title="..."
+  description="..."    # Markdown: context, acceptance criteria, technical notes
+  project_id="..."     # One of the 4 project IDs above
+  label_ids=["015370cf-bc89-474d-a5e9-e64c746f1869"]
+  assignee_id="72ea6cc0-8b38-44e7-ba3c-f76013ea9c63"
+  priority=3           # 1-4
+```
+
+**Create sub-issue:** Same as above, add `parent_id=<parent_issue_id>`
+
+**Add context:** `create_comment` on an issue with findings, decisions, or blockers
+
+## Workflow: Finding and Executing Work
+
+1. **Check Linear for next task:** `list_issues` filtered by `research-cli` label + `state="Todo"`, pick highest priority
+2. **Read the issue:** `get_issue` for full description, acceptance criteria, and parent/sub-issue context
+3. **Check Notion for context:**
+   - Extraction/field changes → check Question Registry and Field Registry
+   - Architectural changes → check the Design Page
+   - New subsystem → check Design Page for prior decisions
+4. **Do the work:** Follow existing CLAUDE.md patterns (error handling, logging, testing, etc.)
+5. **Update Linear:**
+   - Move issue to Done: `update_issue` with `state="Done"`
+   - Add completion comment: what was implemented, files changed, any follow-up
+   - If work spawned new tasks, create sub-issues or new issues
+6. **Update Notion if needed:** If new questions/fields were added to code, note that the Question/Field Registry DBs need corresponding entries
+7. **Check for unblocked work:** Completing an issue may unblock dependent issues — run `list_issues` again to find newly available Todo items
