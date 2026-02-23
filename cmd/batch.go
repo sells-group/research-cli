@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"os/signal"
 	"strings"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/resilience"
 	"github.com/sells-group/research-cli/pkg/notion"
 )
 
@@ -60,14 +62,103 @@ var batchCmd = &cobra.Command{
 			return eris.Wrap(err, "query queued leads")
 		}
 
-		return processBatch(ctx, leads, batchLimit, cfg.Batch.MaxConcurrentCompanies, env.Notion, func(ctx context.Context, company model.Company) (*model.EnrichmentResult, error) {
+		dlqMaxRetries := cfg.Retry.DLQMaxRetries
+		if dlqMaxRetries <= 0 {
+			dlqMaxRetries = 3
+		}
+
+		return processBatch(ctx, leads, batchLimit, cfg.Batch.MaxConcurrentCompanies, env.Notion, env.Store, dlqMaxRetries, func(ctx context.Context, company model.Company) (*model.EnrichmentResult, error) {
 			return env.Pipeline.Run(ctx, company)
 		})
 	},
 }
 
+var retryFailedCmd = &cobra.Command{
+	Use:   "retry-failed",
+	Short: "Retry companies from the dead letter queue",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+
+		env, err := initPipeline(ctx)
+		if err != nil {
+			return err
+		}
+		defer env.Close()
+
+		// Query retryable entries from DLQ.
+		entries, err := env.Store.DequeueDLQ(ctx, resilience.DLQFilter{
+			ErrorType: "transient",
+			Limit:     batchLimit,
+		})
+		if err != nil {
+			return eris.Wrap(err, "query dead letter queue")
+		}
+
+		if len(entries) == 0 {
+			zap.L().Info("no retryable entries in dead letter queue")
+			return nil
+		}
+
+		zap.L().Info("retrying from dead letter queue",
+			zap.Int("entries", len(entries)),
+		)
+
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(cfg.Batch.MaxConcurrentCompanies)
+
+		var succeeded, failed atomic.Int64
+
+		for _, entry := range entries {
+			g.Go(func() error {
+				log := zap.L().With(
+					zap.String("company", entry.Company.URL),
+					zap.String("dlq_id", entry.ID),
+					zap.Int("retry", entry.RetryCount+1),
+				)
+
+				result, enrichErr := env.Pipeline.Run(gctx, entry.Company)
+				if enrichErr != nil {
+					failed.Add(1)
+					log.Error("dlq retry failed", zap.Error(enrichErr))
+
+					// Increment retry count; compute next retry with exponential backoff.
+					nextRetry := time.Now().Add(dlqBackoff(entry.RetryCount + 1))
+					if incErr := env.Store.IncrementDLQRetry(gctx, entry.ID, nextRetry, enrichErr.Error()); incErr != nil {
+						log.Warn("failed to increment dlq retry", zap.Error(incErr))
+					}
+					return nil
+				}
+
+				succeeded.Add(1)
+				log.Info("dlq retry succeeded",
+					zap.Float64("score", result.Score),
+				)
+
+				// Remove from DLQ on success.
+				if rmErr := env.Store.RemoveDLQ(gctx, entry.ID); rmErr != nil {
+					log.Warn("failed to remove dlq entry", zap.Error(rmErr))
+				}
+				return nil
+			})
+		}
+
+		if err := g.Wait(); err != nil {
+			return eris.Wrap(err, "dlq retry processing")
+		}
+
+		zap.L().Info("dlq retry complete",
+			zap.Int64("succeeded", succeeded.Load()),
+			zap.Int64("failed", failed.Load()),
+		)
+		return nil
+	},
+}
+
 func init() {
 	batchCmd.Flags().IntVar(&batchLimit, "limit", 100, "max number of leads to process")
+	batchCmd.AddCommand(retryFailedCmd)
+	retryFailedCmd.Flags().IntVar(&batchLimit, "limit", 50, "max number of DLQ entries to retry")
 	rootCmd.AddCommand(batchCmd)
 }
 
@@ -119,7 +210,10 @@ type enrichFunc func(ctx context.Context, company model.Company) (*model.Enrichm
 
 // processBatch applies limit, then processes leads concurrently using the given enrichment function.
 // If notionClient is non-nil, failed enrichments update the Notion page status to "Failed".
-func processBatch(ctx context.Context, leads []notionapi.Page, limit, concurrency int, notionClient notion.Client, enrich enrichFunc) error {
+// Failed companies with transient errors are enqueued to the dead letter queue for later retry.
+func processBatch(ctx context.Context, leads []notionapi.Page, limit, concurrency int, notionClient notion.Client, st interface {
+	EnqueueDLQ(ctx context.Context, entry resilience.DLQEntry) error
+}, dlqMaxRetries int, enrich enrichFunc) error {
 	if len(leads) == 0 {
 		zap.L().Info("no queued leads found")
 		return nil
@@ -138,7 +232,7 @@ func processBatch(ctx context.Context, leads []notionapi.Page, limit, concurrenc
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(concurrency)
 
-	var succeeded, failed atomic.Int64
+	var succeeded, failed, enqueued atomic.Int64
 
 	for _, lead := range leads {
 		company := leadToCompany(lead)
@@ -158,6 +252,29 @@ func processBatch(ctx context.Context, leads []notionapi.Page, limit, concurrenc
 					}
 					nCancel()
 				}
+
+				// Enqueue transient failures to DLQ for later retry.
+				if resilience.IsTransient(err) && st != nil {
+					entry := resilience.DLQEntry{
+						Company:      company,
+						Error:        err.Error(),
+						ErrorType:    "transient",
+						RetryCount:   0,
+						MaxRetries:   dlqMaxRetries,
+						NextRetryAt:  time.Now().Add(dlqBackoff(0)),
+						CreatedAt:    time.Now(),
+						LastFailedAt: time.Now(),
+					}
+					dlqCtx, dlqCancel := context.WithTimeout(context.Background(), 5*time.Second)
+					if dlqErr := st.EnqueueDLQ(dlqCtx, entry); dlqErr != nil {
+						log.Warn("failed to enqueue to DLQ", zap.Error(dlqErr))
+					} else {
+						enqueued.Add(1)
+						log.Info("enqueued to dead letter queue for retry")
+					}
+					dlqCancel()
+				}
+
 				return nil // don't abort batch on individual failure
 			}
 
@@ -177,8 +294,20 @@ func processBatch(ctx context.Context, leads []notionapi.Page, limit, concurrenc
 	zap.L().Info("batch complete",
 		zap.Int64("succeeded", succeeded.Load()),
 		zap.Int64("failed", failed.Load()),
+		zap.Int64("enqueued_dlq", enqueued.Load()),
 	)
 	return nil
+}
+
+// dlqBackoff computes the next retry delay using exponential backoff.
+// retry 0 → 1m, retry 1 → 5m, retry 2 → 25m, capped at 2h.
+func dlqBackoff(retryCount int) time.Duration {
+	base := 1 * time.Minute
+	d := time.Duration(float64(base) * math.Pow(5, float64(retryCount)))
+	if d > 2*time.Hour {
+		d = 2 * time.Hour
+	}
+	return d
 }
 
 // updateNotionFailed sets the Notion page status to "Failed" when enrichment errors out.

@@ -16,6 +16,7 @@ import (
 	"github.com/sells-group/research-cli/internal/cost"
 	"github.com/sells-group/research-cli/internal/estimate"
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/resilience"
 	"github.com/sells-group/research-cli/internal/scrape"
 	"github.com/sells-group/research-cli/internal/store"
 	"github.com/sells-group/research-cli/internal/waterfall"
@@ -47,6 +48,8 @@ type Pipeline struct {
 	waterfallExec  *waterfall.Executor
 	questions      []model.Question
 	fields         *model.FieldRegistry
+	breakers       *resilience.ServiceBreakers
+	retryCfg       resilience.RetryConfig
 }
 
 // New creates a new Pipeline with all dependencies.
@@ -73,6 +76,24 @@ func New(
 		Perplexity: cost.PerplexityPricing{PerQuery: cfg.Pricing.Perplexity.PerQuery},
 		Firecrawl:  cost.FirecrawlPricing{PlanMonthly: cfg.Pricing.Firecrawl.PlanMonthly, CreditsIncluded: cfg.Pricing.Firecrawl.CreditsIncluded},
 	})
+
+	cbCfg := resilience.FromCircuitConfig(cfg.Circuit.FailureThreshold, cfg.Circuit.ResetTimeoutSecs)
+	cbCfg.OnStateChange = func(from, to resilience.CircuitState) {
+		zap.L().Warn("circuit breaker state change",
+			zap.String("from", from.String()),
+			zap.String("to", to.String()),
+		)
+	}
+	cbCfg.ShouldTrip = resilience.IsTransient
+
+	retryCfg := resilience.FromRetryConfig(
+		cfg.Retry.MaxAttempts,
+		cfg.Retry.InitialBackoffMs,
+		cfg.Retry.MaxBackoffMs,
+		cfg.Retry.Multiplier,
+		cfg.Retry.JitterFraction,
+	)
+
 	return &Pipeline{
 		cfg:        cfg,
 		store:      st,
@@ -90,6 +111,8 @@ func New(
 		waterfallExec: waterfallExec,
 		questions:     questions,
 		fields:        fields,
+		breakers:      resilience.NewServiceBreakers(cbCfg),
+		retryCfg:      retryCfg,
 	}
 }
 
@@ -137,56 +160,40 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	// Phase tracking helper with mutex for concurrent access.
 	var phasesMu sync.Mutex
 	trackPhase := func(name string, fn func() (*model.PhaseResult, error)) *model.PhaseResult {
-		phase, phaseErr := p.store.CreatePhase(ctx, run.ID, name)
-		if phaseErr != nil {
-			log.Warn("pipeline: failed to create phase", zap.String("phase", name), zap.Error(phaseErr))
-		}
+		return p.executePhase(ctx, run.ID, name, fn, log, &phasesMu, result)
+	}
 
-		start := time.Now()
-		phaseResult, fnErr := fn()
-		duration := time.Since(start).Milliseconds()
-
-		if phaseResult == nil {
-			phaseResult = &model.PhaseResult{Name: name}
-		}
-		phaseResult.Name = name
-		phaseResult.Duration = duration
-
-		if fnErr != nil {
-			phaseResult.Status = model.PhaseStatusFailed
-			phaseResult.Error = fnErr.Error()
-			log.Error("pipeline: phase failed",
-				zap.String("phase", name),
-				zap.Int64("duration_ms", duration),
-				zap.Error(fnErr),
-			)
-		} else {
-			phaseResult.Status = model.PhaseStatusComplete
-			log.Info("pipeline: phase complete",
-				zap.String("phase", name),
-				zap.Int64("duration_ms", duration),
-			)
-		}
-
-		// Compute per-phase cost based on model used.
-		if phaseResult.Status != model.PhaseStatusSkipped {
-			phaseResult.TokenUsage.Cost = p.computePhaseCost(name, phaseResult.TokenUsage)
-		}
-
-		if phase != nil {
-			if cpErr := p.store.CompletePhase(ctx, phase.ID, phaseResult); cpErr != nil {
-				log.Warn("pipeline: failed to persist phase result",
+	// trackPhaseWithRetry wraps a phase with retry + circuit breaker logic.
+	// The service parameter identifies which circuit breaker to use.
+	trackPhaseWithRetry := func(name, service string, fn func() (*model.PhaseResult, error)) *model.PhaseResult {
+		cb := p.breakers.Get(service)
+		return p.executePhase(ctx, run.ID, name, func() (*model.PhaseResult, error) {
+			var lastResult *model.PhaseResult
+			retryCfg := p.retryCfg
+			retryCfg.OnRetry = func(attempt int, retryErr error) {
+				log.Warn("pipeline: retrying phase",
 					zap.String("phase", name),
-					zap.String("phase_id", phase.ID),
-					zap.Error(cpErr),
+					zap.String("service", service),
+					zap.Int("attempt", attempt),
+					zap.Error(retryErr),
 				)
 			}
-		}
-		phasesMu.Lock()
-		result.Phases = append(result.Phases, *phaseResult)
-		phasesMu.Unlock()
-		return phaseResult
+			err := cb.Execute(ctx, func(cbCtx context.Context) error {
+				return resilience.Do(cbCtx, retryCfg, func(retryCtx context.Context) error {
+					pr, fnErr := fn()
+					lastResult = pr
+					if fnErr != nil && resilience.IsTransient(fnErr) {
+						return resilience.NewTransientError(fnErr, 0)
+					}
+					return fnErr
+				})
+			})
+			return lastResult, err
+		}, log, &phasesMu, result)
 	}
+
+	// Suppress unused variable warning — trackPhaseWithRetry is used in extraction phases.
+	_ = trackPhaseWithRetry
 
 	// ===== Phase 0: Derive Company Info (URL-only mode) =====
 	var probeResult *model.ProbeResult
@@ -421,7 +428,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	setStatus(model.RunStatusClassifying)
 	var pageIndex model.PageIndex
 
-	trackPhase("2_classify", func() (*model.PhaseResult, error) {
+	trackPhaseWithRetry("2_classify", "anthropic", func() (*model.PhaseResult, error) {
 		idx, usage, classifyErr := ClassifyPhase(ctx, allPages, p.anthropic, p.cfg.Anthropic)
 		if classifyErr != nil {
 			return nil, classifyErr
@@ -541,7 +548,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			return nil
 		}
 
-		trackPhase("4_extract_t1", func() (*model.PhaseResult, error) {
+		trackPhaseWithRetry("4_extract_t1", "anthropic", func() (*model.PhaseResult, error) {
 			t1Result, t1Err := ExtractTier1(g2Ctx, batches.Tier1, company, pppMatches, p.anthropic, p.cfg.Anthropic)
 			if t1Err != nil {
 				return nil, t1Err
@@ -679,7 +686,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	}
 
 	if shouldRunT3 {
-		trackPhase("6_extract_t3", func() (*model.PhaseResult, error) {
+		trackPhaseWithRetry("6_extract_t3", "anthropic", func() (*model.PhaseResult, error) {
 			t3Result, t3Err := ExtractTier3(ctx, batches.Tier3, MergeAnswers(t1Answers, t2Answers, nil), allPages, company, pppMatches, p.anthropic, p.cfg.Anthropic)
 			if t3Err != nil {
 				return nil, t3Err
@@ -805,7 +812,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	// ===== Phase 9: Quality Gate =====
 	setStatus(model.RunStatusWritingSF)
 
-	trackPhase("9_gate", func() (*model.PhaseResult, error) {
+	trackPhaseWithRetry("9_gate", "salesforce", func() (*model.PhaseResult, error) {
 		gate, gateErr := QualityGate(ctx, result, p.fields, p.questions, p.salesforce, p.notion, p.cfg)
 		if gateErr != nil {
 			return nil, gateErr
@@ -859,6 +866,59 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	)
 
 	return result, nil
+}
+
+// executePhase runs a phase function with tracking, logging, cost computation, and persistence.
+func (p *Pipeline) executePhase(ctx context.Context, runID, name string, fn func() (*model.PhaseResult, error), log *zap.Logger, phasesMu *sync.Mutex, result *model.EnrichmentResult) *model.PhaseResult {
+	phase, phaseErr := p.store.CreatePhase(ctx, runID, name)
+	if phaseErr != nil {
+		log.Warn("pipeline: failed to create phase", zap.String("phase", name), zap.Error(phaseErr))
+	}
+
+	start := time.Now()
+	phaseResult, fnErr := fn()
+	duration := time.Since(start).Milliseconds()
+
+	if phaseResult == nil {
+		phaseResult = &model.PhaseResult{Name: name}
+	}
+	phaseResult.Name = name
+	phaseResult.Duration = duration
+
+	if fnErr != nil {
+		phaseResult.Status = model.PhaseStatusFailed
+		phaseResult.Error = fnErr.Error()
+		log.Error("pipeline: phase failed",
+			zap.String("phase", name),
+			zap.Int64("duration_ms", duration),
+			zap.Error(fnErr),
+		)
+	} else {
+		phaseResult.Status = model.PhaseStatusComplete
+		log.Info("pipeline: phase complete",
+			zap.String("phase", name),
+			zap.Int64("duration_ms", duration),
+		)
+	}
+
+	// Compute per-phase cost based on model used.
+	if phaseResult.Status != model.PhaseStatusSkipped {
+		phaseResult.TokenUsage.Cost = p.computePhaseCost(name, phaseResult.TokenUsage)
+	}
+
+	if phase != nil {
+		if cpErr := p.store.CompletePhase(ctx, phase.ID, phaseResult); cpErr != nil {
+			log.Warn("pipeline: failed to persist phase result",
+				zap.String("phase", name),
+				zap.String("phase_id", phase.ID),
+				zap.Error(cpErr),
+			)
+		}
+	}
+	phasesMu.Lock()
+	result.Phases = append(result.Phases, *phaseResult)
+	phasesMu.Unlock()
+	return phaseResult
 }
 
 // computePhaseCost maps a phase name to the correct model and computes cost.

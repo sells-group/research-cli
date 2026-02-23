@@ -12,6 +12,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/resilience"
 )
 
 // SQLiteStore implements Store using modernc.org/sqlite.
@@ -106,6 +107,22 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 	data       TEXT NOT NULL,
 	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS dead_letter_queue (
+	id            TEXT PRIMARY KEY,
+	company       TEXT NOT NULL,
+	error         TEXT NOT NULL,
+	error_type    TEXT NOT NULL DEFAULT 'transient',
+	failed_phase  TEXT,
+	retry_count   INTEGER NOT NULL DEFAULT 0,
+	max_retries   INTEGER NOT NULL DEFAULT 3,
+	next_retry_at DATETIME NOT NULL,
+	created_at    DATETIME NOT NULL DEFAULT (datetime('now')),
+	last_failed_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_dlq_error_type ON dead_letter_queue(error_type);
+CREATE INDEX IF NOT EXISTS idx_dlq_next_retry ON dead_letter_queue(next_retry_at);
 `
 
 func (s *SQLiteStore) Ping(ctx context.Context) error {
@@ -508,4 +525,99 @@ func scanRun(row scannable) (*model.Run, error) {
 
 func scanRunFromRows(rows *sql.Rows) (*model.Run, error) {
 	return scanRun(rows)
+}
+
+// Dead letter queue methods
+
+func (s *SQLiteStore) EnqueueDLQ(ctx context.Context, entry resilience.DLQEntry) error {
+	companyJSON, err := json.Marshal(entry.Company)
+	if err != nil {
+		return eris.Wrap(err, "sqlite: marshal dlq company")
+	}
+
+	if entry.ID == "" {
+		entry.ID = uuid.New().String()
+	}
+
+	_, err = s.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO dead_letter_queue
+		 (id, company, error, error_type, failed_phase, retry_count, max_retries, next_retry_at, created_at, last_failed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.ID, string(companyJSON), entry.Error, entry.ErrorType,
+		entry.FailedPhase, entry.RetryCount, entry.MaxRetries,
+		entry.NextRetryAt.UTC(), entry.CreatedAt.UTC(), entry.LastFailedAt.UTC(),
+	)
+	return eris.Wrap(err, "sqlite: enqueue dlq")
+}
+
+func (s *SQLiteStore) DequeueDLQ(ctx context.Context, filter resilience.DLQFilter) ([]resilience.DLQEntry, error) {
+	now := time.Now().UTC()
+	query := `SELECT id, company, error, error_type, failed_phase, retry_count, max_retries, next_retry_at, created_at, last_failed_at
+	          FROM dead_letter_queue
+	          WHERE next_retry_at <= ? AND retry_count < max_retries`
+	args := []any{now}
+
+	if filter.ErrorType != "" {
+		query += ` AND error_type = ?`
+		args = append(args, filter.ErrorType)
+	}
+
+	query += ` ORDER BY next_retry_at ASC`
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	query += ` LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, eris.Wrap(err, "sqlite: dequeue dlq")
+	}
+	defer rows.Close()
+
+	var entries []resilience.DLQEntry
+	for rows.Next() {
+		var e resilience.DLQEntry
+		var companyJSON string
+		var failedPhase sql.NullString
+		if err := rows.Scan(&e.ID, &companyJSON, &e.Error, &e.ErrorType,
+			&failedPhase, &e.RetryCount, &e.MaxRetries,
+			&e.NextRetryAt, &e.CreatedAt, &e.LastFailedAt); err != nil {
+			return nil, eris.Wrap(err, "sqlite: scan dlq entry")
+		}
+		if failedPhase.Valid {
+			e.FailedPhase = failedPhase.String
+		}
+		if err := json.Unmarshal([]byte(companyJSON), &e.Company); err != nil {
+			return nil, eris.Wrap(err, "sqlite: unmarshal dlq company")
+		}
+		entries = append(entries, e)
+	}
+	return entries, eris.Wrap(rows.Err(), "sqlite: dequeue dlq iterate")
+}
+
+func (s *SQLiteStore) IncrementDLQRetry(ctx context.Context, id string, nextRetryAt time.Time, lastErr string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE dead_letter_queue
+		 SET retry_count = retry_count + 1, next_retry_at = ?, error = ?, last_failed_at = ?
+		 WHERE id = ?`,
+		nextRetryAt.UTC(), lastErr, time.Now().UTC(), id,
+	)
+	if err != nil {
+		return eris.Wrapf(err, "sqlite: increment dlq retry %s", id)
+	}
+	return checkRowsAffected(res, "dlq_entry", id)
+}
+
+func (s *SQLiteStore) RemoveDLQ(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM dead_letter_queue WHERE id = ?`, id)
+	return eris.Wrap(err, "sqlite: remove dlq")
+}
+
+func (s *SQLiteStore) CountDLQ(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dead_letter_queue`).Scan(&count)
+	return count, eris.Wrap(err, "sqlite: count dlq")
 }

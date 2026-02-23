@@ -31,6 +31,24 @@ type Config struct {
 	Log        LogConfig        `yaml:"log" mapstructure:"log"`
 	Fedsync    FedsyncConfig    `yaml:"fedsync" mapstructure:"fedsync"`
 	Waterfall  WaterfallConfig  `yaml:"waterfall" mapstructure:"waterfall"`
+	Retry      RetryConfig      `yaml:"retry" mapstructure:"retry"`
+	Circuit    CircuitConfig    `yaml:"circuit" mapstructure:"circuit"`
+}
+
+// RetryConfig configures retry behavior for API calls.
+type RetryConfig struct {
+	MaxAttempts      int     `yaml:"max_attempts" mapstructure:"max_attempts"`
+	InitialBackoffMs int     `yaml:"initial_backoff_ms" mapstructure:"initial_backoff_ms"`
+	MaxBackoffMs     int     `yaml:"max_backoff_ms" mapstructure:"max_backoff_ms"`
+	Multiplier       float64 `yaml:"multiplier" mapstructure:"multiplier"`
+	JitterFraction   float64 `yaml:"jitter_fraction" mapstructure:"jitter_fraction"`
+	DLQMaxRetries    int     `yaml:"dlq_max_retries" mapstructure:"dlq_max_retries"`
+}
+
+// CircuitConfig configures circuit breaker behavior for external services.
+type CircuitConfig struct {
+	FailureThreshold int `yaml:"failure_threshold" mapstructure:"failure_threshold"`
+	ResetTimeoutSecs int `yaml:"reset_timeout_secs" mapstructure:"reset_timeout_secs"`
 }
 
 // WaterfallConfig configures the per-field waterfall cascade system.
@@ -325,6 +343,14 @@ func Load() (*Config, error) {
 	v.SetDefault("waterfall.config_path", "config/waterfall.yaml")
 	v.SetDefault("waterfall.confidence_threshold", 0.7)
 	v.SetDefault("waterfall.max_premium_cost_usd", 2.00)
+	v.SetDefault("retry.max_attempts", 3)
+	v.SetDefault("retry.initial_backoff_ms", 500)
+	v.SetDefault("retry.max_backoff_ms", 30000)
+	v.SetDefault("retry.multiplier", 2.0)
+	v.SetDefault("retry.jitter_fraction", 0.25)
+	v.SetDefault("retry.dlq_max_retries", 3)
+	v.SetDefault("circuit.failure_threshold", 5)
+	v.SetDefault("circuit.reset_timeout_secs", 30)
 	v.SetDefault("pricing.jina.per_mtok", 0.02)
 	v.SetDefault("pricing.perplexity.per_query", 0.005)
 	v.SetDefault("pricing.firecrawl.plan_monthly", 19.00)
