@@ -33,6 +33,17 @@ type Config struct {
 	Waterfall  WaterfallConfig  `yaml:"waterfall" mapstructure:"waterfall"`
 	Retry      RetryConfig      `yaml:"retry" mapstructure:"retry"`
 	Circuit    CircuitConfig    `yaml:"circuit" mapstructure:"circuit"`
+	Monitoring MonitoringConfig `yaml:"monitoring" mapstructure:"monitoring"`
+}
+
+// MonitoringConfig configures production monitoring and alerting.
+type MonitoringConfig struct {
+	Enabled              bool    `yaml:"enabled" mapstructure:"enabled"`
+	WebhookURL           string  `yaml:"webhook_url" mapstructure:"webhook_url"`
+	CheckIntervalSecs    int     `yaml:"check_interval_secs" mapstructure:"check_interval_secs"`
+	LookbackWindowHours  int     `yaml:"lookback_window_hours" mapstructure:"lookback_window_hours"`
+	FailureRateThreshold float64 `yaml:"failure_rate_threshold" mapstructure:"failure_rate_threshold"`
+	CostThresholdUSD     float64 `yaml:"cost_threshold_usd" mapstructure:"cost_threshold_usd"`
 }
 
 // RetryConfig configures retry behavior for API calls.
@@ -368,6 +379,11 @@ func Load() (*Config, error) {
 	v.SetDefault("retry.dlq_max_retries", 3)
 	v.SetDefault("circuit.failure_threshold", 5)
 	v.SetDefault("circuit.reset_timeout_secs", 30)
+	v.SetDefault("monitoring.enabled", false)
+	v.SetDefault("monitoring.check_interval_secs", 300)
+	v.SetDefault("monitoring.lookback_window_hours", 24)
+	v.SetDefault("monitoring.failure_rate_threshold", 0.10)
+	v.SetDefault("monitoring.cost_threshold_usd", 500.0)
 	v.SetDefault("pricing.jina.per_mtok", 0.02)
 	v.SetDefault("pricing.perplexity.per_query", 0.005)
 	v.SetDefault("pricing.firecrawl.plan_monthly", 19.00)

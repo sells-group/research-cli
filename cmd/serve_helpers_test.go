@@ -30,7 +30,7 @@ func TestResolvePort_BothZero(t *testing.T) {
 func TestStartServer_GracefulShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	mux, _ := buildMux(ctx, nil, nil, "")
+	mux, _ := buildMux(ctx, nil, nil, "", nil)
 
 	// Find a free port.
 	l, err := net.Listen("tcp", "127.0.0.1:0")

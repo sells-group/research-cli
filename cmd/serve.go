@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/monitoring"
 	"github.com/sells-group/research-cli/internal/pipeline"
 	"github.com/sells-group/research-cli/internal/store"
 )
@@ -28,7 +29,7 @@ const webhookSemSize = 20
 // It returns the mux and a drain function that waits for all in-flight
 // enrichment jobs to complete. The caller should invoke drain after the
 // HTTP server has stopped accepting new requests.
-func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store, webhookSecret string) (*http.ServeMux, func()) {
+func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store, webhookSecret string, collector *monitoring.Collector) (*http.ServeMux, func()) {
 	mux := http.NewServeMux()
 	sem := make(chan struct{}, webhookSemSize)
 	var wg sync.WaitGroup
@@ -130,6 +131,23 @@ func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store, webhook
 		})
 	})
 
+	if collector != nil {
+		mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+			lookback := cfg.Monitoring.LookbackWindowHours
+			if lookback <= 0 {
+				lookback = 24
+			}
+			snap, err := collector.Collect(r.Context(), lookback)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(snap)
+		})
+	}
+
 	drain := func() {
 		wg.Wait()
 	}
@@ -153,7 +171,20 @@ var serveCmd = &cobra.Command{
 		}
 		defer env.Close()
 
-		mux, drain := buildMux(ctx, env.Pipeline, env.Store, cfg.Server.WebhookSecret)
+		// Initialize metrics collector (syncLog is nil unless fedsync pool is available).
+		collector := monitoring.NewCollector(env.Store, nil)
+
+		// Start background alert checker if monitoring is enabled.
+		if cfg.Monitoring.Enabled {
+			alerter := monitoring.NewAlerter(cfg.Monitoring)
+			checker := monitoring.NewChecker(collector, alerter, cfg.Monitoring)
+			go checker.Run(ctx)
+			zap.L().Info("monitoring: alert checker enabled",
+				zap.String("webhook_url", cfg.Monitoring.WebhookURL),
+			)
+		}
+
+		mux, drain := buildMux(ctx, env.Pipeline, env.Store, cfg.Server.WebhookSecret, collector)
 		port := resolvePort(servePort, cfg.Server.Port)
 		srvErr := startServer(ctx, mux, port)
 		drain() // wait for in-flight enrichment jobs after server shutdown

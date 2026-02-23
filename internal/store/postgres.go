@@ -291,6 +291,11 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunFilter) ([]model
 		args = append(args, filter.CompanyURL)
 		argIdx++
 	}
+	if !filter.CreatedAfter.IsZero() {
+		query += fmt.Sprintf(` AND created_at >= $%d`, argIdx)
+		args = append(args, filter.CreatedAfter)
+		argIdx++
+	}
 	query += ` ORDER BY created_at DESC`
 
 	limit := filter.Limit
