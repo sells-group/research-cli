@@ -14,6 +14,7 @@ import (
 
 	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/resilience"
 )
 
 // PostgresStore implements Store using pgxpool.
@@ -155,6 +156,22 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 	data       JSONB NOT NULL,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS dead_letter_queue (
+	id             TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+	company        JSONB NOT NULL,
+	error          TEXT NOT NULL,
+	error_type     TEXT NOT NULL DEFAULT 'transient',
+	failed_phase   TEXT,
+	retry_count    INTEGER NOT NULL DEFAULT 0,
+	max_retries    INTEGER NOT NULL DEFAULT 3,
+	next_retry_at  TIMESTAMPTZ NOT NULL,
+	created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+	last_failed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dlq_error_type ON dead_letter_queue(error_type);
+CREATE INDEX IF NOT EXISTS idx_dlq_next_retry ON dead_letter_queue(next_retry_at);
 `
 
 func (s *PostgresStore) Ping(ctx context.Context) error {
@@ -551,4 +568,106 @@ func (s *PostgresStore) DeleteCheckpoint(ctx context.Context, companyID string) 
 		companyID,
 	)
 	return eris.Wrap(err, "postgres: delete checkpoint")
+}
+
+// Dead letter queue methods
+
+func (s *PostgresStore) EnqueueDLQ(ctx context.Context, entry resilience.DLQEntry) error {
+	companyJSON, err := json.Marshal(entry.Company)
+	if err != nil {
+		return eris.Wrap(err, "postgres: marshal dlq company")
+	}
+
+	if entry.ID == "" {
+		entry.ID = uuid.New().String()
+	}
+
+	_, err = s.pool.Exec(ctx,
+		`INSERT INTO dead_letter_queue
+		 (id, company, error, error_type, failed_phase, retry_count, max_retries, next_retry_at, created_at, last_failed_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		 ON CONFLICT (id) DO UPDATE SET
+		   error = $3, error_type = $4, failed_phase = $5, retry_count = $6,
+		   next_retry_at = $8, last_failed_at = $10`,
+		entry.ID, companyJSON, entry.Error, entry.ErrorType,
+		entry.FailedPhase, entry.RetryCount, entry.MaxRetries,
+		entry.NextRetryAt, entry.CreatedAt, entry.LastFailedAt,
+	)
+	return eris.Wrap(err, "postgres: enqueue dlq")
+}
+
+func (s *PostgresStore) DequeueDLQ(ctx context.Context, filter resilience.DLQFilter) ([]resilience.DLQEntry, error) {
+	query := `SELECT id, company, error, error_type, failed_phase, retry_count, max_retries, next_retry_at, created_at, last_failed_at
+	          FROM dead_letter_queue
+	          WHERE next_retry_at <= now() AND retry_count < max_retries`
+	args := []any{}
+	argIdx := 1
+
+	if filter.ErrorType != "" {
+		query += fmt.Sprintf(` AND error_type = $%d`, argIdx)
+		args = append(args, filter.ErrorType)
+		argIdx++
+	}
+
+	query += ` ORDER BY next_retry_at ASC`
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	query += fmt.Sprintf(` LIMIT $%d`, argIdx)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, eris.Wrap(err, "postgres: dequeue dlq")
+	}
+	defer rows.Close()
+
+	var entries []resilience.DLQEntry
+	for rows.Next() {
+		var e resilience.DLQEntry
+		var companyJSON []byte
+		var failedPhase *string
+		if err := rows.Scan(&e.ID, &companyJSON, &e.Error, &e.ErrorType,
+			&failedPhase, &e.RetryCount, &e.MaxRetries,
+			&e.NextRetryAt, &e.CreatedAt, &e.LastFailedAt); err != nil {
+			return nil, eris.Wrap(err, "postgres: scan dlq entry")
+		}
+		if failedPhase != nil {
+			e.FailedPhase = *failedPhase
+		}
+		if err := json.Unmarshal(companyJSON, &e.Company); err != nil {
+			return nil, eris.Wrap(err, "postgres: unmarshal dlq company")
+		}
+		entries = append(entries, e)
+	}
+	return entries, eris.Wrap(rows.Err(), "postgres: dequeue dlq iterate")
+}
+
+func (s *PostgresStore) IncrementDLQRetry(ctx context.Context, id string, nextRetryAt time.Time, lastErr string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE dead_letter_queue
+		 SET retry_count = retry_count + 1, next_retry_at = $1, error = $2, last_failed_at = now()
+		 WHERE id = $3`,
+		nextRetryAt, lastErr, id,
+	)
+	if err != nil {
+		return eris.Wrapf(err, "postgres: increment dlq retry %s", id)
+	}
+	if tag.RowsAffected() == 0 {
+		return eris.Errorf("dlq_entry not found: %s", id)
+	}
+	return nil
+}
+
+func (s *PostgresStore) RemoveDLQ(ctx context.Context, id string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM dead_letter_queue WHERE id = $1`, id)
+	return eris.Wrap(err, "postgres: remove dlq")
+}
+
+func (s *PostgresStore) CountDLQ(ctx context.Context) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM dead_letter_queue`).Scan(&count)
+	return count, eris.Wrap(err, "postgres: count dlq")
 }

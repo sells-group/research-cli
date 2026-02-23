@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/resilience"
 )
 
 // RunFilter specifies criteria for listing runs.
@@ -52,6 +53,13 @@ type Store interface {
 	// Cache cleanup
 	DeleteExpiredLinkedIn(ctx context.Context) (int, error)
 	DeleteExpiredScrapes(ctx context.Context) (int, error)
+
+	// Dead letter queue
+	EnqueueDLQ(ctx context.Context, entry resilience.DLQEntry) error
+	DequeueDLQ(ctx context.Context, filter resilience.DLQFilter) ([]resilience.DLQEntry, error)
+	IncrementDLQRetry(ctx context.Context, id string, nextRetryAt time.Time, lastErr string) error
+	RemoveDLQ(ctx context.Context, id string) error
+	CountDLQ(ctx context.Context) (int, error)
 
 	// Lifecycle
 	Ping(ctx context.Context) error

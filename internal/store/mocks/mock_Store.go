@@ -8,6 +8,8 @@ import (
 	model "github.com/sells-group/research-cli/internal/model"
 	mock "github.com/stretchr/testify/mock"
 
+	resilience "github.com/sells-group/research-cli/internal/resilience"
+
 	store "github.com/sells-group/research-cli/internal/store"
 
 	time "time"
@@ -986,6 +988,264 @@ func (_m *MockStore) DeleteExpiredScrapes(ctx context.Context) (int, error) {
 	}
 
 	return r0, r1
+}
+
+// CountDLQ provides a mock function with given fields: ctx
+func (_m *MockStore) CountDLQ(ctx context.Context) (int, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountDLQ")
+	}
+
+	var r0 int
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (int, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) int); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStore_CountDLQ_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountDLQ'
+type MockStore_CountDLQ_Call struct {
+	*mock.Call
+}
+
+// CountDLQ is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockStore_Expecter) CountDLQ(ctx interface{}) *MockStore_CountDLQ_Call {
+	return &MockStore_CountDLQ_Call{Call: _e.mock.On("CountDLQ", ctx)}
+}
+
+func (_c *MockStore_CountDLQ_Call) Run(run func(ctx context.Context)) *MockStore_CountDLQ_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockStore_CountDLQ_Call) Return(_a0 int, _a1 error) *MockStore_CountDLQ_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStore_CountDLQ_Call) RunAndReturn(run func(context.Context) (int, error)) *MockStore_CountDLQ_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DequeueDLQ provides a mock function with given fields: ctx, filter
+func (_m *MockStore) DequeueDLQ(ctx context.Context, filter resilience.DLQFilter) ([]resilience.DLQEntry, error) {
+	ret := _m.Called(ctx, filter)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DequeueDLQ")
+	}
+
+	var r0 []resilience.DLQEntry
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, resilience.DLQFilter) ([]resilience.DLQEntry, error)); ok {
+		return rf(ctx, filter)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, resilience.DLQFilter) []resilience.DLQEntry); ok {
+		r0 = rf(ctx, filter)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]resilience.DLQEntry)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, resilience.DLQFilter) error); ok {
+		r1 = rf(ctx, filter)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStore_DequeueDLQ_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DequeueDLQ'
+type MockStore_DequeueDLQ_Call struct {
+	*mock.Call
+}
+
+// DequeueDLQ is a helper method to define mock.On call
+//   - ctx context.Context
+//   - filter resilience.DLQFilter
+func (_e *MockStore_Expecter) DequeueDLQ(ctx interface{}, filter interface{}) *MockStore_DequeueDLQ_Call {
+	return &MockStore_DequeueDLQ_Call{Call: _e.mock.On("DequeueDLQ", ctx, filter)}
+}
+
+func (_c *MockStore_DequeueDLQ_Call) Run(run func(ctx context.Context, filter resilience.DLQFilter)) *MockStore_DequeueDLQ_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(resilience.DLQFilter))
+	})
+	return _c
+}
+
+func (_c *MockStore_DequeueDLQ_Call) Return(_a0 []resilience.DLQEntry, _a1 error) *MockStore_DequeueDLQ_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStore_DequeueDLQ_Call) RunAndReturn(run func(context.Context, resilience.DLQFilter) ([]resilience.DLQEntry, error)) *MockStore_DequeueDLQ_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// EnqueueDLQ provides a mock function with given fields: ctx, entry
+func (_m *MockStore) EnqueueDLQ(ctx context.Context, entry resilience.DLQEntry) error {
+	ret := _m.Called(ctx, entry)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EnqueueDLQ")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, resilience.DLQEntry) error); ok {
+		r0 = rf(ctx, entry)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStore_EnqueueDLQ_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EnqueueDLQ'
+type MockStore_EnqueueDLQ_Call struct {
+	*mock.Call
+}
+
+// EnqueueDLQ is a helper method to define mock.On call
+//   - ctx context.Context
+//   - entry resilience.DLQEntry
+func (_e *MockStore_Expecter) EnqueueDLQ(ctx interface{}, entry interface{}) *MockStore_EnqueueDLQ_Call {
+	return &MockStore_EnqueueDLQ_Call{Call: _e.mock.On("EnqueueDLQ", ctx, entry)}
+}
+
+func (_c *MockStore_EnqueueDLQ_Call) Run(run func(ctx context.Context, entry resilience.DLQEntry)) *MockStore_EnqueueDLQ_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(resilience.DLQEntry))
+	})
+	return _c
+}
+
+func (_c *MockStore_EnqueueDLQ_Call) Return(_a0 error) *MockStore_EnqueueDLQ_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStore_EnqueueDLQ_Call) RunAndReturn(run func(context.Context, resilience.DLQEntry) error) *MockStore_EnqueueDLQ_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IncrementDLQRetry provides a mock function with given fields: ctx, id, nextRetryAt, lastErr
+func (_m *MockStore) IncrementDLQRetry(ctx context.Context, id string, nextRetryAt time.Time, lastErr string) error {
+	ret := _m.Called(ctx, id, nextRetryAt, lastErr)
+
+	if len(ret) == 0 {
+		panic("no return value specified for IncrementDLQRetry")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, time.Time, string) error); ok {
+		r0 = rf(ctx, id, nextRetryAt, lastErr)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStore_IncrementDLQRetry_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IncrementDLQRetry'
+type MockStore_IncrementDLQRetry_Call struct {
+	*mock.Call
+}
+
+// IncrementDLQRetry is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id string
+//   - nextRetryAt time.Time
+//   - lastErr string
+func (_e *MockStore_Expecter) IncrementDLQRetry(ctx interface{}, id interface{}, nextRetryAt interface{}, lastErr interface{}) *MockStore_IncrementDLQRetry_Call {
+	return &MockStore_IncrementDLQRetry_Call{Call: _e.mock.On("IncrementDLQRetry", ctx, id, nextRetryAt, lastErr)}
+}
+
+func (_c *MockStore_IncrementDLQRetry_Call) Run(run func(ctx context.Context, id string, nextRetryAt time.Time, lastErr string)) *MockStore_IncrementDLQRetry_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(time.Time), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *MockStore_IncrementDLQRetry_Call) Return(_a0 error) *MockStore_IncrementDLQRetry_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStore_IncrementDLQRetry_Call) RunAndReturn(run func(context.Context, string, time.Time, string) error) *MockStore_IncrementDLQRetry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveDLQ provides a mock function with given fields: ctx, id
+func (_m *MockStore) RemoveDLQ(ctx context.Context, id string) error {
+	ret := _m.Called(ctx, id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveDLQ")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStore_RemoveDLQ_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveDLQ'
+type MockStore_RemoveDLQ_Call struct {
+	*mock.Call
+}
+
+// RemoveDLQ is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id string
+func (_e *MockStore_Expecter) RemoveDLQ(ctx interface{}, id interface{}) *MockStore_RemoveDLQ_Call {
+	return &MockStore_RemoveDLQ_Call{Call: _e.mock.On("RemoveDLQ", ctx, id)}
+}
+
+func (_c *MockStore_RemoveDLQ_Call) Run(run func(ctx context.Context, id string)) *MockStore_RemoveDLQ_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStore_RemoveDLQ_Call) Return(_a0 error) *MockStore_RemoveDLQ_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStore_RemoveDLQ_Call) RunAndReturn(run func(context.Context, string) error) *MockStore_RemoveDLQ_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // NewMockStore creates a new instance of MockStore. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

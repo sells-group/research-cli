@@ -55,7 +55,7 @@ func makeFakeLeads(n int) []notionapi.Page {
 }
 
 func TestProcessBatch_EmptyLeads(t *testing.T) {
-	err := processBatch(context.Background(), nil, 10, 5, nil, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
+	err := processBatch(context.Background(), nil, 10, 5, nil, nil, 0, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
 		t.Fatal("enrichFunc should not be called for empty leads")
 		return nil, nil
 	})
@@ -63,7 +63,7 @@ func TestProcessBatch_EmptyLeads(t *testing.T) {
 }
 
 func TestProcessBatch_EmptyLeadsSlice(t *testing.T) {
-	err := processBatch(context.Background(), []notionapi.Page{}, 10, 5, nil, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
+	err := processBatch(context.Background(), []notionapi.Page{}, 10, 5, nil, nil, 0, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
 		t.Fatal("enrichFunc should not be called for empty leads")
 		return nil, nil
 	})
@@ -74,7 +74,7 @@ func TestProcessBatch_AllSucceed(t *testing.T) {
 	leads := makeFakeLeads(3)
 	var count atomic.Int64
 
-	err := processBatch(context.Background(), leads, 0, 2, nil, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
+	err := processBatch(context.Background(), leads, 0, 2, nil, nil, 0, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
 		count.Add(1)
 		return &model.EnrichmentResult{
 			Score:   0.85,
@@ -88,7 +88,7 @@ func TestProcessBatch_AllSucceed(t *testing.T) {
 func TestProcessBatch_AllFail(t *testing.T) {
 	leads := makeFakeLeads(2)
 
-	err := processBatch(context.Background(), leads, 0, 2, nil, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
+	err := processBatch(context.Background(), leads, 0, 2, nil, nil, 0, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
 		return nil, errors.New("enrichment error")
 	})
 	// Individual failures don't abort the batch.
@@ -99,7 +99,7 @@ func TestProcessBatch_MixedResults(t *testing.T) {
 	leads := makeFakeLeads(4)
 	var callCount atomic.Int64
 
-	err := processBatch(context.Background(), leads, 0, 2, nil, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
+	err := processBatch(context.Background(), leads, 0, 2, nil, nil, 0, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
 		n := callCount.Add(1)
 		if n%2 == 0 {
 			return nil, errors.New("even-numbered call fails")
@@ -113,7 +113,7 @@ func TestProcessBatch_AppliesLimit(t *testing.T) {
 	leads := makeFakeLeads(5)
 	var count atomic.Int64
 
-	err := processBatch(context.Background(), leads, 3, 2, nil, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
+	err := processBatch(context.Background(), leads, 3, 2, nil, nil, 0, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
 		count.Add(1)
 		return &model.EnrichmentResult{Score: 0.8}, nil
 	})
@@ -125,7 +125,7 @@ func TestProcessBatch_LimitLargerThanLeads(t *testing.T) {
 	leads := makeFakeLeads(2)
 	var count atomic.Int64
 
-	err := processBatch(context.Background(), leads, 10, 2, nil, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
+	err := processBatch(context.Background(), leads, 10, 2, nil, nil, 0, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
 		count.Add(1)
 		return &model.EnrichmentResult{Score: 0.7}, nil
 	})
@@ -138,7 +138,7 @@ func TestProcessBatch_ZeroLimit(t *testing.T) {
 	leads := makeFakeLeads(4)
 	var count atomic.Int64
 
-	err := processBatch(context.Background(), leads, 0, 5, nil, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
+	err := processBatch(context.Background(), leads, 0, 5, nil, nil, 0, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
 		count.Add(1)
 		return &model.EnrichmentResult{Score: 0.9}, nil
 	})
@@ -150,7 +150,7 @@ func TestProcessBatch_Concurrency1(t *testing.T) {
 	leads := makeFakeLeads(3)
 	var count atomic.Int64
 
-	err := processBatch(context.Background(), leads, 0, 1, nil, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
+	err := processBatch(context.Background(), leads, 0, 1, nil, nil, 0, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
 		count.Add(1)
 		return &model.EnrichmentResult{Score: 0.95}, nil
 	})
@@ -165,7 +165,7 @@ func TestProcessBatch_CancelledContext(t *testing.T) {
 	leads := makeFakeLeads(2)
 
 	// Even with cancelled context, processBatch should handle it gracefully.
-	err := processBatch(ctx, leads, 0, 2, nil, func(ctx context.Context, _ model.Company) (*model.EnrichmentResult, error) {
+	err := processBatch(ctx, leads, 0, 2, nil, nil, 0, func(ctx context.Context, _ model.Company) (*model.EnrichmentResult, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -179,7 +179,7 @@ func TestProcessBatch_FailureUpdatesNotion(t *testing.T) {
 	leads := makeFakeLeads(3)
 	mc := &mockNotionClient{}
 
-	err := processBatch(context.Background(), leads, 0, 1, mc, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
+	err := processBatch(context.Background(), leads, 0, 1, mc, nil, 0, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
 		return nil, errors.New("api timeout")
 	})
 	require.NoError(t, err)
@@ -192,7 +192,7 @@ func TestProcessBatch_FailureNilNotion(t *testing.T) {
 	// With nil notion client, failures should not panic.
 	leads := makeFakeLeads(2)
 
-	err := processBatch(context.Background(), leads, 0, 1, nil, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
+	err := processBatch(context.Background(), leads, 0, 1, nil, nil, 0, func(_ context.Context, _ model.Company) (*model.EnrichmentResult, error) {
 		return nil, errors.New("some error")
 	})
 	require.NoError(t, err)
