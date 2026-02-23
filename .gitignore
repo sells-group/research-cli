@@ -36,6 +36,7 @@ coverage.html
 # Run logs and results (local dev artifacts)
 *.log
 results*.json
+comparison-report*.md
 
 # CSV inputs (may contain PII)
 *.csv
