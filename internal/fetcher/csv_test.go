@@ -162,9 +162,7 @@ func TestStreamCSV_ContextAlreadyCancelled(t *testing.T) {
 	input := "a,b,c\n1,2,3\n"
 	rowCh, errCh := StreamCSV(ctx, strings.NewReader(input), CSVOptions{})
 
-	var rows [][]string
-	for row := range rowCh {
-		rows = append(rows, row)
+	for range rowCh {
 	}
 	// May get 0 rows due to cancellation
 	var gotErr error

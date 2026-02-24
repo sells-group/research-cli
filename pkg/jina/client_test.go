@@ -34,7 +34,7 @@ func TestRead_Success(t *testing.T) {
 		assert.Equal(t, "/https://acme.com", r.URL.Path)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(want)
+		json.NewEncoder(w).Encode(want) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -53,7 +53,7 @@ func TestRead_HTTPError(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(`{"error":"rate limit exceeded"}`))
+		w.Write([]byte(`{"error":"rate limit exceeded"}`)) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -69,7 +69,7 @@ func TestRead_ServerError(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`internal error`))
+		w.Write([]byte(`internal error`)) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -85,7 +85,7 @@ func TestRead_MalformedJSON(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{not json`))
+		w.Write([]byte(`{not json`)) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -129,7 +129,7 @@ func TestRead_EmptyContent(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(want)
+		json.NewEncoder(w).Encode(want) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -182,7 +182,7 @@ func TestSearch_Success(t *testing.T) {
 		assert.Empty(t, r.Header.Get("X-Return-Format"))
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(want)
+		json.NewEncoder(w).Encode(want) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -203,7 +203,7 @@ func TestSearch_WithSiteFilter(t *testing.T) {
 		assert.Contains(t, r.URL.RawQuery, "site=bbb.org")
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(SearchResponse{Code: 200, Data: []SearchResult{}})
+		json.NewEncoder(w).Encode(SearchResponse{Code: 200, Data: []SearchResult{}}) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -219,7 +219,7 @@ func TestSearch_HTTPError(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(`{"error":"rate limit"}`))
+		_, _ = w.Write([]byte(`{"error":"rate limit"}`)) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -235,7 +235,7 @@ func TestSearch_MalformedJSON(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{not json`))
+		_, _ = w.Write([]byte(`{not json`)) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -266,11 +266,11 @@ func TestRead_RetryOn429(t *testing.T) {
 		n := attempts.Add(1)
 		if n <= 2 {
 			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error":"rate limit"}`))
+			_, _ = w.Write([]byte(`{"error":"rate limit"}`)) //nolint:errcheck
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(want)
+		json.NewEncoder(w).Encode(want) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -290,7 +290,7 @@ func TestRead_RetryExhausted(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`service unavailable`))
+		_, _ = w.Write([]byte(`service unavailable`)) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -315,11 +315,11 @@ func TestSearch_RetryOn500(t *testing.T) {
 		n := attempts.Add(1)
 		if n == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`internal error`))
+			_, _ = w.Write([]byte(`internal error`)) //nolint:errcheck
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(want)
+		json.NewEncoder(w).Encode(want) //nolint:errcheck
 	}))
 	defer srv.Close()
 

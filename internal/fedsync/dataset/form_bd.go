@@ -49,7 +49,7 @@ func (d *FormBD) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, temp
 	if err != nil {
 		return nil, eris.Wrap(err, "form_bd: open csv")
 	}
-	defer csvFile.Close()
+	defer csvFile.Close() //nolint:errcheck
 
 	// Form BD file is pipe-delimited with header row.
 	rowCh, errCh := fetcher.StreamCSV(ctx, csvFile, fetcher.CSVOptions{

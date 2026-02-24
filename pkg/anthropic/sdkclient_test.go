@@ -29,7 +29,7 @@ func TestSDKClient_CreateMessage(t *testing.T) {
 		assert.Contains(t, r.URL.Path, "/messages")
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
 			"id":   "msg_test_001",
 			"type": "message",
 			"role": "assistant",
@@ -68,7 +68,7 @@ func TestSDKClient_CreateMessage(t *testing.T) {
 func TestSDKClient_CreateMessage_WithSystemAndTemp(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
 			"id":   "msg_sys",
 			"type": "message",
 			"role": "assistant",
@@ -106,7 +106,7 @@ func TestSDKClient_CreateMessage_WithSystemAndTemp(t *testing.T) {
 func TestSDKClient_CreateMessage_Error(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]any{
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
 			"type": "error",
 			"error": map[string]any{
 				"type":    "api_error",
@@ -131,7 +131,7 @@ func TestSDKClient_CreateBatch(t *testing.T) {
 		assert.Contains(t, r.URL.Path, "/batches")
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id":                "batch_test_001",
 			"type":              "message_batch",
 			"processing_status": "in_progress",
@@ -170,7 +170,7 @@ func TestSDKClient_CreateBatch(t *testing.T) {
 func TestSDKClient_CreateBatch_WithSystemAndTemp(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id":                "batch_sys",
 			"type":              "message_batch",
 			"processing_status": "in_progress",
@@ -204,7 +204,7 @@ func TestSDKClient_CreateBatch_WithSystemAndTemp(t *testing.T) {
 func TestSDKClient_CreateBatch_Error(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"type": "error",
 			"error": map[string]any{
 				"type":    "rate_limit_error",
@@ -232,7 +232,7 @@ func TestSDKClient_GetBatch(t *testing.T) {
 		assert.Contains(t, r.URL.Path, "batch_get_001")
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id":                "batch_get_001",
 			"type":              "message_batch",
 			"processing_status": "ended",
@@ -261,7 +261,7 @@ func TestSDKClient_GetBatch(t *testing.T) {
 func TestSDKClient_GetBatch_Error(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"type": "error",
 			"error": map[string]any{
 				"type":    "not_found_error",
@@ -285,7 +285,7 @@ func TestSDKClient_GetBatchResults(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Contains(t, r.URL.Path, "batch_results_001")
 		w.Header().Set("Content-Type", "application/x-jsonlines")
-		w.Write([]byte(jsonl))
+		_, _ = w.Write([]byte(jsonl)) //nolint:errcheck
 	}))
 	defer ts.Close()
 
@@ -293,7 +293,7 @@ func TestSDKClient_GetBatchResults(t *testing.T) {
 	iter, err := client.GetBatchResults(context.Background(), "batch_results_001")
 	require.NoError(t, err)
 	require.NotNil(t, iter)
-	defer iter.Close()
+	defer iter.Close() //nolint:errcheck
 
 	var items []BatchResultItem
 	for iter.Next() {
@@ -314,7 +314,7 @@ func TestSDKClient_GetBatchResults(t *testing.T) {
 func TestSDKClient_GetBatchResults_Error(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"type": "error",
 			"error": map[string]any{
 				"type":    "not_found_error",

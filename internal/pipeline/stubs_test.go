@@ -81,7 +81,7 @@ func TestStubAnthropicClient_Batch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBatchResults() error: %v", err)
 	}
-	defer iter.Close()
+	defer iter.Close() //nolint:errcheck
 	if iter.Err() != nil {
 		t.Errorf("unexpected iterator error: %v", iter.Err())
 	}

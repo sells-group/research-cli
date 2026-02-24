@@ -92,7 +92,7 @@ func (m *MistralOCR) ExtractText(ctx context.Context, pdfPath string) (string, e
 	if err != nil {
 		return "", eris.Wrap(err, "ocr: mistral API call")
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

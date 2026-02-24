@@ -40,7 +40,6 @@ func QueryAll(ctx context.Context, c Client, dbID string, filter *notionapi.Data
 		if prefetchCh != nil {
 			// We already have a prefetched result pending.
 			result := <-prefetchCh
-			prefetchCh = nil
 			resp, err = result.resp, result.err
 		} else {
 			// First request or no prefetch available: wait for rate limit.

@@ -50,8 +50,8 @@ func init() {
 // formatStatusEntries writes a tabular representation of sync entries to w.
 func formatStatusEntries(out io.Writer, entries []fedsync.SyncEntry) {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tDATASET\tSTATUS\tSTARTED\tDURATION\tROWS\tERROR")
-	fmt.Fprintln(w, "--\t-------\t------\t-------\t--------\t----\t-----")
+	_, _ = fmt.Fprintln(w, "ID\tDATASET\tSTATUS\tSTARTED\tDURATION\tROWS\tERROR")
+	_, _ = fmt.Fprintln(w, "--\t-------\t------\t-------\t--------\t----\t-----")
 
 	for _, e := range entries {
 		dur := "-"
@@ -65,7 +65,7 @@ func formatStatusEntries(out io.Writer, entries []fedsync.SyncEntry) {
 			errMsg = truncate(e.Error, 60)
 		}
 
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%d\t%s\n",
+		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%d\t%s\n",
 			e.ID,
 			e.Dataset,
 			e.Status,
@@ -75,7 +75,7 @@ func formatStatusEntries(out io.Writer, entries []fedsync.SyncEntry) {
 			errMsg,
 		)
 	}
-	w.Flush()
+	_ = w.Flush()
 }
 
 func truncate(s string, max int) string {

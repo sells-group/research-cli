@@ -54,7 +54,7 @@ func (d *M3) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir 
 	}
 
 	data, err := io.ReadAll(body)
-	body.Close()
+	_ = body.Close()
 	if err != nil {
 		return nil, eris.Wrap(err, "m3: read response")
 	}

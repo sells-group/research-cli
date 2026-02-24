@@ -53,7 +53,7 @@ func ImportCSV(ctx context.Context, c Client, dbID string, csvPath string) (int,
 	if err != nil {
 		return 0, eris.Wrap(err, fmt.Sprintf("notion: open csv %s", csvPath))
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	records, err := reader.ReadAll()

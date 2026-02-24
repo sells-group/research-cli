@@ -39,7 +39,7 @@ func NewSQLite(dsn string) (*SQLiteStore, error) {
 
 	// Verify the connection is usable (sql.Open is lazy).
 	if err := db.Ping(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, eris.Wrap(err, "sqlite: ping")
 	}
 
@@ -233,7 +233,7 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, filter RunFilter) ([]model.R
 	if err != nil {
 		return nil, eris.Wrap(err, "sqlite: list runs")
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var runs []model.Run
 	for rows.Next() {
@@ -425,7 +425,7 @@ func (s *SQLiteStore) GetHighConfidenceAnswers(ctx context.Context, companyURL s
 	if err != nil {
 		return nil, eris.Wrap(err, "sqlite: get high confidence answers")
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	if !rows.Next() {
 		return nil, nil
@@ -579,7 +579,7 @@ func (s *SQLiteStore) DequeueDLQ(ctx context.Context, filter resilience.DLQFilte
 	if err != nil {
 		return nil, eris.Wrap(err, "sqlite: dequeue dlq")
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var entries []resilience.DLQEntry
 	for rows.Next() {

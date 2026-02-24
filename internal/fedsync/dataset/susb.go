@@ -1,7 +1,6 @@
 package dataset
 
 import (
-	"archive/zip"
 	"context"
 	"encoding/csv"
 	"fmt"
@@ -67,7 +66,7 @@ func (d *SUSB) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDi
 			return nil, eris.Wrapf(err, "susb: open year %d", year)
 		}
 		rows, err := d.parseCSV(ctx, pool, file, year)
-		file.Close()
+		_ = file.Close()
 		if err != nil {
 			return nil, eris.Wrapf(err, "susb: process year %d", year)
 		}
@@ -82,29 +81,6 @@ func (d *SUSB) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDi
 		RowsSynced: totalRows,
 		Metadata:   map[string]any{"start_year": susbStartYear, "end_year": currentYear},
 	}, nil
-}
-
-func (d *SUSB) processZip(ctx context.Context, pool db.Pool, zipPath string, year int) (int64, error) {
-	zr, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return 0, eris.Wrap(err, "susb: open zip")
-	}
-	defer zr.Close()
-
-	for _, zf := range zr.File {
-		name := strings.ToLower(zf.Name)
-		if strings.HasSuffix(name, ".csv") || strings.HasSuffix(name, ".txt") {
-			rc, err := zf.Open()
-			if err != nil {
-				return 0, eris.Wrapf(err, "susb: open file %s in zip", zf.Name)
-			}
-			n, err := d.parseCSV(ctx, pool, rc, year)
-			rc.Close()
-			return n, err
-		}
-	}
-
-	return 0, eris.New("susb: no CSV found in zip")
 }
 
 func (d *SUSB) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int) (int64, error) {

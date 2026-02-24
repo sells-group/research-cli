@@ -46,7 +46,7 @@ func (d *OSHITA) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, temp
 	if err != nil {
 		return nil, eris.Wrap(err, "osha_ita: open csv")
 	}
-	defer csvFile.Close()
+	defer csvFile.Close() //nolint:errcheck
 
 	rowCh, errCh := fetcher.StreamCSV(ctx, csvFile, fetcher.CSVOptions{HasHeader: true})
 

@@ -195,19 +195,19 @@ func initOfflinePipeline(ctx context.Context) (*pipelineEnv, error) {
 		return nil, eris.Wrap(err, "csvrun: init sqlite store")
 	}
 	if err := st.Migrate(ctx); err != nil {
-		st.Close()
+		_ = st.Close()
 		return nil, eris.Wrap(err, "csvrun: migrate store")
 	}
 
 	// Load fixture registries.
 	questions, err := registry.LoadQuestionsFromFile("testdata/questions.json")
 	if err != nil {
-		st.Close()
+		_ = st.Close()
 		return nil, eris.Wrap(err, "csvrun: load question fixtures")
 	}
 	fields, err := registry.LoadFieldsFromFile("testdata/fields.json")
 	if err != nil {
-		st.Close()
+		_ = st.Close()
 		return nil, eris.Wrap(err, "csvrun: load field fixtures")
 	}
 
@@ -311,7 +311,7 @@ func writeResults(results []*model.EnrichmentResult) error {
 		if err != nil {
 			return eris.Wrap(err, "csvrun: create output file")
 		}
-		defer f.Close()
+		defer f.Close() //nolint:errcheck
 		w = f
 	} else {
 		w = os.Stdout

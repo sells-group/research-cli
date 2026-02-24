@@ -28,14 +28,14 @@ func newTestFetcher() *HTTPFetcher {
 func TestDownload(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "test-agent", r.Header.Get("User-Agent"))
-		w.Write([]byte("hello world"))
+		w.Write([]byte("hello world")) //nolint:errcheck
 	}))
 	defer srv.Close()
 
 	f := newTestFetcher()
 	body, err := f.Download(context.Background(), srv.URL+"/data")
 	require.NoError(t, err)
-	defer body.Close()
+	defer body.Close() //nolint:errcheck
 
 	data, err := io.ReadAll(body)
 	require.NoError(t, err)
@@ -44,7 +44,7 @@ func TestDownload(t *testing.T) {
 
 func TestDownloadToFile(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("file content here"))
+		_, _ = w.Write([]byte("file content here")) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -81,7 +81,7 @@ func TestDownloadIfChanged_NotModified(t *testing.T) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		w.Write([]byte("should not reach"))
+		_, _ = w.Write([]byte("should not reach")) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -96,7 +96,7 @@ func TestDownloadIfChanged_NotModified(t *testing.T) {
 func TestDownloadIfChanged_Changed(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", `"etag2"`)
-		w.Write([]byte("new content"))
+		_, _ = w.Write([]byte("new content")) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -107,7 +107,7 @@ func TestDownloadIfChanged_Changed(t *testing.T) {
 	assert.Equal(t, `"etag2"`, etag)
 
 	data, err := io.ReadAll(body)
-	body.Close()
+	_ = body.Close()
 	require.NoError(t, err)
 	assert.Equal(t, "new content", string(data))
 }
@@ -120,7 +120,7 @@ func TestRetryOnServerError(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success"))
 	}))
 	defer srv.Close()
 
@@ -133,7 +133,7 @@ func TestRetryOnServerError(t *testing.T) {
 
 	body, err := f.Download(context.Background(), srv.URL+"/retry")
 	require.NoError(t, err)
-	defer body.Close()
+	defer body.Close() //nolint:errcheck
 
 	data, err := io.ReadAll(body)
 	require.NoError(t, err)
@@ -162,7 +162,7 @@ func TestRateLimiting(t *testing.T) {
 	var reqTimes []time.Time
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqTimes = append(reqTimes, time.Now())
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	defer srv.Close()
 
@@ -183,7 +183,7 @@ func TestRateLimiting(t *testing.T) {
 	for range 3 {
 		body, err := f.Download(ctx, srv.URL+"/limited")
 		require.NoError(t, err)
-		body.Close()
+		_ = body.Close()
 	}
 
 	// With 2 req/s and burst=1, 3 requests should take at least ~1s
@@ -209,7 +209,7 @@ func TestDownloadIfChanged_NoETag(t *testing.T) {
 		// No If-None-Match header should be set when etag is empty
 		assert.Empty(t, r.Header.Get("If-None-Match"))
 		w.Header().Set("ETag", `"new-etag"`)
-		w.Write([]byte("content"))
+		_, _ = w.Write([]byte("content"))
 	}))
 	defer srv.Close()
 
@@ -219,7 +219,7 @@ func TestDownloadIfChanged_NoETag(t *testing.T) {
 	assert.True(t, changed)
 	assert.Equal(t, `"new-etag"`, etag)
 	data, _ := io.ReadAll(body)
-	body.Close()
+	_ = body.Close()
 	assert.Equal(t, "content", string(data))
 }
 
@@ -291,7 +291,7 @@ func TestNewHTTPFetcher_Defaults(t *testing.T) {
 
 func TestDownload_ContextCancelled(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	defer srv.Close()
 
@@ -371,7 +371,7 @@ func TestDoWithRetry_429_AdaptiveBackoff(t *testing.T) {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
 		}
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	defer srv.Close()
 
@@ -392,7 +392,7 @@ func TestDoWithRetry_429_AdaptiveBackoff(t *testing.T) {
 
 	body, err := f.Download(context.Background(), srv.URL+"/data")
 	require.NoError(t, err)
-	defer body.Close()
+	defer body.Close() //nolint:errcheck
 
 	data, _ := io.ReadAll(body)
 	assert.Equal(t, "ok", string(data))

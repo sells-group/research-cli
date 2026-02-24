@@ -162,7 +162,7 @@ func executeBatchAPI(ctx context.Context, items []batchItem, tier int, client an
 	if err != nil {
 		return nil, 0, 0, eris.Wrap(err, "advextract: get batch results")
 	}
-	defer iter.Close()
+	defer iter.Close() //nolint:errcheck
 
 	results, err := anthropic.CollectBatchResults(iter)
 	if err != nil {

@@ -20,9 +20,7 @@ func TestStreamCSV_ReadError(t *testing.T) {
 
 	rowCh, errCh := StreamCSV(context.Background(), r, CSVOptions{})
 
-	var rows [][]string
-	for row := range rowCh {
-		rows = append(rows, row)
+	for range rowCh {
 	}
 
 	var gotErr error

@@ -93,13 +93,13 @@ func (f *FTPFetcher) Download(ctx context.Context, ftpURL string) (io.ReadCloser
 	}
 
 	if err := conn.Login("anonymous", "anonymous@"); err != nil {
-		conn.Quit()
+		_ = conn.Quit()
 		return nil, eris.Wrap(err, "ftp login")
 	}
 
 	resp, err := conn.Retr(path)
 	if err != nil {
-		conn.Quit()
+		_ = conn.Quit()
 		return nil, eris.Wrap(err, "ftp retrieve")
 	}
 
@@ -112,13 +112,13 @@ func (f *FTPFetcher) DownloadToFile(ctx context.Context, ftpURL string, path str
 	if err != nil {
 		return 0, err
 	}
-	defer rc.Close()
+	defer rc.Close() //nolint:errcheck
 
 	file, err := os.Create(path)
 	if err != nil {
 		return 0, eris.Wrap(err, "create file")
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	n, err := io.Copy(file, rc)
 	if err != nil {

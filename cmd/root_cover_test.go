@@ -25,7 +25,7 @@ log:
 
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(tmpDir))
-	defer os.Chdir(origDir)
+	defer os.Chdir(origDir) //nolint:errcheck
 
 	// Reset cfg to nil so PersistentPreRunE repopulates it.
 	oldCfg := cfg
@@ -43,7 +43,7 @@ func TestRootCmd_PersistentPreRunE_NoConfigFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(tmpDir))
-	defer os.Chdir(origDir)
+	defer os.Chdir(origDir) //nolint:errcheck
 
 	oldCfg := cfg
 	cfg = nil
@@ -69,7 +69,7 @@ log:
 
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(tmpDir))
-	defer os.Chdir(origDir)
+	defer os.Chdir(origDir) //nolint:errcheck
 
 	oldCfg := cfg
 	cfg = nil
@@ -94,7 +94,7 @@ func TestRootCmd_PersistentPreRunE_InvalidYAML(t *testing.T) {
 
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(tmpDir))
-	defer os.Chdir(origDir)
+	defer os.Chdir(origDir) //nolint:errcheck
 
 	oldCfg := cfg
 	cfg = nil

@@ -63,14 +63,14 @@ func (d *ADVPart2) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, te
 	if _, err := f.DownloadToFile(ctx, url, zipPath); err != nil {
 		return nil, eris.Wrap(err, "adv_part2: download brochure ZIP")
 	}
-	defer os.Remove(zipPath)
+	defer os.Remove(zipPath) //nolint:errcheck
 
 	// Extract ZIP to temp dir.
 	extractDir := filepath.Join(tempDir, "adv_brochures_extract")
 	if err := os.MkdirAll(extractDir, 0o755); err != nil {
 		return nil, eris.Wrap(err, "adv_part2: create extract dir")
 	}
-	defer os.RemoveAll(extractDir)
+	defer os.RemoveAll(extractDir) //nolint:errcheck
 
 	extractedFiles, err := fetcher.ExtractZIP(zipPath, extractDir)
 	if err != nil {
@@ -177,7 +177,7 @@ func parseBrochureMapping(path string) ([]brochureMapping, error) {
 	if err != nil {
 		return nil, eris.Wrap(err, "open mapping CSV")
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	reader.LazyQuotes = true

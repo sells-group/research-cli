@@ -153,7 +153,7 @@ func (a *Alerter) sendWebhook(ctx context.Context, alert Alert) error {
 	if err != nil {
 		return eris.Wrap(err, "monitoring: webhook request")
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode >= 400 {
 		return eris.Errorf("monitoring: webhook returned status %d", resp.StatusCode)

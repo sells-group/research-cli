@@ -69,13 +69,13 @@ Advisor: %s (CRD %d)`, systemPrompt, docs.FirmName, docs.CRDNumber)
 // T2SystemPrompt returns the Tier 2 (Sonnet) system prompt with cross-document context.
 func T2SystemPrompt(docs *AdvisorDocs, t1Answers []Answer) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(`%s
+	fmt.Fprintf(&sb, `%s
 
 You are performing Tier 2 extraction: cross-document synthesis.
 You may synthesize information across multiple document sections and types.
 Consider the full context of the advisor's business when answering.
 
-Advisor: %s (CRD %d)`, systemPrompt, docs.FirmName, docs.CRDNumber))
+Advisor: %s (CRD %d)`, systemPrompt, docs.FirmName, docs.CRDNumber)
 
 	// Include T1 context.
 	if len(t1Answers) > 0 {
@@ -83,7 +83,7 @@ Advisor: %s (CRD %d)`, systemPrompt, docs.FirmName, docs.CRDNumber))
 		for _, a := range t1Answers {
 			if a.Value != nil {
 				valJSON, _ := json.Marshal(a.Value)
-				sb.WriteString(fmt.Sprintf("- %s: %s (confidence: %.2f)\n", a.QuestionKey, string(valJSON), a.Confidence))
+				fmt.Fprintf(&sb, "- %s: %s (confidence: %.2f)\n", a.QuestionKey, string(valJSON), a.Confidence)
 			}
 		}
 	}
@@ -94,14 +94,14 @@ Advisor: %s (CRD %d)`, systemPrompt, docs.FirmName, docs.CRDNumber))
 // T3SystemPrompt returns the Tier 3 (Opus) system prompt for expert analysis.
 func T3SystemPrompt(docs *AdvisorDocs, priorAnswers []Answer) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(`%s
+	fmt.Fprintf(&sb, `%s
 
 You are performing Tier 3 extraction: expert M&A judgment and analysis.
 Provide deep analysis, trend assessment, and strategic insights.
 You may make reasonable inferences based on the totality of available information.
 Clearly distinguish between directly stated facts and your analytical conclusions.
 
-Advisor: %s (CRD %d)`, systemPrompt, docs.FirmName, docs.CRDNumber))
+Advisor: %s (CRD %d)`, systemPrompt, docs.FirmName, docs.CRDNumber)
 
 	// Include prior answers as context.
 	if len(priorAnswers) > 0 {
@@ -109,7 +109,7 @@ Advisor: %s (CRD %d)`, systemPrompt, docs.FirmName, docs.CRDNumber))
 		for _, a := range priorAnswers {
 			if a.Value != nil && a.Confidence >= 0.4 {
 				valJSON, _ := json.Marshal(a.Value)
-				sb.WriteString(fmt.Sprintf("- %s: %s (confidence: %.2f)\n", a.QuestionKey, string(valJSON), a.Confidence))
+				fmt.Fprintf(&sb, "- %s: %s (confidence: %.2f)\n", a.QuestionKey, string(valJSON), a.Confidence)
 			}
 		}
 	}

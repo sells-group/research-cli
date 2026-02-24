@@ -309,7 +309,6 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunFilter) ([]model
 	if filter.Offset > 0 {
 		query += fmt.Sprintf(` OFFSET $%d`, argIdx)
 		args = append(args, filter.Offset)
-		argIdx++
 	}
 
 	rows, err := s.pool.Query(ctx, query, args...)

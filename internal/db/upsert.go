@@ -51,7 +51,7 @@ func BulkUpsert(ctx context.Context, pool Pool, cfg UpsertConfig, rows [][]any) 
 	if err != nil {
 		return 0, eris.Wrap(err, "db: upsert: begin tx")
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is no-op
 
 	tempTable := fmt.Sprintf("_tmp_upsert_%s", strings.ReplaceAll(cfg.Table, ".", "_"))
 
@@ -141,7 +141,7 @@ func BulkUpsertMulti(ctx context.Context, pool Pool, entries []MultiUpsertEntry)
 	if err != nil {
 		return nil, eris.Wrap(err, "db: upsert multi: begin tx")
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is no-op
 
 	for _, e := range active {
 		cfg := e.Config

@@ -1,7 +1,6 @@
 package dataset
 
 import (
-	"archive/zip"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -142,14 +141,14 @@ func syncFOIAMonth(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir
 	if _, err := f.DownloadToFile(ctx, url, zipPath); err != nil {
 		return 0, 0, eris.Wrapf(err, "adv_part1: download %s", url)
 	}
-	defer os.Remove(zipPath)
+	defer os.Remove(zipPath) //nolint:errcheck
 
 	// Extract ZIP to temp dir.
 	extractDir := filepath.Join(tempDir, "adv_filing_extract")
 	if err := os.MkdirAll(extractDir, 0o755); err != nil {
 		return 0, 0, eris.Wrap(err, "adv_part1: create extract dir")
 	}
-	defer os.RemoveAll(extractDir)
+	defer os.RemoveAll(extractDir) //nolint:errcheck
 
 	extractedFiles, err := fetcher.ExtractZIP(zipPath, extractDir)
 	if err != nil {
@@ -477,7 +476,7 @@ func (d *ADVPart1) SyncFull(ctx context.Context, pool db.Pool, f fetcher.Fetcher
 			}
 
 			firms, filings, err := syncFOIAMonth(ctx, pool, f, monthDir, url, monthLog)
-			os.RemoveAll(monthDir)
+			_ = os.RemoveAll(monthDir)
 			if err != nil {
 				monthLog.Error("failed to process FOIA month, continuing", zap.Error(err))
 				continue
@@ -522,7 +521,7 @@ func (d *ADVPart1) syncHistorical(ctx context.Context, pool db.Pool, f fetcher.F
 	if _, err := f.DownloadToFile(ctx, advHistPart1URL, part1Zip); err != nil {
 		return 0, 0, 0, eris.Wrap(err, "adv_part1: download historical part1 ZIP")
 	}
-	defer os.Remove(part1Zip)
+	defer os.Remove(part1Zip) //nolint:errcheck
 
 	// Download Part 2 ZIP.
 	log.Info("downloading historical Part 2 ZIP")
@@ -530,7 +529,7 @@ func (d *ADVPart1) syncHistorical(ctx context.Context, pool db.Pool, f fetcher.F
 	if _, err := f.DownloadToFile(ctx, advHistPart2URL, part2Zip); err != nil {
 		return 0, 0, 0, eris.Wrap(err, "adv_part1: download historical part2 ZIP")
 	}
-	defer os.Remove(part2Zip)
+	defer os.Remove(part2Zip) //nolint:errcheck
 
 	// Extract Part 1 ZIP.
 	log.Info("extracting Part 1 ZIP")
@@ -538,7 +537,7 @@ func (d *ADVPart1) syncHistorical(ctx context.Context, pool db.Pool, f fetcher.F
 	if err2 != nil {
 		return 0, 0, 0, eris.Wrap(err2, "adv_part1: extract part1 ZIP")
 	}
-	defer os.RemoveAll(part1Dir)
+	defer os.RemoveAll(part1Dir) //nolint:errcheck
 
 	// Extract Part 2 ZIP.
 	log.Info("extracting Part 2 ZIP")
@@ -546,7 +545,7 @@ func (d *ADVPart1) syncHistorical(ctx context.Context, pool db.Pool, f fetcher.F
 	if err2 != nil {
 		return 0, 0, 0, eris.Wrap(err2, "adv_part1: extract part2 ZIP")
 	}
-	defer os.RemoveAll(part2Dir)
+	defer os.RemoveAll(part2Dir) //nolint:errcheck
 
 	// Pass 1: Build latestFiling map (CRD → max FilingID) from base files.
 	log.Info("pass 1: building latest filing map")
@@ -737,7 +736,7 @@ func fetchFOIAMetadata(ctx context.Context, f fetcher.Fetcher) (*foiaReportsMeta
 	if err != nil {
 		return nil, eris.Wrap(err, "fetch FOIA metadata")
 	}
-	defer rc.Close()
+	defer rc.Close() //nolint:errcheck
 
 	var raw map[string]json.RawMessage
 	if err := json.NewDecoder(rc).Decode(&raw); err != nil {
@@ -775,42 +774,6 @@ func latestFileURL(entries []foiaFileEntry, fileType string) (string, error) {
 }
 
 // --- Helper functions ---
-
-// findCSVInZip extracts a ZIP and returns the path to the first CSV/TXT file found.
-func findCSVInZip(zipPath, destDir string) (string, error) {
-	zr, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return "", eris.Wrap(err, "open zip")
-	}
-	defer zr.Close()
-
-	for _, zf := range zr.File {
-		name := strings.ToLower(zf.Name)
-		if strings.HasSuffix(name, ".csv") || strings.HasSuffix(name, ".txt") {
-			rc, err := zf.Open()
-			if err != nil {
-				return "", eris.Wrapf(err, "open %s in zip", zf.Name)
-			}
-
-			outPath := filepath.Join(destDir, filepath.Base(zf.Name))
-			out, err := os.Create(outPath)
-			if err != nil {
-				rc.Close()
-				return "", eris.Wrap(err, "create output file")
-			}
-
-			_, err = io.Copy(out, rc)
-			rc.Close()
-			out.Close()
-			if err != nil {
-				return "", eris.Wrap(err, "extract file from zip")
-			}
-			return outPath, nil
-		}
-	}
-
-	return "", eris.New("no CSV/TXT file found in ZIP")
-}
 
 // parseAUM strips commas and trailing ".00" then parses as int64.
 func parseAUM(s string) int64 {
@@ -883,7 +846,7 @@ func buildLatestFilingMap(path string, out map[string]int64) error {
 	if err != nil {
 		return eris.Wrap(err, "open base file")
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	reader.LazyQuotes = true
@@ -933,7 +896,7 @@ func buildWebsiteMap(path string, out map[int64]string, latestFiling map[string]
 	if err != nil {
 		return eris.Wrap(err, "open schedule_d_1i")
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	reader.LazyQuotes = true
@@ -993,7 +956,7 @@ func buildBaseBMap(path string) (map[int64]map[string]string, error) {
 	if err != nil {
 		return nil, eris.Wrap(err, "open base_b file")
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	reader.LazyQuotes = true
@@ -1043,7 +1006,7 @@ func streamBaseFile(ctx context.Context, pool db.Pool, path string, latestFiling
 	if err != nil {
 		return 0, 0, eris.Wrap(err, "open base file")
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	reader.LazyQuotes = true
@@ -1193,7 +1156,7 @@ func streamOwnerFile(ctx context.Context, pool db.Pool, path string, latestFilin
 	if err != nil {
 		return 0, eris.Wrap(err, "open owner file")
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	reader.LazyQuotes = true
@@ -1289,7 +1252,7 @@ func streamFundFile(ctx context.Context, pool db.Pool, path string, latestFiling
 	if err != nil {
 		return 0, eris.Wrap(err, "open fund file")
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	reader.LazyQuotes = true

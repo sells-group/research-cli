@@ -254,7 +254,7 @@ func TestNewClient_ReturnsNonNil(t *testing.T) {
 	require.NotNil(t, client)
 
 	// Verify it implements the Client interface.
-	var _ Client = client
+	var _ Client = client //nolint:staticcheck // interface compliance check
 }
 
 func TestMessageRequest_Fields(t *testing.T) {

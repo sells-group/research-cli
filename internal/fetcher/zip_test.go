@@ -15,7 +15,7 @@ func createTestZIP(t *testing.T, files map[string]string) string {
 	zipPath := filepath.Join(t.TempDir(), "test.zip")
 	f, err := os.Create(zipPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	w := zip.NewWriter(f)
 	for name, content := range files {
@@ -119,7 +119,7 @@ func TestExtractZIP_ZipSlipPrevention(t *testing.T) {
 	w := zip.NewWriter(f)
 	fw, err := w.Create("../../../etc/passwd")
 	require.NoError(t, err)
-	fw.Write([]byte("malicious"))
+	_, _ = fw.Write([]byte("malicious")) //nolint:errcheck
 	require.NoError(t, w.Close())
 	require.NoError(t, f.Close())
 
@@ -143,7 +143,7 @@ func TestExtractZIP_WithSubdirectory(t *testing.T) {
 	// Add a file in the subdirectory
 	fw, err := w.Create("subdir/data.txt")
 	require.NoError(t, err)
-	fw.Write([]byte("nested content"))
+	_, _ = fw.Write([]byte("nested content")) //nolint:errcheck
 
 	require.NoError(t, w.Close())
 	require.NoError(t, f.Close())

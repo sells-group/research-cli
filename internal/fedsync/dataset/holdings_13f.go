@@ -3,7 +3,6 @@ package dataset
 import (
 	"context"
 	"encoding/json"
-	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
@@ -37,21 +36,6 @@ func (d *Holdings13F) Cadence() Cadence { return Quarterly }
 
 func (d *Holdings13F) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return QuarterlyAfterDelay(now, lastSync, 45)
-}
-
-// f13Filing represents a 13F filing from the EFTS search results.
-type f13Filing struct {
-	CIK             string `json:"cik"`
-	CompanyName     string `json:"company_name"`
-	FormType        string `json:"form_type"`
-	FilingDate      string `json:"filing_date"`
-	AccessionNumber string `json:"accession_number"`
-}
-
-// f13InfoTable represents the root of a 13F XML holdings document.
-type f13InfoTable struct {
-	XMLName  xml.Name     `xml:"informationTable"`
-	Holdings []f13Holding `xml:"infoTable"`
 }
 
 // f13Holding represents a single holding in a 13F filing.
@@ -128,7 +112,7 @@ func (d *Holdings13F) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher,
 	}
 
 	searchResult, err := fetcher.DecodeJSONObject[eftsSearchResult](body)
-	body.Close()
+	_ = body.Close()
 	if err != nil {
 		return nil, eris.Wrap(err, "holdings_13f: decode search results")
 	}
@@ -214,13 +198,13 @@ func (d *Holdings13F) downloadAndParseHoldings(
 	if _, err := f.DownloadToFile(ctx, url, xmlPath); err != nil {
 		return nil, eris.Wrapf(err, "download 13F holdings for %s", cik)
 	}
-	defer os.Remove(xmlPath)
+	defer os.Remove(xmlPath) //nolint:errcheck
 
 	file, err := os.Open(xmlPath)
 	if err != nil {
 		return nil, eris.Wrap(err, "open 13F XML")
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	return d.parseHoldingsXML(ctx, pool, file, cik, period, log)
 }

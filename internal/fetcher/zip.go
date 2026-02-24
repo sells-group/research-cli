@@ -17,7 +17,7 @@ func ExtractZIP(zipPath, destDir string) ([]string, error) {
 	if err != nil {
 		return nil, eris.Wrap(err, "zip: open archive")
 	}
-	defer r.Close()
+	defer r.Close() //nolint:errcheck
 
 	var extracted []string
 	for _, f := range r.File {
@@ -40,7 +40,7 @@ func ExtractZIPFile(zipPath, fileName, destDir string) (string, error) {
 	if err != nil {
 		return "", eris.Wrap(err, "zip: open archive")
 	}
-	defer r.Close()
+	defer r.Close() //nolint:errcheck
 
 	for _, f := range r.File {
 		if f.Name == fileName {
@@ -57,7 +57,7 @@ func ExtractZIPSingle(zipPath, destDir string) (string, error) {
 	if err != nil {
 		return "", eris.Wrap(err, "zip: open archive")
 	}
-	defer r.Close()
+	defer r.Close() //nolint:errcheck
 
 	// Filter to only files (skip directories)
 	var files []*zip.File
@@ -99,13 +99,13 @@ func extractZIPEntry(f *zip.File, destDir string) (string, error) {
 	if err != nil {
 		return "", eris.Wrap(err, "zip: open entry")
 	}
-	defer rc.Close()
+	defer rc.Close() //nolint:errcheck
 
 	out, err := os.Create(destPath)
 	if err != nil {
 		return "", eris.Wrap(err, "zip: create file")
 	}
-	defer out.Close()
+	defer out.Close() //nolint:errcheck
 
 	if _, err := io.Copy(out, rc); err != nil {
 		return "", eris.Wrap(err, "zip: write file")

@@ -21,7 +21,7 @@ func ParseGrataCSV(csvPath string) ([]model.Company, error) {
 	if err != nil {
 		return nil, eris.Wrap(err, "grata: open csv")
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	reader.LazyQuotes = true
@@ -287,7 +287,7 @@ func ParseGrataCSVFull(csvPath string) ([]GrataCompany, error) {
 	if err != nil {
 		return nil, eris.Wrap(err, "grata: open csv")
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	reader.LazyQuotes = true
@@ -814,7 +814,7 @@ func CompareResults(grataCompanies []GrataCompany, results []*model.EnrichmentRe
 	var comparisons []CompanyComparison
 
 	for _, gc := range grataCompanies {
-		domain := strings.ToLower(stripScheme(gc.Company.URL))
+		domain := strings.ToLower(stripScheme(gc.URL))
 		r, ok := resultsByDomain[domain]
 		if !ok {
 			continue
@@ -910,14 +910,14 @@ func FormatComparisonReport(comparisons []CompanyComparison) string {
 			}
 		}
 
-		b.WriteString(fmt.Sprintf("--- %s (%s) ---\n", comp.CompanyName, comp.Domain))
+		fmt.Fprintf(&b, "--- %s (%s) ---\n", comp.CompanyName, comp.Domain)
 		if total > 0 {
-			b.WriteString(fmt.Sprintf("Match: %d%% (%d/%d fields)\n\n", int(comp.MatchRate*100), matchCount, total))
+			fmt.Fprintf(&b, "Match: %d%% (%d/%d fields)\n\n", int(comp.MatchRate*100), matchCount, total)
 		} else {
 			b.WriteString("Match: N/A (no comparable fields)\n\n")
 		}
 
-		b.WriteString(fmt.Sprintf("  %-20s %-22s %-22s %-6s %s\n", "Field", "Grata", "Ours", "Conf", "Result"))
+		fmt.Fprintf(&b, "  %-20s %-22s %-22s %-6s %s\n", "Field", "Grata", "Ours", "Conf", "Result")
 		for _, fc := range comp.Comparisons {
 			gVal := fc.GrataValue
 			oVal := fc.OurValue
@@ -968,7 +968,7 @@ func FormatComparisonReport(comparisons []CompanyComparison) string {
 				resultStr = fc.MatchType
 			}
 
-			b.WriteString(fmt.Sprintf("  %-20s %-22s %-22s %-6s %s\n", fc.Field, gVal, oVal, confStr, resultStr))
+			fmt.Fprintf(&b, "  %-20s %-22s %-22s %-6s %s\n", fc.Field, gVal, oVal, confStr, resultStr)
 		}
 		b.WriteString("\n")
 	}
@@ -1019,7 +1019,7 @@ func FormatComparisonReport(comparisons []CompanyComparison) string {
 	}
 
 	b.WriteString("--- FIELD ACCURACY (all companies) ---\n")
-	b.WriteString(fmt.Sprintf("  %-20s %-10s %-12s %s\n", "Field", "Match", "Populated", "Notes"))
+	fmt.Fprintf(&b, "  %-20s %-10s %-12s %s\n", "Field", "Match", "Populated", "Notes")
 	for _, name := range fieldOrder {
 		s := stats[name]
 		if s.total == 0 {
@@ -1028,7 +1028,7 @@ func FormatComparisonReport(comparisons []CompanyComparison) string {
 		matchStr := fmt.Sprintf("%d/%d", s.matched, s.total)
 		popStr := fmt.Sprintf("%d/%d", s.populated, s.total)
 		noteStr := strings.Join(s.notes, ", ")
-		b.WriteString(fmt.Sprintf("  %-20s %-10s %-12s %s\n", name, matchStr, popStr, noteStr))
+		fmt.Fprintf(&b, "  %-20s %-10s %-12s %s\n", name, matchStr, popStr, noteStr)
 	}
 
 	// Summary.
@@ -1048,11 +1048,11 @@ func FormatComparisonReport(comparisons []CompanyComparison) string {
 
 	b.WriteString("\n--- SUMMARY ---\n")
 	if totalComparable > 0 {
-		b.WriteString(fmt.Sprintf("Overall match rate: %d%%\n", int(float64(totalMatch)/float64(totalComparable)*100)))
-		b.WriteString(fmt.Sprintf("Avg fields populated: %d/%d\n", totalPopulated, totalFields))
+		fmt.Fprintf(&b, "Overall match rate: %d%%\n", int(float64(totalMatch)/float64(totalComparable)*100))
+		fmt.Fprintf(&b, "Avg fields populated: %d/%d\n", totalPopulated, totalFields)
 	}
 	if len(gaps) > 0 {
-		b.WriteString(fmt.Sprintf("Top gaps: %s\n", strings.Join(gaps, ", ")))
+		fmt.Fprintf(&b, "Top gaps: %s\n", strings.Join(gaps, ", "))
 	}
 
 	return b.String()

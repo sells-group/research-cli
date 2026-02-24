@@ -58,7 +58,7 @@ func TestExtractZIP_DestDirReadOnly(t *testing.T) {
 	destDir := t.TempDir()
 	// Make the destination read-only
 	require.NoError(t, os.Chmod(destDir, 0o555))
-	defer os.Chmod(destDir, 0o755)
+	defer os.Chmod(destDir, 0o755) //nolint:errcheck
 
 	_, err := ExtractZIP(zipPath, destDir)
 	require.Error(t, err)
@@ -71,7 +71,7 @@ func TestExtractZIPFile_DestDirReadOnly(t *testing.T) {
 
 	destDir := t.TempDir()
 	require.NoError(t, os.Chmod(destDir, 0o555))
-	defer os.Chmod(destDir, 0o755)
+	defer os.Chmod(destDir, 0o755) //nolint:errcheck
 
 	_, err := ExtractZIPFile(zipPath, "file.txt", destDir)
 	require.Error(t, err)
@@ -85,7 +85,7 @@ func TestExtractZIPSingle_ZipSlipPrevention(t *testing.T) {
 	w := zip.NewWriter(f)
 	fw, err := w.Create("../../../etc/passwd")
 	require.NoError(t, err)
-	fw.Write([]byte("malicious"))
+	fw.Write([]byte("malicious")) //nolint:errcheck
 	require.NoError(t, w.Close())
 	require.NoError(t, f.Close())
 
@@ -105,7 +105,7 @@ func TestExtractZIP_NestedSubdirectories(t *testing.T) {
 	// Create deeply nested file (parent dirs should be auto-created)
 	fw, err := w.Create("a/b/c/deep.txt")
 	require.NoError(t, err)
-	fw.Write([]byte("deep content"))
+	fw.Write([]byte("deep content")) //nolint:errcheck
 
 	require.NoError(t, w.Close())
 	require.NoError(t, f.Close())
@@ -158,7 +158,7 @@ func TestExtractZIPFile_ZipSlipPrevention(t *testing.T) {
 	w := zip.NewWriter(f)
 	fw, err := w.Create("../../../etc/passwd")
 	require.NoError(t, err)
-	fw.Write([]byte("malicious"))
+	fw.Write([]byte("malicious")) //nolint:errcheck
 	require.NoError(t, w.Close())
 	require.NoError(t, f.Close())
 
@@ -180,7 +180,7 @@ func TestExtractZIPSingle_WithDirectoryAndOneFile(t *testing.T) {
 	// Add one file
 	fw, err := w.Create("subdir/data.txt")
 	require.NoError(t, err)
-	fw.Write([]byte("content"))
+	fw.Write([]byte("content")) //nolint:errcheck
 	require.NoError(t, w.Close())
 	require.NoError(t, f.Close())
 

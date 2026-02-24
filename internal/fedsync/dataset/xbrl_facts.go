@@ -74,7 +74,7 @@ func (d *XBRLFacts) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, t
 		}
 
 		facts, err := xbrl.ParseCompanyFacts(body)
-		body.Close()
+		_ = body.Close()
 		if err != nil {
 			log.Debug("skip malformed facts", zap.String("cik", cik), zap.Error(err))
 			continue

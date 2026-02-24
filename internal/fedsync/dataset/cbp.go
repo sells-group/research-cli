@@ -120,7 +120,7 @@ func (d *CBP) processZip(ctx context.Context, pool db.Pool, zipPath string, year
 	if err != nil {
 		return 0, eris.Wrap(err, "cbp: open zip")
 	}
-	defer zr.Close()
+	defer zr.Close() //nolint:errcheck
 
 	for _, zf := range zr.File {
 		if strings.HasSuffix(strings.ToLower(zf.Name), ".csv") || strings.HasSuffix(strings.ToLower(zf.Name), ".txt") {
@@ -129,7 +129,7 @@ func (d *CBP) processZip(ctx context.Context, pool db.Pool, zipPath string, year
 				return 0, eris.Wrapf(err, "cbp: open file %s in zip", zf.Name)
 			}
 			n, err := d.parseCSV(ctx, pool, rc, year)
-			rc.Close()
+			_ = rc.Close()
 			return n, err
 		}
 	}

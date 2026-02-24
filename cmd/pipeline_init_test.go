@@ -66,7 +66,7 @@ func TestInitPipeline_FailsOnBadSalesforce(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(tmpDir))
-	defer os.Chdir(origDir)
+	defer os.Chdir(origDir) //nolint:errcheck
 
 	cfg = &config.Config{
 		Store: config.StoreConfig{

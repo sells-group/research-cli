@@ -35,10 +35,7 @@ func newCircuitBreaker(threshold int, window, cooldown time.Duration) *circuitBr
 func (cb *circuitBreaker) isOpen() bool {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	if time.Now().Before(cb.openUntil) {
-		return true
-	}
-	return false
+	return time.Now().Before(cb.openUntil)
 }
 
 func (cb *circuitBreaker) recordFailure() {

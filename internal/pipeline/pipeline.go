@@ -1035,7 +1035,7 @@ func linkedInToPage(data *LinkedInData, company model.Company) model.CrawledPage
 	// Render executive contacts.
 	if len(data.ExecContacts) > 0 {
 		for i, c := range data.ExecContacts {
-			content.WriteString(fmt.Sprintf("**Executive %d:** %s %s, %s\n", i+1, c.FirstName, c.LastName, c.Title))
+			fmt.Fprintf(&content, "**Executive %d:** %s %s, %s\n", i+1, c.FirstName, c.LastName, c.Title)
 			if c.Email != "" {
 				content.WriteString("  Email: " + c.Email + "\n")
 			}

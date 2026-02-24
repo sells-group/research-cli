@@ -297,7 +297,7 @@ func sendToToolJet(ctx context.Context, result *model.EnrichmentResult, webhookU
 	if err != nil {
 		return eris.Wrap(err, "gate: tooljet request failed")
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return eris.Errorf("gate: tooljet returned status %d", resp.StatusCode)

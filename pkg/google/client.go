@@ -96,7 +96,7 @@ func (c *httpClient) TextSearch(ctx context.Context, query string) (*TextSearchR
 	if err != nil {
 		return nil, eris.Wrap(err, "google: send request")
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

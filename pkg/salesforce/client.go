@@ -131,7 +131,7 @@ func (c *sfClient) DescribeSObject(_ context.Context, name string) (*SObjectDesc
 	if err != nil {
 		return nil, eris.Wrap(err, fmt.Sprintf("sf: describe %s", name))
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	var desc SObjectDescription
 	if err := decodeJSON(resp.Body, &desc); err != nil {

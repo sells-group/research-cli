@@ -26,11 +26,11 @@ func TestDoWithRetry_NetworkError(t *testing.T) {
 			hj, ok := w.(http.Hijacker)
 			if ok {
 				conn, _, _ := hj.Hijack()
-				conn.Close()
+				conn.Close() //nolint:errcheck
 				return
 			}
 		}
-		w.Write([]byte("ok"))
+		w.Write([]byte("ok")) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -42,7 +42,7 @@ func TestDoWithRetry_NetworkError(t *testing.T) {
 
 	body, err := f.Download(context.Background(), srv.URL+"/net-err")
 	require.NoError(t, err)
-	defer body.Close()
+	defer body.Close() //nolint:errcheck
 
 	data, err := io.ReadAll(body)
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestDoWithRetry_AllNetworkErrors(t *testing.T) {
 		hj, ok := w.(http.Hijacker)
 		if ok {
 			conn, _, _ := hj.Hijack()
-			conn.Close()
+			conn.Close() //nolint:errcheck
 			return
 		}
 	}))
@@ -112,7 +112,7 @@ func TestDownload_InvalidURL(t *testing.T) {
 
 func TestDownloadToFile_CreateFileError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("data"))
+		_, _ = w.Write([]byte("data")) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -125,7 +125,7 @@ func TestDownloadToFile_CreateFileError(t *testing.T) {
 
 func TestDownloadToFile_ReadOnlyDir(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("content"))
+		_, _ = w.Write([]byte("content")) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -134,7 +134,7 @@ func TestDownloadToFile_ReadOnlyDir(t *testing.T) {
 
 	// Make directory read-only
 	require.NoError(t, os.Chmod(dir, 0o555))
-	defer os.Chmod(dir, 0o755)
+	defer os.Chmod(dir, 0o755) //nolint:errcheck
 
 	path := filepath.Join(dir, "out.txt")
 	_, err := f.DownloadToFile(context.Background(), srv.URL+"/file", path)
@@ -169,7 +169,7 @@ func TestHeadETag_ServerError(t *testing.T) {
 		hj, ok := w.(http.Hijacker)
 		if ok {
 			conn, _, _ := hj.Hijack()
-			conn.Close()
+			conn.Close() //nolint:errcheck
 		}
 	}))
 	defer srv.Close()
@@ -214,7 +214,7 @@ func TestDownloadIfChanged_InvalidURL(t *testing.T) {
 
 func TestDownloadIfChanged_RateLimiterCancelled(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("data"))
+		w.Write([]byte("data")) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -242,7 +242,7 @@ func TestDownloadIfChanged_NetworkError(t *testing.T) {
 		hj, ok := w.(http.Hijacker)
 		if ok {
 			conn, _, _ := hj.Hijack()
-			conn.Close()
+			conn.Close() //nolint:errcheck
 		}
 	}))
 	defer srv.Close()
@@ -260,7 +260,7 @@ func TestDownloadIfChanged_NetworkError(t *testing.T) {
 
 func TestDoWithRetry_RateLimiterCancelled(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		w.Write([]byte("ok")) //nolint:errcheck
 	}))
 	defer srv.Close()
 

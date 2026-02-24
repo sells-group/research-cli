@@ -21,7 +21,7 @@ func TestServeCmd_RunE_FailsOnValidation(t *testing.T) {
 	}
 
 	serveCmd.SetContext(context.Background())
-	defer serveCmd.SetContext(nil)
+	defer serveCmd.SetContext(context.TODO())
 
 	err := serveCmd.RunE(serveCmd, nil)
 	require.Error(t, err)

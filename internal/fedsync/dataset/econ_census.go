@@ -127,7 +127,7 @@ func (d *EconCensus) fetchYear(ctx context.Context, f fetcher.Fetcher, apiKey st
 	if err != nil {
 		return nil, eris.Wrapf(err, "econ_census: fetch year %d", year)
 	}
-	defer body.Close()
+	defer body.Close() //nolint:errcheck
 
 	data, err := io.ReadAll(body)
 	if err != nil {

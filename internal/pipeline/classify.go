@@ -454,8 +454,8 @@ func classifyGrouped(ctx context.Context, pages []model.CrawledPage, aiClient an
 				if len(content) > 500 {
 					content = content[:500]
 				}
-				pagesList.WriteString(fmt.Sprintf("Page %d:\nURL: %s\nTitle: %s\nContent preview: %s\n\n",
-					j+1, page.URL, page.Title, content))
+				fmt.Fprintf(&pagesList, "Page %d:\nURL: %s\nTitle: %s\nContent preview: %s\n\n",
+					j+1, page.URL, page.Title, content)
 			}
 
 			prompt := fmt.Sprintf(classifyGroupedUserPrompt, pagesList.String())

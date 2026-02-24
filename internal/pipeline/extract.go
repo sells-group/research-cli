@@ -125,10 +125,10 @@ func FormatPageMetadata(pages []model.ClassifiedPage) string {
 		if meta.ReviewCount > 0 || meta.Rating > 0 || meta.BBBRating != "" {
 			b.WriteString("--- Structured Metadata: " + p.Title + " ---\n")
 			if meta.Rating > 0 {
-				b.WriteString(fmt.Sprintf("Google Rating: %.1f stars\n", meta.Rating))
+				fmt.Fprintf(&b, "Google Rating: %.1f stars\n", meta.Rating)
 			}
 			if meta.ReviewCount > 0 {
-				b.WriteString(fmt.Sprintf("Google Review Count: %d\n", meta.ReviewCount))
+				fmt.Fprintf(&b, "Google Review Count: %d\n", meta.ReviewCount)
 			}
 			if meta.BBBRating != "" {
 				b.WriteString("BBB Rating: " + meta.BBBRating + "\n")
@@ -153,10 +153,10 @@ func FormatPPPContext(matches []ppp.LoanMatch) string {
 		b.WriteString("Borrower: " + best.BorrowerName + "\n")
 	}
 	if best.CurrentApproval > 0 {
-		b.WriteString(fmt.Sprintf("Loan Amount: $%.0f\n", best.CurrentApproval))
+		fmt.Fprintf(&b, "Loan Amount: $%.0f\n", best.CurrentApproval)
 	}
 	if best.JobsReported > 0 {
-		b.WriteString(fmt.Sprintf("Jobs Reported: %d\n", best.JobsReported))
+		fmt.Fprintf(&b, "Jobs Reported: %d\n", best.JobsReported)
 	}
 	if best.NAICSCode != "" {
 		b.WriteString("NAICS: " + best.NAICSCode + "\n")
@@ -187,31 +187,31 @@ func FormatPreSeededContext(preSeeded map[string]any) string {
 	var b strings.Builder
 	b.WriteString("--- Industry Data (verify against website) ---\n")
 	if v, ok := preSeeded["employees"]; ok {
-		b.WriteString(fmt.Sprintf("Employee Count (industry estimate): %v — use this as baseline unless website explicitly states a different current headcount\n", v))
+		fmt.Fprintf(&b, "Employee Count (industry estimate): %v — use this as baseline unless website explicitly states a different current headcount\n", v)
 	}
 	if v, ok := preSeeded["naics_code"]; ok {
-		b.WriteString(fmt.Sprintf("NAICS Code: %v\n", v))
+		fmt.Fprintf(&b, "NAICS Code: %v\n", v)
 	}
 	if v, ok := preSeeded["description"]; ok {
-		b.WriteString(fmt.Sprintf("Business Description: %v\n", v))
+		fmt.Fprintf(&b, "Business Description: %v\n", v)
 	}
 	if v, ok := preSeeded["revenue_range"]; ok {
-		b.WriteString(fmt.Sprintf("Revenue Estimate: %v\n", v))
+		fmt.Fprintf(&b, "Revenue Estimate: %v\n", v)
 	}
 	if v, ok := preSeeded["year_established"]; ok {
-		b.WriteString(fmt.Sprintf("Year Founded: %v — use this unless website explicitly states a different founding year\n", v))
+		fmt.Fprintf(&b, "Year Founded: %v — use this unless website explicitly states a different founding year\n", v)
 	}
 	if v, ok := preSeeded["email"]; ok {
-		b.WriteString(fmt.Sprintf("Contact Email: %v\n", v))
+		fmt.Fprintf(&b, "Contact Email: %v\n", v)
 	}
 	if v, ok := preSeeded["exec_first_name"]; ok {
-		b.WriteString(fmt.Sprintf("Executive First Name: %v\n", v))
+		fmt.Fprintf(&b, "Executive First Name: %v\n", v)
 	}
 	if v, ok := preSeeded["exec_last_name"]; ok {
-		b.WriteString(fmt.Sprintf("Executive Last Name: %v\n", v))
+		fmt.Fprintf(&b, "Executive Last Name: %v\n", v)
 	}
 	if v, ok := preSeeded["exec_title"]; ok {
-		b.WriteString(fmt.Sprintf("Executive Title: %v\n", v))
+		fmt.Fprintf(&b, "Executive Title: %v\n", v)
 	}
 	return b.String()
 }

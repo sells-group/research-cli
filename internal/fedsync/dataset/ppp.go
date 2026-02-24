@@ -100,7 +100,7 @@ func (d *PPP) discoverResources(ctx context.Context, f fetcher.Fetcher) ([]pppRe
 	if err != nil {
 		return nil, eris.Wrap(err, "ppp: fetch CKAN metadata")
 	}
-	defer body.Close()
+	defer body.Close() //nolint:errcheck
 
 	var resp struct {
 		Result struct {
@@ -134,7 +134,7 @@ func (d *PPP) processCSV(ctx context.Context, pool db.Pool, csvPath string) (int
 	if err != nil {
 		return 0, eris.Wrap(err, "ppp: open CSV")
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	return d.parseCSV(ctx, pool, file)
 }

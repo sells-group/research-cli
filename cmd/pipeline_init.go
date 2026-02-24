@@ -41,7 +41,7 @@ func (pe *pipelineEnv) Close() {
 		pe.PPP.Close()
 	}
 	if pe.Store != nil {
-		pe.Store.Close()
+		_ = pe.Store.Close()
 	}
 }
 
@@ -58,7 +58,7 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 	}
 
 	if err := st.Migrate(ctx); err != nil {
-		st.Close()
+		_ = st.Close()
 		return nil, eris.Wrap(err, "migrate store")
 	}
 
@@ -74,7 +74,7 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 
 	sfClient, err := initSalesforce()
 	if err != nil {
-		st.Close()
+		_ = st.Close()
 		return nil, err
 	}
 
@@ -120,7 +120,7 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 			if pppClient != nil {
 				pppClient.Close()
 			}
-			st.Close()
+			_ = st.Close()
 			return nil, eris.Wrap(err, "load question fixtures")
 		}
 		fields, err = registry.LoadFieldsFromFile("testdata/fields.json")
@@ -128,7 +128,7 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 			if pppClient != nil {
 				pppClient.Close()
 			}
-			st.Close()
+			_ = st.Close()
 			return nil, eris.Wrap(err, "load field fixtures")
 		}
 	} else {
@@ -137,7 +137,7 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 			if pppClient != nil {
 				pppClient.Close()
 			}
-			st.Close()
+			_ = st.Close()
 			return nil, eris.Wrap(err, "load question registry")
 		}
 		fields, err = registry.LoadFieldRegistry(ctx, notionClient, cfg.Notion.FieldDB)
@@ -145,7 +145,7 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 			if pppClient != nil {
 				pppClient.Close()
 			}
-			st.Close()
+			_ = st.Close()
 			return nil, eris.Wrap(err, "load field registry")
 		}
 	}

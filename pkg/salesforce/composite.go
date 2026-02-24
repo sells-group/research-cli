@@ -34,10 +34,7 @@ func BulkUpdateAccounts(ctx context.Context, c Client, updates []AccountUpdate) 
 
 		records := make([]CollectionRecord, len(batch))
 		for i, u := range batch {
-			records[i] = CollectionRecord{
-				ID:     u.ID,
-				Fields: u.Fields,
-			}
+			records[i] = CollectionRecord(u)
 		}
 
 		results, err := c.UpdateCollection(ctx, "Account", records)

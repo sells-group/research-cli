@@ -29,7 +29,7 @@ func createTestZIP(t *testing.T, zipPath, innerName, content string) {
 	t.Helper()
 	f, err := os.Create(zipPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	w := zip.NewWriter(f)
 	fw, err := w.Create(innerName)
@@ -1665,7 +1665,7 @@ func TestBrokerCheck_Sync_MidBatchFlush(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("CRD|Firm Name|SEC Number|City|State|Offices|Reps\n")
 	for i := 1; i <= 5002; i++ {
-		sb.WriteString(fmt.Sprintf("%d|Firm %d|801-%d|City|NY|1|10\n", i, i, i))
+		fmt.Fprintf(&sb, "%d|Firm %d|801-%d|City|NY|1|10\n", i, i, i)
 	}
 
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
@@ -1698,7 +1698,7 @@ func TestFormBD_Sync_MidBatchFlush(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("CRD|SEC|Name|City|State|FYE|Reps\n")
 	for i := 1; i <= 5002; i++ {
-		sb.WriteString(fmt.Sprintf("%d|8-%d|Firm %d|City|ST|12|%d\n", i, i, i, i))
+		fmt.Fprintf(&sb, "%d|8-%d|Firm %d|City|ST|12|%d\n", i, i, i, i)
 	}
 
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
@@ -1729,7 +1729,7 @@ func TestOSHITA_Sync_MidBatchFlush(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("activity_nr,estab_name,site_city,site_state,site_zip,naics_code,sic_code,open_date,close_case_date,case_type,safety_hlth,total_penalty\n")
 	for i := 1; i <= 5002; i++ {
-		sb.WriteString(fmt.Sprintf("%d,Firm %d,City,ST,12345,523110,6211,01/01/2024,,R,S,%d.00\n", 100000000+i, i, i*10))
+		fmt.Fprintf(&sb, "%d,Firm %d,City,ST,12345,523110,6211,01/01/2024,,R,S,%d.00\n", 100000000+i, i, i*10)
 	}
 
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
@@ -1760,7 +1760,7 @@ func TestEPAECHO_Sync_MidBatchFlush(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("REGISTRY_ID,PRIMARY_NAME,CITY_NAME,STATE_CODE,POSTAL_CODE,col5,col6,LATITUDE83,LONGITUDE83\n")
 	for i := 1; i <= 5002; i++ {
-		sb.WriteString(fmt.Sprintf("%d,Facility %d,City,ST,12345,x,y,39.78,-89.65\n", 110000000+i, i))
+		fmt.Fprintf(&sb, "%d,Facility %d,City,ST,12345,x,y,39.78,-89.65\n", 110000000+i, i)
 	}
 
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
@@ -1911,13 +1911,13 @@ func TestIACompilation_ParseAndLoad_MidBatchFlush(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString(`<?xml version="1.0"?>` + "\n<IAPDFirmSECReport GenOn=\"2024-06-01\">\n<Firms>\n")
 	for i := 1; i <= 2002; i++ {
-		sb.WriteString(fmt.Sprintf(`  <Firm>
+		fmt.Fprintf(&sb, `  <Firm>
     <Info FirmCrdNb="%d" SECNb="801-%d" BusNm="Firm %d"/>
     <MainAddr City="City" State="NY" Cntry="US"/>
     <Filing Dt="2024-06-01"/>
     <FormInfo><Part1A><Item1><WebAddrs></WebAddrs></Item1><Item5A TtlEmp="0"/><Item5F Q5F2C="1000000" Q5F2F="10"/></Part1A></FormInfo>
   </Firm>
-`, i, i, i))
+`, i, i, i)
 	}
 	sb.WriteString("</Firms>\n</IAPDFirmSECReport>")
 
@@ -1952,7 +1952,7 @@ func TestCBP_ParseCSV_MidBatchFlush(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("fipstate,fipscty,naics,emp,emp_nf,qp1,qp1_nf,ap,ap_nf,est\n")
 	for i := 1; i <= 5002; i++ {
-		sb.WriteString(fmt.Sprintf("01,%03d,523110,%d,,%d,,%d,,5\n", i%999, i*10, i*100, i*1000))
+		fmt.Fprintf(&sb, "01,%03d,523110,%d,,%d,,%d,,5\n", i%999, i*10, i*100, i*1000)
 	}
 
 	r := strings.NewReader(sb.String())
@@ -1980,7 +1980,7 @@ func TestQCEW_ParseCSV_MidBatchFlush(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("area_fips,own_code,industry_code,qtr,month1_emplvl,month2_emplvl,month3_emplvl,total_qtrly_wages,avg_wkly_wage,qtrly_estabs\n")
 	for i := 1; i <= 20002; i++ {
-		sb.WriteString(fmt.Sprintf("%05d,5,523110,%d,100,105,110,2500000,1800,50\n", i, (i%4)+1))
+		fmt.Fprintf(&sb, "%05d,5,523110,%d,100,105,110,2500000,1800,50\n", i, (i%4)+1)
 	}
 
 	r := strings.NewReader(sb.String())
@@ -2096,7 +2096,7 @@ func TestSUSB_ParseCSV_MidBatchFlush(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("statefips,naics,entrsizedscr,firm,estb,empl,payr\n")
 	for i := 1; i <= 5002; i++ {
-		sb.WriteString(fmt.Sprintf("%02d,523110,Size%d,%d,%d,%d,%d\n", i%56+1, i, i, i*2, i*10, i*100))
+		fmt.Fprintf(&sb, "%02d,523110,Size%d,%d,%d,%d,%d\n", i%56+1, i, i, i*2, i*10, i*100)
 	}
 
 	r := strings.NewReader(sb.String())
@@ -2124,7 +2124,7 @@ func TestOEWS_ParseCSV_MidBatchFlush(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("area,area_type,naics,occ_code,tot_emp,h_mean,a_mean,h_median,a_median\n")
 	for i := 1; i <= 5002; i++ {
-		sb.WriteString(fmt.Sprintf("%05d,1,523110,%02d-%04d,%d,55.5,%d,50.0,%d\n", i, i/10000+11, i%10000, i*10, i*100, i*90))
+		fmt.Fprintf(&sb, "%05d,1,523110,%02d-%04d,%d,55.5,%d,50.0,%d\n", i, i/10000+11, i%10000, i*10, i*100, i*90)
 	}
 
 	r := strings.NewReader(sb.String())
@@ -2188,7 +2188,7 @@ func TestEDGARSubmissions_Sync_MidBatchFlush(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.NoError(t, w.Close())
-	zf.Close()
+	_ = zf.Close()
 
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(_ context.Context, _ string, dest string) (int64, error) {
@@ -2419,14 +2419,14 @@ func TestHoldings13F_ParseHoldingsXML_MidBatchFlush(t *testing.T) {
 	sb.WriteString(`<?xml version="1.0"?>` + "\n")
 	sb.WriteString(`<informationTable xmlns="http://www.sec.gov/edgar/document/thirteenf/informationtable">` + "\n")
 	for i := 0; i < 5002; i++ {
-		sb.WriteString(fmt.Sprintf(`  <infoTable>
+		fmt.Fprintf(&sb, `  <infoTable>
     <nameOfIssuer>Company %d</nameOfIssuer>
     <titleOfClass>COM</titleOfClass>
     <cusip>%09d</cusip>
     <value>%d</value>
     <shrsOrPrnAmt><sshPrnamt>%d</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>
   </infoTable>
-`, i, 100000000+i, 1000+i, 100+i))
+`, i, 100000000+i, 1000+i, 100+i)
 	}
 	sb.WriteString("</informationTable>")
 
@@ -2511,9 +2511,9 @@ func TestOEWS_ProcessZip_FallbackCSV(t *testing.T) {
 	w := zip.NewWriter(zf)
 	fw, err := w.Create("alldata.csv") // NOT "nat" in name
 	require.NoError(t, err)
-	fw.Write([]byte(csvContent))
-	w.Close()
-	zf.Close()
+	_, _ = fw.Write([]byte(csvContent))
+	_ = w.Close()
+	_ = zf.Close()
 
 	oewsCols := []string{"area_code", "area_type", "naics", "occ_code", "year", "tot_emp", "h_mean", "a_mean", "h_median", "a_median"}
 	expectBulkUpsert(pool, "fed_data.oews_data", oewsCols, 1)

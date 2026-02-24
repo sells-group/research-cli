@@ -43,7 +43,7 @@ func ExportGrataCSV(results []*model.EnrichmentResult, outputPath string) error 
 	if err != nil {
 		return eris.Wrap(err, "grata export: create file")
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	w := csv.NewWriter(f)
 	defer w.Flush()

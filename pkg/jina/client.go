@@ -154,7 +154,7 @@ func (c *httpClient) retryDo(ctx context.Context, req *http.Request) ([]byte, in
 		}
 
 		body, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if readErr != nil {
 			return nil, resp.StatusCode, eris.Wrap(readErr, "jina: read response body")
 		}

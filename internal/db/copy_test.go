@@ -12,7 +12,7 @@ import (
 )
 
 func TestCopyFrom_EmptyRows(t *testing.T) {
-	n, err := CopyFrom(nil, nil, "test_table", []string{"a", "b"}, nil)
+	n, err := CopyFrom(context.TODO(), nil, "test_table", []string{"a", "b"}, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(0), n)
 }
@@ -46,7 +46,7 @@ func TestCopyFrom_Error(t *testing.T) {
 }
 
 func TestCopyFromSchema_EmptyRows(t *testing.T) {
-	n, err := CopyFromSchema(nil, nil, "fed_data", "test_table", []string{"a"}, [][]any{})
+	n, err := CopyFromSchema(context.TODO(), nil, "fed_data", "test_table", []string{"a"}, [][]any{})
 	assert.NoError(t, err)
 	assert.Equal(t, int64(0), n)
 }

@@ -23,7 +23,7 @@ func TestRunCmd_RunE_FailsOnValidation(t *testing.T) {
 	}
 
 	runCmd.SetContext(context.Background())
-	defer runCmd.SetContext(nil)
+	defer runCmd.SetContext(context.TODO())
 
 	runURL = "https://example.com"
 	runSFID = "001TEST"
@@ -42,7 +42,7 @@ func TestRunCmd_RunE_FailsOnInitPipeline_BadSF(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(tmpDir))
-	defer os.Chdir(origDir)
+	defer os.Chdir(origDir) //nolint:errcheck
 
 	cfg = &config.Config{
 		Store: config.StoreConfig{
@@ -68,7 +68,7 @@ func TestRunCmd_RunE_FailsOnInitPipeline_BadSF(t *testing.T) {
 	}
 
 	runCmd.SetContext(context.Background())
-	defer runCmd.SetContext(nil)
+	defer runCmd.SetContext(context.TODO())
 
 	runURL = "https://example.com"
 	runSFID = "001TEST"
