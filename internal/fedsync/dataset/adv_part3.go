@@ -63,14 +63,14 @@ func (d *ADVPart3) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, te
 	if _, err := f.DownloadToFile(ctx, url, zipPath); err != nil {
 		return nil, eris.Wrap(err, "adv_part3: download CRS ZIP")
 	}
-	defer os.Remove(zipPath)
+	defer os.Remove(zipPath) //nolint:errcheck
 
 	// Extract ZIP to temp dir.
 	extractDir := filepath.Join(tempDir, "adv_crs_extract")
 	if err := os.MkdirAll(extractDir, 0o755); err != nil {
 		return nil, eris.Wrap(err, "adv_part3: create extract dir")
 	}
-	defer os.RemoveAll(extractDir)
+	defer os.RemoveAll(extractDir) //nolint:errcheck
 
 	extractedFiles, err := fetcher.ExtractZIP(zipPath, extractDir)
 	if err != nil {
@@ -180,7 +180,7 @@ func parseCRSMapping(path string) ([]crsMapping, error) {
 	if err != nil {
 		return nil, eris.Wrap(err, "open CRS mapping CSV")
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	reader.LazyQuotes = true
@@ -256,9 +256,7 @@ func crsMappingsFromPDFs(files []string) []crsMapping {
 
 		// Try patterns: "crs_12345", "12345", etc.
 		numStr := name
-		if strings.HasPrefix(numStr, "crs_") {
-			numStr = strings.TrimPrefix(numStr, "crs_")
-		}
+		numStr = strings.TrimPrefix(numStr, "crs_")
 
 		crd := parseIntOr(numStr, 0)
 		if crd == 0 {

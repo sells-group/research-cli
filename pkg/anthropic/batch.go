@@ -130,7 +130,7 @@ func CollectBatchResults(iter BatchResultIterator) (map[string]*MessageResponse,
 // CollectBatchResultsDetailed drains a BatchResultIterator and returns both
 // succeeded results and a list of failed items.
 func CollectBatchResultsDetailed(iter BatchResultIterator) (*BatchCollectResult, error) {
-	defer iter.Close()
+	defer iter.Close() //nolint:errcheck
 
 	result := &BatchCollectResult{
 		Succeeded: make(map[string]*MessageResponse),

@@ -30,7 +30,7 @@ func TestNewSQLite_ValidPath(t *testing.T) {
 	s, err := NewSQLite(dbPath)
 	require.NoError(t, err)
 	require.NotNil(t, s)
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close() }) //nolint:errcheck
 
 	// Verify WAL mode was set by querying the journal_mode pragma.
 	var mode string
@@ -50,7 +50,7 @@ func TestNewSQLite_CloseAndReopen(t *testing.T) {
 
 	s2, err := NewSQLite(dbPath)
 	require.NoError(t, err)
-	t.Cleanup(func() { s2.Close() })
+	t.Cleanup(func() { s2.Close() }) //nolint:errcheck
 
 	// Tables should already exist from the first migration.
 	ctx := context.Background()
@@ -642,7 +642,7 @@ func newTestSQLiteRaw(t *testing.T) *SQLiteStore {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := NewSQLite(dbPath)
 	require.NoError(t, err)
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close() }) //nolint:errcheck
 	require.NoError(t, s.Migrate(context.Background()))
 	return s
 }

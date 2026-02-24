@@ -92,7 +92,7 @@ func (d *OEWS) processZip(ctx context.Context, pool db.Pool, zipPath string, yea
 	if err != nil {
 		return 0, eris.Wrap(err, "oews: open zip")
 	}
-	defer zr.Close()
+	defer zr.Close() //nolint:errcheck
 
 	// First pass: look for CSV/TXT with "nat" in name.
 	for _, zf := range zr.File {
@@ -103,7 +103,7 @@ func (d *OEWS) processZip(ctx context.Context, pool db.Pool, zipPath string, yea
 				return 0, eris.Wrapf(err, "oews: open file %s", zf.Name)
 			}
 			n, err := d.parseCSV(ctx, pool, rc, year)
-			rc.Close()
+			_ = rc.Close()
 			return n, err
 		}
 	}
@@ -126,7 +126,7 @@ func (d *OEWS) processZip(ctx context.Context, pool db.Pool, zipPath string, yea
 				return 0, eris.Wrapf(err, "oews: open file %s", zf.Name)
 			}
 			n, err := d.parseCSV(ctx, pool, rc, year)
-			rc.Close()
+			_ = rc.Close()
 			return n, err
 		}
 	}
@@ -142,19 +142,19 @@ func (d *OEWS) parseXLSX(ctx context.Context, pool db.Pool, zf *zip.File, year i
 	}
 	tmpFile, err := os.CreateTemp("", "oews-*.xlsx")
 	if err != nil {
-		rc.Close()
+		_ = rc.Close()
 		return 0, eris.Wrap(err, "oews: create temp xlsx")
 	}
 	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
+	defer os.Remove(tmpPath) //nolint:errcheck
 
 	if _, err := io.Copy(tmpFile, rc); err != nil {
-		tmpFile.Close()
-		rc.Close()
+		_ = tmpFile.Close()
+		_ = rc.Close()
 		return 0, eris.Wrap(err, "oews: extract xlsx")
 	}
-	tmpFile.Close()
-	rc.Close()
+	_ = tmpFile.Close()
+	_ = rc.Close()
 
 	xlFile, err := xlsx.OpenFile(tmpPath)
 	if err != nil {

@@ -79,7 +79,7 @@ func (lc *LocalCrawler) Probe(ctx context.Context, rawURL string) (*model.ProbeR
 		result.Reachable = false
 		return result, nil
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
 
@@ -254,7 +254,7 @@ func (lc *LocalCrawler) fetchSitemapURLs(ctx context.Context, sitemapURL string,
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil
@@ -301,7 +301,7 @@ func (lc *LocalCrawler) extractLinks(ctx context.Context, pageURL string, base *
 	if err != nil {
 		return nil, eris.Wrap(err, "execute request")
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, nil
@@ -378,7 +378,7 @@ func (lc *LocalCrawler) checkExists(ctx context.Context, url string) bool {
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
 }
 

@@ -53,7 +53,7 @@ func (d *BrokerCheck) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher,
 	if err != nil {
 		return nil, eris.Wrap(err, "brokercheck: open extracted file")
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	rowCh, errCh := fetcher.StreamCSV(ctx, file, csvOpts)
 

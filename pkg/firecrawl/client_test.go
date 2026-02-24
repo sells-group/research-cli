@@ -41,7 +41,7 @@ func TestCrawl(t *testing.T) {
 				assert.Equal(t, "https://example.com", req.URL)
 
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(CrawlResponse{Success: true, ID: "crawl-123"})
+				json.NewEncoder(w).Encode(CrawlResponse{Success: true, ID: "crawl-123"}) //nolint:errcheck
 			},
 			wantID: "crawl-123",
 		},
@@ -49,7 +49,7 @@ func TestCrawl(t *testing.T) {
 			name: "auth error",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte(`{"error":"Unauthorized"}`))
+				w.Write([]byte(`{"error":"Unauthorized"}`)) //nolint:errcheck
 			},
 			wantErr:    true,
 			wantAPIErr: true,
@@ -59,7 +59,7 @@ func TestCrawl(t *testing.T) {
 			name: "server error",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(`{"error":"internal server error"}`))
+				w.Write([]byte(`{"error":"internal server error"}`)) //nolint:errcheck
 			},
 			wantErr:    true,
 			wantAPIErr: true,
@@ -103,7 +103,7 @@ func TestGetCrawlStatus(t *testing.T) {
 				assert.Equal(t, "/crawl/crawl-123", r.URL.Path)
 				assert.Equal(t, "Bearer test-api-key", r.Header.Get("Authorization"))
 
-				json.NewEncoder(w).Encode(CrawlStatusResponse{
+				json.NewEncoder(w).Encode(CrawlStatusResponse{ //nolint:errcheck
 					Status: "completed",
 					Total:  2,
 					Data: []PageData{
@@ -118,7 +118,7 @@ func TestGetCrawlStatus(t *testing.T) {
 		{
 			name: "still scraping",
 			handler: func(w http.ResponseWriter, r *http.Request) {
-				json.NewEncoder(w).Encode(CrawlStatusResponse{
+				json.NewEncoder(w).Encode(CrawlStatusResponse{ //nolint:errcheck
 					Status: "scraping",
 					Total:  5,
 				})
@@ -163,7 +163,7 @@ func TestScrape(t *testing.T) {
 				require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 				assert.Equal(t, "https://example.com/about", req.URL)
 
-				json.NewEncoder(w).Encode(ScrapeResponse{
+				json.NewEncoder(w).Encode(ScrapeResponse{ //nolint:errcheck
 					Success: true,
 					Data: PageData{
 						URL:        "https://example.com/about",
@@ -179,7 +179,7 @@ func TestScrape(t *testing.T) {
 			name: "rate limited",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusTooManyRequests)
-				w.Write([]byte(`{"error":"rate limited"}`))
+				w.Write([]byte(`{"error":"rate limited"}`)) //nolint:errcheck
 			},
 			wantErr:    true,
 			wantAPIErr: true,
@@ -217,7 +217,7 @@ func TestBatchScrape(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 		assert.Len(t, req.URLs, 3)
 
-		json.NewEncoder(w).Encode(BatchScrapeResponse{
+		_ = json.NewEncoder(w).Encode(BatchScrapeResponse{
 			Success: true,
 			ID:      "batch-456",
 		})
@@ -236,7 +236,7 @@ func TestGetBatchScrapeStatus(t *testing.T) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/batch/scrape/batch-456", r.URL.Path)
 
-		json.NewEncoder(w).Encode(BatchScrapeStatusResponse{
+		_ = json.NewEncoder(w).Encode(BatchScrapeStatusResponse{
 			Status: "completed",
 			Total:  2,
 			Data: []PageData{
@@ -282,7 +282,7 @@ func TestWithHTTPClient(t *testing.T) {
 func TestMalformedJSON(t *testing.T) {
 	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{not json`))
+		_, _ = w.Write([]byte(`{not json`)) //nolint:errcheck
 	})
 
 	_, err := c.Scrape(context.Background(), ScrapeRequest{URL: "https://example.com"})
@@ -293,7 +293,7 @@ func TestMalformedJSON(t *testing.T) {
 func TestGetCrawlStatus_Error(t *testing.T) {
 	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"error":"not found"}`))
+		_, _ = w.Write([]byte(`{"error":"not found"}`)) //nolint:errcheck
 	})
 
 	_, err := c.GetCrawlStatus(context.Background(), "nonexistent")
@@ -306,7 +306,7 @@ func TestGetCrawlStatus_Error(t *testing.T) {
 func TestGetBatchScrapeStatus_Error(t *testing.T) {
 	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"error":"not found"}`))
+		_, _ = w.Write([]byte(`{"error":"not found"}`))
 	})
 
 	_, err := c.GetBatchScrapeStatus(context.Background(), "nonexistent")
@@ -319,7 +319,7 @@ func TestGetBatchScrapeStatus_Error(t *testing.T) {
 func TestBatchScrape_Error(t *testing.T) {
 	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(`{"error":"rate limited"}`))
+		_, _ = w.Write([]byte(`{"error":"rate limited"}`))
 	})
 
 	_, err := c.BatchScrape(context.Background(), BatchScrapeRequest{

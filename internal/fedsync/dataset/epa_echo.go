@@ -58,7 +58,7 @@ func (d *EPAECHO) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tem
 	if err != nil {
 		return nil, eris.Wrap(err, "epa_echo: open csv")
 	}
-	defer csvFile.Close()
+	defer csvFile.Close() //nolint:errcheck
 
 	rowCh, errCh := fetcher.StreamCSV(ctx, csvFile, fetcher.CSVOptions{HasHeader: false})
 

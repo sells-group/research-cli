@@ -50,7 +50,7 @@ func (d *ABS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir
 		}
 
 		data, err := io.ReadAll(body)
-		body.Close()
+		_ = body.Close()
 		if err != nil {
 			return nil, eris.Wrap(err, "abs: read response")
 		}

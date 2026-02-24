@@ -79,7 +79,7 @@ func (d *FPDS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDi
 		}
 
 		data, err := io.ReadAll(body)
-		body.Close()
+		_ = body.Close()
 		if err != nil {
 			return nil, eris.Wrap(err, "fpds: read response body")
 		}

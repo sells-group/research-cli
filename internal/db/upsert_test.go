@@ -12,7 +12,7 @@ import (
 )
 
 func TestBulkUpsert_EmptyRows(t *testing.T) {
-	n, err := BulkUpsert(nil, nil, UpsertConfig{
+	n, err := BulkUpsert(context.TODO(), nil, UpsertConfig{
 		Table:        "fed_data.test",
 		Columns:      []string{"id", "name"},
 		ConflictKeys: []string{"id"},
@@ -22,7 +22,7 @@ func TestBulkUpsert_EmptyRows(t *testing.T) {
 }
 
 func TestBulkUpsert_NoColumns(t *testing.T) {
-	_, err := BulkUpsert(nil, nil, UpsertConfig{
+	_, err := BulkUpsert(context.TODO(), nil, UpsertConfig{
 		Table:        "fed_data.test",
 		ConflictKeys: []string{"id"},
 	}, [][]any{{1, "a"}})
@@ -31,7 +31,7 @@ func TestBulkUpsert_NoColumns(t *testing.T) {
 }
 
 func TestBulkUpsert_NoConflictKeys(t *testing.T) {
-	_, err := BulkUpsert(nil, nil, UpsertConfig{
+	_, err := BulkUpsert(context.TODO(), nil, UpsertConfig{
 		Table:   "fed_data.test",
 		Columns: []string{"id", "name"},
 	}, [][]any{{1, "a"}})

@@ -51,7 +51,7 @@ func (s *miniFTPServer) close() {
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
-	s.listener.Close()
+	s.listener.Close() //nolint:errcheck
 	s.wg.Wait()
 }
 
@@ -69,16 +69,16 @@ func (s *miniFTPServer) serve(t *testing.T) {
 
 func (s *miniFTPServer) handleConn(t *testing.T, conn net.Conn) {
 	defer s.wg.Done()
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	conn.SetDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck
 
 	writer := bufio.NewWriter(conn)
 	reader := bufio.NewReader(conn)
 
 	// Send greeting
-	fmt.Fprintf(writer, "220 Mini FTP Server ready\r\n")
-	writer.Flush()
+	fmt.Fprintf(writer, "220 Mini FTP Server ready\r\n") //nolint:errcheck
+	writer.Flush()                                        //nolint:errcheck
 
 	var dataListener net.Listener
 
@@ -97,97 +97,97 @@ func (s *miniFTPServer) handleConn(t *testing.T, conn net.Conn) {
 
 		switch cmd {
 		case "USER":
-			fmt.Fprintf(writer, "230 User logged in\r\n")
-			writer.Flush()
+			fmt.Fprintf(writer, "230 User logged in\r\n") //nolint:errcheck
+			writer.Flush()                                 //nolint:errcheck
 
 		case "PASS":
-			fmt.Fprintf(writer, "230 User logged in\r\n")
-			writer.Flush()
+			fmt.Fprintf(writer, "230 User logged in\r\n") //nolint:errcheck
+			writer.Flush()                                 //nolint:errcheck
 
 		case "FEAT":
-			fmt.Fprintf(writer, "211-Features:\r\n")
-			fmt.Fprintf(writer, " UTF8\r\n")
-			fmt.Fprintf(writer, "211 End\r\n")
-			writer.Flush()
+			fmt.Fprintf(writer, "211-Features:\r\n") //nolint:errcheck
+			fmt.Fprintf(writer, " UTF8\r\n")         //nolint:errcheck
+			fmt.Fprintf(writer, "211 End\r\n")        //nolint:errcheck
+			writer.Flush()                             //nolint:errcheck
 
 		case "TYPE":
-			fmt.Fprintf(writer, "200 Type set to %s\r\n", arg)
-			writer.Flush()
+			fmt.Fprintf(writer, "200 Type set to %s\r\n", arg) //nolint:errcheck
+			writer.Flush()                                      //nolint:errcheck
 
 		case "EPSV":
 			// Open a data connection listener
 			var err error
 			dataListener, err = net.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
-				fmt.Fprintf(writer, "425 Can't open data connection\r\n")
-				writer.Flush()
+				fmt.Fprintf(writer, "425 Can't open data connection\r\n") //nolint:errcheck
+				writer.Flush()                                            //nolint:errcheck
 				continue
 			}
 			port := dataListener.Addr().(*net.TCPAddr).Port
-			fmt.Fprintf(writer, "229 Entering Extended Passive Mode (|||%d|)\r\n", port)
-			writer.Flush()
+			fmt.Fprintf(writer, "229 Entering Extended Passive Mode (|||%d|)\r\n", port) //nolint:errcheck
+			writer.Flush()                                                                //nolint:errcheck
 
 		case "PASV":
 			// Open a data connection listener
 			var err error
 			dataListener, err = net.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
-				fmt.Fprintf(writer, "425 Can't open data connection\r\n")
-				writer.Flush()
+				fmt.Fprintf(writer, "425 Can't open data connection\r\n") //nolint:errcheck
+				writer.Flush()                                            //nolint:errcheck
 				continue
 			}
 			addr := dataListener.Addr().(*net.TCPAddr)
 			p1 := addr.Port / 256
 			p2 := addr.Port % 256
-			fmt.Fprintf(writer, "227 Entering Passive Mode (127,0,0,1,%d,%d)\r\n", p1, p2)
-			writer.Flush()
+			fmt.Fprintf(writer, "227 Entering Passive Mode (127,0,0,1,%d,%d)\r\n", p1, p2) //nolint:errcheck
+			writer.Flush()                                                                   //nolint:errcheck
 
 		case "RETR":
 			if dataListener == nil {
-				fmt.Fprintf(writer, "425 Use PASV first\r\n")
-				writer.Flush()
+				fmt.Fprintf(writer, "425 Use PASV first\r\n") //nolint:errcheck
+				writer.Flush()                                 //nolint:errcheck
 				continue
 			}
 
 			content, ok := s.fileData[arg]
 			if !ok {
-				fmt.Fprintf(writer, "550 File not found\r\n")
-				writer.Flush()
-				dataListener.Close()
+				fmt.Fprintf(writer, "550 File not found\r\n") //nolint:errcheck
+				writer.Flush()                                 //nolint:errcheck
+				dataListener.Close()                           //nolint:errcheck
 				dataListener = nil
 				continue
 			}
 
-			fmt.Fprintf(writer, "150 Opening data connection\r\n")
-			writer.Flush()
+			fmt.Fprintf(writer, "150 Opening data connection\r\n") //nolint:errcheck
+			writer.Flush()                                         //nolint:errcheck
 
 			dataConn, err := dataListener.Accept()
 			if err != nil {
-				fmt.Fprintf(writer, "425 Can't open data connection\r\n")
-				writer.Flush()
+				fmt.Fprintf(writer, "425 Can't open data connection\r\n") //nolint:errcheck
+				writer.Flush()                                            //nolint:errcheck
 				continue
 			}
 
-			io.WriteString(dataConn, content)
-			dataConn.Close()
-			dataListener.Close()
+			io.WriteString(dataConn, content) //nolint:errcheck
+			dataConn.Close()                  //nolint:errcheck
+			dataListener.Close()              //nolint:errcheck
 			dataListener = nil
 
-			fmt.Fprintf(writer, "226 Transfer complete\r\n")
-			writer.Flush()
+			fmt.Fprintf(writer, "226 Transfer complete\r\n") //nolint:errcheck
+			writer.Flush()                                    //nolint:errcheck
 
 		case "QUIT":
-			fmt.Fprintf(writer, "221 Goodbye\r\n")
-			writer.Flush()
+			fmt.Fprintf(writer, "221 Goodbye\r\n") //nolint:errcheck
+			writer.Flush()                          //nolint:errcheck
 			return
 
 		case "OPTS":
-			fmt.Fprintf(writer, "200 OK\r\n")
-			writer.Flush()
+			fmt.Fprintf(writer, "200 OK\r\n") //nolint:errcheck
+			writer.Flush()                     //nolint:errcheck
 
 		default:
-			fmt.Fprintf(writer, "502 Command not implemented\r\n")
-			writer.Flush()
+			fmt.Fprintf(writer, "502 Command not implemented\r\n") //nolint:errcheck
+			writer.Flush()                                         //nolint:errcheck
 		}
 	}
 }
@@ -203,7 +203,7 @@ func TestFTPFetcher_Download(t *testing.T) {
 	ftpURL := fmt.Sprintf("ftp://%s/data/test.csv", srv.addr())
 	body, err := f.Download(context.Background(), ftpURL)
 	require.NoError(t, err)
-	defer body.Close()
+	defer body.Close() //nolint:errcheck
 
 	data, err := io.ReadAll(body)
 	require.NoError(t, err)

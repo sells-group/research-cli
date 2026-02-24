@@ -15,7 +15,7 @@ func TestLoadDefaults(t *testing.T) {
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { os.Chdir(origDir) })
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
 
 	cfg, err := Load()
 	require.NoError(t, err)
@@ -49,7 +49,7 @@ func TestLoadFromYAML(t *testing.T) {
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { os.Chdir(origDir) })
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
 
 	yaml := `
 store:
@@ -80,7 +80,7 @@ func TestLoadEnvOverridesFile(t *testing.T) {
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { os.Chdir(origDir) })
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
 
 	yaml := `
 store:
@@ -105,7 +105,7 @@ func TestLoadEnvOverridesDefaults(t *testing.T) {
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { os.Chdir(origDir) })
+	t.Cleanup(func() { os.Chdir(origDir) }) //nolint:errcheck
 
 	t.Setenv("RESEARCH_SERVER_PORT", "3000")
 

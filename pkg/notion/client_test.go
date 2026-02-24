@@ -107,7 +107,7 @@ func TestCreatePageError(t *testing.T) {
 func TestNewClientReturnsClient(t *testing.T) {
 	c := NewClient("test-token")
 	assert.NotNil(t, c)
-	var _ Client = c
+	var _ Client = c //nolint:staticcheck // interface compliance check
 }
 
 func TestQueryDatabaseError(t *testing.T) {

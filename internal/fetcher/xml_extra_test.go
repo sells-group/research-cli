@@ -96,9 +96,7 @@ func TestStreamXML_InvalidXMLSyntax(t *testing.T) {
 	input := `<root><item><unclosed`
 	ch, errCh := StreamXML[testItem](context.Background(), strings.NewReader(input), "item")
 
-	var items []testItem
-	for item := range ch {
-		items = append(items, item)
+	for range ch {
 	}
 
 	var gotErr error
@@ -118,9 +116,7 @@ func TestStreamXML_BrokenTokenOnly(t *testing.T) {
 	input := "\x00"
 	ch, errCh := StreamXML[testItem](context.Background(), strings.NewReader(input), "item")
 
-	var items []testItem
-	for item := range ch {
-		items = append(items, item)
+	for range ch {
 	}
 
 	var gotErr error

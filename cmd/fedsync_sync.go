@@ -63,7 +63,7 @@ Use --full to perform a full reload instead of incremental sync.`,
 		if err := os.MkdirAll(runDir, 0o755); err != nil {
 			return eris.Wrapf(err, "fedsync sync: create run dir %s", runDir)
 		}
-		defer os.RemoveAll(runDir)
+		defer os.RemoveAll(runDir) //nolint:errcheck
 
 		// Build fetcher.
 		f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{

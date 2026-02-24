@@ -46,7 +46,7 @@ func TestExportGrataCSV_ColumnOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open output: %v", err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	records, err := reader.ReadAll()
@@ -174,7 +174,7 @@ func TestExportGrataCSV_MissingFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open output: %v", err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	records, err := reader.ReadAll()
@@ -277,7 +277,7 @@ func TestExportGrataCSV_MultipleResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	reader := csv.NewReader(f)
 	records, err := reader.ReadAll()

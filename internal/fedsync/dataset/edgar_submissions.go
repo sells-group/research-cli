@@ -89,14 +89,14 @@ func (d *EDGARSubmissions) Sync(ctx context.Context, pool db.Pool, f fetcher.Fet
 	if _, err := f.DownloadToFile(ctx, submissionsZipURL, zipPath); err != nil {
 		return nil, eris.Wrap(err, "edgar_submissions: download ZIP")
 	}
-	defer os.Remove(zipPath)
+	defer os.Remove(zipPath) //nolint:errcheck
 
 	// Extract all JSON files from the ZIP.
 	extractDir := filepath.Join(tempDir, "submissions")
 	if err := os.MkdirAll(extractDir, 0o755); err != nil {
 		return nil, eris.Wrap(err, "edgar_submissions: create extract dir")
 	}
-	defer os.RemoveAll(extractDir)
+	defer os.RemoveAll(extractDir) //nolint:errcheck
 
 	files, err := fetcher.ExtractZIP(zipPath, extractDir)
 	if err != nil {
@@ -112,11 +112,6 @@ func (d *EDGARSubmissions) Sync(ctx context.Context, pool db.Pool, f fetcher.Fet
 	filingConflict := []string{"accession_number"}
 
 	// Parallel decode: collect parsed rows from worker pool.
-	type parsedResult struct {
-		entityRow  []any
-		filingRows [][]any
-	}
-
 	var mu sync.Mutex
 	var entityBatch [][]any
 	var filingBatch [][]any
@@ -261,7 +256,7 @@ func (d *EDGARSubmissions) parseSubmissionFile(path string) (*submissionJSON, er
 	if err != nil {
 		return nil, eris.Wrap(err, "open submission file")
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	return d.decodeSubmission(file)
 }

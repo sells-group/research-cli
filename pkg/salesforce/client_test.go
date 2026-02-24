@@ -67,7 +67,7 @@ func TestNewClientReturnsClient(t *testing.T) {
 	// NewClient wraps a salesforce.Salesforce instance.
 	client := NewClient(nil)
 	require.NotNil(t, client)
-	var _ Client = client
+	var _ Client = client //nolint:staticcheck // interface compliance check
 }
 
 func TestCollectionResultFields(t *testing.T) {

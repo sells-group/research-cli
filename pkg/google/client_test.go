@@ -23,7 +23,7 @@ func TestTextSearch_Success(t *testing.T) {
 		assert.Equal(t, "Acme Corp Springfield IL", body.TextQuery)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(TextSearchResponse{
+		_ = json.NewEncoder(w).Encode(TextSearchResponse{
 			Places: []Place{
 				{
 					DisplayName:     DisplayName{Text: "Acme Corp"},
@@ -48,7 +48,7 @@ func TestTextSearch_Success(t *testing.T) {
 func TestTextSearch_NoResults(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(TextSearchResponse{Places: nil})
+		_ = json.NewEncoder(w).Encode(TextSearchResponse{Places: nil})
 	}))
 	defer srv.Close()
 
@@ -62,7 +62,7 @@ func TestTextSearch_NoResults(t *testing.T) {
 func TestTextSearch_APIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(`{"error": "invalid API key"}`))
+		_, _ = w.Write([]byte(`{"error": "invalid API key"}`)) //nolint:errcheck
 	}))
 	defer srv.Close()
 

@@ -34,7 +34,7 @@ func TestSFClient_Query(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Contains(t, r.URL.Path, "/query")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"totalSize": 1,
 			"done":      true,
 			"records": []map[string]any{
@@ -62,7 +62,7 @@ func TestSFClient_Query(t *testing.T) {
 func TestSFClient_Query_Error(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode([]map[string]any{
+		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{"message": "invalid SOQL", "errorCode": "MALFORMED_QUERY"},
 		})
 	})
@@ -80,7 +80,7 @@ func TestSFClient_InsertOne(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path != "/query" {
 			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id":      "001new",
 				"success": true,
 				"errors":  []any{},
@@ -104,7 +104,7 @@ func TestSFClient_InsertOne_Failure(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id":      "",
 				"success": false,
 				"errors":  []map[string]any{{"message": "required field missing"}},
@@ -143,7 +143,7 @@ func TestSFClient_UpdateOne(t *testing.T) {
 func TestSFClient_UpdateOne_Error(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode([]map[string]any{
+		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{"message": "invalid field", "errorCode": "INVALID_FIELD"},
 		})
 	})
@@ -162,7 +162,7 @@ func TestSFClient_UpdateCollection(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPatch {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]map[string]any{
+			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{"id": "001xx", "success": true, "errors": []any{}},
 				{"id": "002xx", "success": true, "errors": []any{}},
 			})
@@ -188,7 +188,7 @@ func TestSFClient_UpdateCollection(t *testing.T) {
 func TestSFClient_UpdateCollection_Error(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode([]map[string]any{
+		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{"message": "batch error"},
 		})
 	})
@@ -209,7 +209,7 @@ func TestSFClient_DescribeSObject(t *testing.T) {
 		// go-salesforce constructs URL as: InstanceUrl + /services/data/vXX.X + uri
 		assert.Contains(t, r.URL.Path, "/sobjects/Account/describe")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name":  "Account",
 			"label": "Account",
 			"fields": []map[string]any{
@@ -237,7 +237,7 @@ func TestSFClient_DescribeSObject(t *testing.T) {
 func TestSFClient_DescribeSObject_Error(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode([]map[string]any{
+		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{"message": "sobject not found", "errorCode": "NOT_FOUND"},
 		})
 	})

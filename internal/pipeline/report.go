@@ -18,25 +18,25 @@ func FormatReport(company model.Company, answers []model.ExtractionAnswer, field
 	if name == "" {
 		name = company.URL
 	}
-	b.WriteString(fmt.Sprintf("# Enrichment Report: %s\n", name))
-	b.WriteString(fmt.Sprintf("URL: %s\n", company.URL))
-	b.WriteString(fmt.Sprintf("Salesforce ID: %s\n\n", company.SalesforceID))
+	fmt.Fprintf(&b, "# Enrichment Report: %s\n", name)
+	fmt.Fprintf(&b, "URL: %s\n", company.URL)
+	fmt.Fprintf(&b, "Salesforce ID: %s\n\n", company.SalesforceID)
 
 	// Summary.
 	b.WriteString("## Summary\n")
-	b.WriteString(fmt.Sprintf("- Fields found: %d\n", len(fieldValues)))
-	b.WriteString(fmt.Sprintf("- Total answers: %d\n", len(answers)))
-	b.WriteString(fmt.Sprintf("- Token usage: %d input, %d output\n",
-		totalUsage.InputTokens, totalUsage.OutputTokens))
-	b.WriteString(fmt.Sprintf("- Estimated cost: $%.4f\n\n", totalUsage.Cost))
+	fmt.Fprintf(&b, "- Fields found: %d\n", len(fieldValues))
+	fmt.Fprintf(&b, "- Total answers: %d\n", len(answers))
+	fmt.Fprintf(&b, "- Token usage: %d input, %d output\n",
+		totalUsage.InputTokens, totalUsage.OutputTokens)
+	fmt.Fprintf(&b, "- Estimated cost: $%.4f\n\n", totalUsage.Cost)
 
 	// Phase results.
 	b.WriteString("## Phases\n")
 	for _, p := range phases {
 		status := string(p.Status)
-		b.WriteString(fmt.Sprintf("- %s: %s (%dms)\n", p.Name, status, p.Duration))
+		fmt.Fprintf(&b, "- %s: %s (%dms)\n", p.Name, status, p.Duration)
 		if p.Error != "" {
-			b.WriteString(fmt.Sprintf("  Error: %s\n", p.Error))
+			fmt.Fprintf(&b, "  Error: %s\n", p.Error)
 		}
 	}
 	b.WriteString("\n")
@@ -55,8 +55,8 @@ func FormatReport(company model.Company, answers []model.ExtractionAnswer, field
 
 		for _, k := range keys {
 			fv := fieldValues[k]
-			b.WriteString(fmt.Sprintf("- **%s** (%s): %v [T%d, %.0f%%]\n",
-				fv.FieldKey, fv.SFField, fv.Value, fv.Tier, fv.Confidence*100))
+			fmt.Fprintf(&b, "- **%s** (%s): %v [T%d, %.0f%%]\n",
+				fv.FieldKey, fv.SFField, fv.Value, fv.Tier, fv.Confidence*100)
 		}
 		b.WriteString("\n")
 	}
@@ -74,9 +74,9 @@ func FormatReport(company model.Company, answers []model.ExtractionAnswer, field
 		}
 	}
 	b.WriteString("## Tier Breakdown\n")
-	b.WriteString(fmt.Sprintf("- Tier 1 (Haiku): %d answers\n", t1Count))
-	b.WriteString(fmt.Sprintf("- Tier 2 (Sonnet): %d answers\n", t2Count))
-	b.WriteString(fmt.Sprintf("- Tier 3 (Opus): %d answers\n", t3Count))
+	fmt.Fprintf(&b, "- Tier 1 (Haiku): %d answers\n", t1Count)
+	fmt.Fprintf(&b, "- Tier 2 (Sonnet): %d answers\n", t2Count)
+	fmt.Fprintf(&b, "- Tier 3 (Opus): %d answers\n", t3Count)
 
 	return b.String()
 }

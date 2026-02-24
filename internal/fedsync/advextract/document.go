@@ -68,42 +68,42 @@ func FormatPart1Structured(a *AdvisorRow) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("=== ADV Part 1 Structured Data for CRD %d ===\n\n", a.CRDNumber))
+	fmt.Fprintf(&sb, "=== ADV Part 1 Structured Data for CRD %d ===\n\n", a.CRDNumber)
 
 	// Firm Identity
 	sb.WriteString("--- Firm Identity ---\n")
-	sb.WriteString(fmt.Sprintf("Firm Name: %s\n", a.FirmName))
-	sb.WriteString(fmt.Sprintf("CRD Number: %d\n", a.CRDNumber))
-	sb.WriteString(fmt.Sprintf("City: %s\n", a.City))
-	sb.WriteString(fmt.Sprintf("State: %s\n", a.State))
-	sb.WriteString(fmt.Sprintf("Website: %s\n", a.Website))
+	fmt.Fprintf(&sb, "Firm Name: %s\n", a.FirmName)
+	fmt.Fprintf(&sb, "CRD Number: %d\n", a.CRDNumber)
+	fmt.Fprintf(&sb, "City: %s\n", a.City)
+	fmt.Fprintf(&sb, "State: %s\n", a.State)
+	fmt.Fprintf(&sb, "Website: %s\n", a.Website)
 	if a.FilingDate != nil {
-		sb.WriteString(fmt.Sprintf("Filing Date: %s\n", a.FilingDate.Format("2006-01-02")))
+		fmt.Fprintf(&sb, "Filing Date: %s\n", a.FilingDate.Format("2006-01-02"))
 	}
 
 	// AUM
 	sb.WriteString("\n--- Assets Under Management ---\n")
 	if a.AUMTotal != nil {
-		sb.WriteString(fmt.Sprintf("Total AUM: $%s\n", formatDollars(*a.AUMTotal)))
+		fmt.Fprintf(&sb, "Total AUM: $%s\n", formatDollars(*a.AUMTotal))
 	}
 	if a.AUMDiscretionary != nil {
-		sb.WriteString(fmt.Sprintf("Discretionary AUM: $%s\n", formatDollars(*a.AUMDiscretionary)))
+		fmt.Fprintf(&sb, "Discretionary AUM: $%s\n", formatDollars(*a.AUMDiscretionary))
 	}
 	if a.AUMNonDiscretionary != nil {
-		sb.WriteString(fmt.Sprintf("Non-Discretionary AUM: $%s\n", formatDollars(*a.AUMNonDiscretionary)))
+		fmt.Fprintf(&sb, "Non-Discretionary AUM: $%s\n", formatDollars(*a.AUMNonDiscretionary))
 	}
 	if a.NumAccounts != nil {
-		sb.WriteString(fmt.Sprintf("Number of Accounts: %d\n", *a.NumAccounts))
+		fmt.Fprintf(&sb, "Number of Accounts: %d\n", *a.NumAccounts)
 	}
 	if a.AUMTotal != nil && a.NumAccounts != nil && *a.NumAccounts > 0 {
 		avg := *a.AUMTotal / int64(*a.NumAccounts)
-		sb.WriteString(fmt.Sprintf("Average Account Size: $%s\n", formatDollars(avg)))
+		fmt.Fprintf(&sb, "Average Account Size: $%s\n", formatDollars(avg))
 	}
 
 	// Employees
 	sb.WriteString("\n--- Employees ---\n")
 	if a.TotalEmployees != nil {
-		sb.WriteString(fmt.Sprintf("Total Employees: %d\n", *a.TotalEmployees))
+		fmt.Fprintf(&sb, "Total Employees: %d\n", *a.TotalEmployees)
 	}
 
 	// Client Types (if JSONB data available)
@@ -126,7 +126,7 @@ func FormatPart1Structured(a *AdvisorRow) string {
 		}
 		for _, cf := range compFields {
 			if v, ok := a.Filing[cf.key]; ok && v != nil && v != false {
-				sb.WriteString(fmt.Sprintf("  %s: %v\n", cf.label, v))
+				fmt.Fprintf(&sb, "  %s: %v\n", cf.label, v)
 			}
 		}
 
@@ -138,7 +138,7 @@ func FormatPart1Structured(a *AdvisorRow) string {
 		}
 		for _, rf := range regFields {
 			if v, ok := a.Filing[rf.key]; ok && v != nil {
-				sb.WriteString(fmt.Sprintf("  %s: %v\n", rf.label, v))
+				fmt.Fprintf(&sb, "  %s: %v\n", rf.label, v)
 			}
 		}
 
@@ -152,7 +152,7 @@ func FormatPart1Structured(a *AdvisorRow) string {
 		}
 		for _, df := range drpFields {
 			if v, ok := a.Filing[df.key]; ok && v != nil {
-				sb.WriteString(fmt.Sprintf("  %s: %v\n", df.label, v))
+				fmt.Fprintf(&sb, "  %s: %v\n", df.label, v)
 			}
 		}
 
@@ -165,7 +165,7 @@ func FormatPart1Structured(a *AdvisorRow) string {
 		}
 		for _, cf := range custodyFields {
 			if v, ok := a.Filing[cf.key]; ok && v != nil {
-				sb.WriteString(fmt.Sprintf("  %s: %v\n", cf.label, v))
+				fmt.Fprintf(&sb, "  %s: %v\n", cf.label, v)
 			}
 		}
 
@@ -179,7 +179,7 @@ func FormatPart1Structured(a *AdvisorRow) string {
 		}
 		for _, tf := range txnFields {
 			if v, ok := a.Filing[tf.key]; ok && v != nil {
-				sb.WriteString(fmt.Sprintf("  %s: %v\n", tf.label, v))
+				fmt.Fprintf(&sb, "  %s: %v\n", tf.label, v)
 			}
 		}
 
@@ -195,13 +195,13 @@ func FormatPart1Structured(a *AdvisorRow) string {
 		}
 		for _, bf := range bizFields {
 			if v, ok := a.Filing[bf.key]; ok && v != nil && v != false {
-				sb.WriteString(fmt.Sprintf("  %s: %v\n", bf.label, v))
+				fmt.Fprintf(&sb, "  %s: %v\n", bf.label, v)
 			}
 		}
 
 		sb.WriteString("\n--- Offices ---\n")
 		if v, ok := a.Filing["num_other_offices"]; ok && v != nil {
-			sb.WriteString(fmt.Sprintf("  Number of Other Offices: %v\n", v))
+			fmt.Fprintf(&sb, "  Number of Other Offices: %v\n", v)
 		}
 	}
 
@@ -247,13 +247,13 @@ func FundContext(docs *AdvisorDocs, fund FundRow) string {
 	var sb strings.Builder
 
 	// Fund structured data
-	sb.WriteString(fmt.Sprintf("=== Fund: %s (ID: %s) ===\n", fund.FundName, fund.FundID))
-	sb.WriteString(fmt.Sprintf("Type: %s\n", fund.FundType))
+	fmt.Fprintf(&sb, "=== Fund: %s (ID: %s) ===\n", fund.FundName, fund.FundID)
+	fmt.Fprintf(&sb, "Type: %s\n", fund.FundType)
 	if fund.GrossAssetValue != nil {
-		sb.WriteString(fmt.Sprintf("Gross Asset Value: $%s\n", formatDollars(*fund.GrossAssetValue)))
+		fmt.Fprintf(&sb, "Gross Asset Value: $%s\n", formatDollars(*fund.GrossAssetValue))
 	}
 	if fund.NetAssetValue != nil {
-		sb.WriteString(fmt.Sprintf("Net Asset Value: $%s\n", formatDollars(*fund.NetAssetValue)))
+		fmt.Fprintf(&sb, "Net Asset Value: $%s\n", formatDollars(*fund.NetAssetValue))
 	}
 
 	// Find brochure sections mentioning this fund
@@ -308,7 +308,7 @@ func formatOwners(owners []OwnerRow) string {
 		if o.IsControl {
 			control = " [CONTROL PERSON]"
 		}
-		sb.WriteString(fmt.Sprintf("- %s (%s): %s%s\n", o.OwnerName, o.OwnerType, pct, control))
+		fmt.Fprintf(&sb, "- %s (%s): %s%s\n", o.OwnerName, o.OwnerType, pct, control)
 	}
 	return sb.String()
 }
@@ -325,7 +325,7 @@ func formatClientTypes(raw json.RawMessage) string {
 		count, _ := c["count"].(float64)
 		pctRAUM, _ := c["pct_raum"].(float64)
 		if name != "" && (count > 0 || pctRAUM > 0) {
-			sb.WriteString(fmt.Sprintf("  %s: %d clients, %.1f%% RAUM\n", name, int(count), pctRAUM))
+			fmt.Fprintf(&sb, "  %s: %d clients, %.1f%% RAUM\n", name, int(count), pctRAUM)
 		}
 	}
 	return sb.String()

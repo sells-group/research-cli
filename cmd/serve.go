@@ -39,12 +39,12 @@ func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store, webhook
 		if st != nil {
 			if err := st.Ping(r.Context()); err != nil {
 				w.WriteHeader(http.StatusServiceUnavailable)
-				json.NewEncoder(w).Encode(map[string]string{"status": "unhealthy", "error": err.Error()})
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "unhealthy", "error": err.Error()})
 				return
 			}
 		}
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
 	mux.HandleFunc("POST /webhook/enrich", func(w http.ResponseWriter, r *http.Request) {
@@ -125,7 +125,7 @@ func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store, webhook
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status":  "accepted",
 			"company": req.URL,
 		})
@@ -140,11 +140,11 @@ func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store, webhook
 			snap, err := collector.Collect(r.Context(), lookback)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(snap)
+			_ = json.NewEncoder(w).Encode(snap)
 		})
 	}
 
@@ -214,7 +214,7 @@ func startServer(ctx context.Context, handler http.Handler, port int) error {
 		zap.L().Info("shutting down server")
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer shutdownCancel()
-		srv.Shutdown(shutdownCtx)
+		_ = srv.Shutdown(shutdownCtx)
 	}()
 
 	zap.L().Info("starting server", zap.Int("port", port))

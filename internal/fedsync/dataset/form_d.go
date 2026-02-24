@@ -101,7 +101,7 @@ func (d *FormD) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempD
 	}
 
 	result, err := fetcher.DecodeJSONObject[formDSearchResult](body)
-	body.Close()
+	_ = body.Close()
 	if err != nil {
 		return nil, eris.Wrap(err, "form_d: decode search results")
 	}
@@ -143,13 +143,13 @@ func (d *FormD) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempD
 
 		xmlFile, err := os.Open(xmlPath)
 		if err != nil {
-			os.Remove(xmlPath)
+			_ = os.Remove(xmlPath)
 			continue
 		}
 
 		row, err := d.parseFormDXML(xmlFile, accession, cik, src.FilingDate)
-		xmlFile.Close()
-		os.Remove(xmlPath)
+		_ = xmlFile.Close()
+		_ = os.Remove(xmlPath)
 
 		if err != nil {
 			log.Warn("form_d: parse XML failed", zap.String("accession", accession), zap.Error(err))

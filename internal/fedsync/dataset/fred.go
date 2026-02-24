@@ -86,7 +86,7 @@ func (d *FRED) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDi
 			}
 
 			data, err := io.ReadAll(body)
-			body.Close()
+			_ = body.Close()
 			if err != nil {
 				return nil
 			}

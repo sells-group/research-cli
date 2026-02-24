@@ -23,7 +23,7 @@ func TestBatchCmd_RunE_FailsOnValidation(t *testing.T) {
 	}
 
 	batchCmd.SetContext(context.Background())
-	defer batchCmd.SetContext(nil)
+	defer batchCmd.SetContext(context.TODO())
 
 	err := batchCmd.RunE(batchCmd, nil)
 	require.Error(t, err)
@@ -36,7 +36,7 @@ func TestBatchCmd_RunE_FailsOnInitPipeline_BadSF(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(tmpDir))
-	defer os.Chdir(origDir)
+	defer os.Chdir(origDir) //nolint:errcheck
 
 	cfg = &config.Config{
 		Store: config.StoreConfig{
@@ -62,7 +62,7 @@ func TestBatchCmd_RunE_FailsOnInitPipeline_BadSF(t *testing.T) {
 	}
 
 	batchCmd.SetContext(context.Background())
-	defer batchCmd.SetContext(nil)
+	defer batchCmd.SetContext(context.TODO())
 
 	err := batchCmd.RunE(batchCmd, nil)
 	require.Error(t, err)

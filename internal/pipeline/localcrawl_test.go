@@ -158,7 +158,7 @@ func TestCheckExists_Found(t *testing.T) {
 		switch r.URL.Path {
 		case "/robots.txt":
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, "User-agent: *\nAllow: /")
+			fmt.Fprint(w, "User-agent: *\nAllow: /") //nolint:errcheck
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -198,15 +198,15 @@ func TestProbe_Reachable(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "<html><body><h1>Welcome to Acme</h1><p>We are a technology company.</p></body></html>")
+		fmt.Fprint(w, "<html><body><h1>Welcome to Acme</h1><p>We are a technology company.</p></body></html>") //nolint:errcheck
 	})
 	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "User-agent: *\nAllow: /")
+		fmt.Fprint(w, "User-agent: *\nAllow: /") //nolint:errcheck
 	})
 	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "<urlset></urlset>")
+		fmt.Fprint(w, "<urlset></urlset>") //nolint:errcheck
 	})
 
 	srv := httptest.NewServer(mux)
@@ -242,7 +242,7 @@ func TestProbe_Blocked_Cloudflare(t *testing.T) {
 		w.Header().Set("Cf-Ray", "abc123-IAD")
 		w.Header().Set("Server", "cloudflare")
 		w.WriteHeader(http.StatusForbidden)
-		fmt.Fprint(w, "<html><body>Checking your browser before accessing the site. Cloudflare challenge page.</body></html>")
+		fmt.Fprint(w, "<html><body>Checking your browser before accessing the site. Cloudflare challenge page.</body></html>") //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -260,7 +260,7 @@ func TestProbe_NoRobotsNoSitemap(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" && r.Method == http.MethodGet {
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, "<html><body>Normal page</body></html>")
+			fmt.Fprint(w, "<html><body>Normal page</body></html>") //nolint:errcheck
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -281,22 +281,16 @@ func TestProbe_NoRobotsNoSitemap(t *testing.T) {
 func TestDiscoverLinks_BFS(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>
-			<a href="/about">About</a>
-			<a href="/services">Services</a>
-			<a href="/blog/post">Blog Post</a>
-		</body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body><a href="/about">About</a><a href="/services">Services</a><a href="/blog/post">Blog Post</a></body></html>`)
 	})
 	mux.HandleFunc("/about", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>
-			<a href="/team">Team</a>
-		</body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body><a href="/team">Team</a></body></html>`)
 	})
 	mux.HandleFunc("/services", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>Our services</body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body>Our services</body></html>`)
 	})
 	mux.HandleFunc("/team", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>Our team</body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body>Our team</body></html>`)
 	})
 	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -326,20 +320,16 @@ func TestDiscoverLinks_BFS(t *testing.T) {
 func TestDiscoverLinks_MaxPages(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>
-			<a href="/about">About</a>
-			<a href="/services">Services</a>
-			<a href="/contact">Contact</a>
-		</body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></body></html>`)
 	})
 	mux.HandleFunc("/about", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>About us</body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body>About us</body></html>`)
 	})
 	mux.HandleFunc("/services", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>Services</body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body>Services</body></html>`)
 	})
 	mux.HandleFunc("/contact", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>Contact</body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body>Contact</body></html>`)
 	})
 	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -359,13 +349,13 @@ func TestDiscoverLinks_MaxPages(t *testing.T) {
 func TestDiscoverLinks_MaxDepth(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body><a href="/about">About</a></body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body><a href="/about">About</a></body></html>`)
 	})
 	mux.HandleFunc("/about", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body><a href="/team">Team</a></body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body><a href="/team">Team</a></body></html>`)
 	})
 	mux.HandleFunc("/team", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>Team page</body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body>Team page</body></html>`)
 	})
 	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -395,7 +385,7 @@ func TestDiscoverLinks_MaxDepth(t *testing.T) {
 
 func TestDiscoverLinks_ContextCancelled(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body><a href="/about">About</a></body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body><a href="/about">About</a></body></html>`)
 	}))
 	defer srv.Close()
 
@@ -412,7 +402,7 @@ func TestDiscoverLinks_ContextCancelled(t *testing.T) {
 func TestExtractLinks_Non200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprint(w, "Not Found")
+		_, _ = fmt.Fprint(w, "Not Found")
 	}))
 	defer srv.Close()
 
@@ -428,7 +418,7 @@ func TestExtractLinks_Non200(t *testing.T) {
 
 func TestExtractLinks_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body><a href="/about">About</a><a href="/services">Services</a></body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body><a href="/about">About</a><a href="/services">Services</a></body></html>`)
 	}))
 	defer srv.Close()
 
@@ -446,7 +436,7 @@ func TestFetchSitemapURLs(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/xml")
-		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
+		_, _ = fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://acme.com/about</loc></url>
   <url><loc>https://acme.com/services</loc></url>
@@ -486,7 +476,7 @@ func TestFetchSitemapURLs_NotFound(t *testing.T) {
 
 func TestFetchSitemapURLs_InvalidXML(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "not xml at all")
+		_, _ = fmt.Fprint(w, "not xml at all")
 	}))
 	defer srv.Close()
 
@@ -502,21 +492,18 @@ func TestFetchSitemapURLs_InvalidXML(t *testing.T) {
 func TestDiscoverLinks_WithSitemap(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body><a href="/about">About</a></body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body><a href="/about">About</a></body></html>`)
 	})
 	mux.HandleFunc("/about", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>About us</body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body>About us</body></html>`)
 	})
 	mux.HandleFunc("/services", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>Services</body></html>`)
+		_, _ = fmt.Fprint(w, `<html><body>Services</body></html>`)
 	})
 	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
 		// The sitemap URLs must use the httptest server host.
 		srvURL := "http://" + r.Host
-		fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>%s/services</loc></url>
-</urlset>`, srvURL)
+		_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>%s/services</loc></url></urlset>`, srvURL)
 	})
 
 	srv := httptest.NewServer(mux)
@@ -546,7 +533,7 @@ func TestDiscoverLinks_ParallelFetch(t *testing.T) {
 		for i := 0; i < pageCount; i++ {
 			links += fmt.Sprintf(`<a href="/page%d">Page %d</a>`, i, i)
 		}
-		fmt.Fprintf(w, `<html><body>%s</body></html>`, links)
+		fmt.Fprintf(w, `<html><body>%s</body></html>`, links) //nolint:errcheck
 	})
 
 	// Each page has a small delay to simulate slow responses.
@@ -554,7 +541,7 @@ func TestDiscoverLinks_ParallelFetch(t *testing.T) {
 		i := i
 		mux.HandleFunc(fmt.Sprintf("/page%d", i), func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(perPageDelay)
-			fmt.Fprintf(w, `<html><body>Page %d content</body></html>`, i)
+			fmt.Fprintf(w, `<html><body>Page %d content</body></html>`, i) //nolint:errcheck
 		})
 	}
 
@@ -601,13 +588,13 @@ func TestDiscoverLinks_ParallelRespectMaxPages(t *testing.T) {
 		for i := 0; i < totalPages; i++ {
 			links += fmt.Sprintf(`<a href="/page%d">Page %d</a>`, i, i)
 		}
-		fmt.Fprintf(w, `<html><body>%s</body></html>`, links)
+		fmt.Fprintf(w, `<html><body>%s</body></html>`, links) //nolint:errcheck
 	})
 
 	for i := 0; i < totalPages; i++ {
 		i := i
 		mux.HandleFunc(fmt.Sprintf("/page%d", i), func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintf(w, `<html><body>Page %d content</body></html>`, i)
+			fmt.Fprintf(w, `<html><body>Page %d content</body></html>`, i) //nolint:errcheck
 		})
 	}
 
@@ -644,14 +631,14 @@ func TestDiscoverLinks_ParallelErrorsNonFatal(t *testing.T) {
 		for i := 0; i < badPages; i++ {
 			links += fmt.Sprintf(`<a href="/bad%d">Bad %d</a>`, i, i)
 		}
-		fmt.Fprintf(w, `<html><body>%s</body></html>`, links)
+		fmt.Fprintf(w, `<html><body>%s</body></html>`, links) //nolint:errcheck
 	})
 
 	// Good pages return 200.
 	for i := 0; i < goodPages; i++ {
 		i := i
 		mux.HandleFunc(fmt.Sprintf("/good%d", i), func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintf(w, `<html><body>Good page %d</body></html>`, i)
+			fmt.Fprintf(w, `<html><body>Good page %d</body></html>`, i) //nolint:errcheck
 		})
 	}
 
@@ -659,7 +646,7 @@ func TestDiscoverLinks_ParallelErrorsNonFatal(t *testing.T) {
 	for i := 0; i < badPages; i++ {
 		mux.HandleFunc(fmt.Sprintf("/bad%d", i), func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprint(w, "Internal Server Error")
+			_, _ = fmt.Fprint(w, "Internal Server Error")
 		})
 	}
 
@@ -699,7 +686,7 @@ func TestDiscoverLinks_ParallelContextCancel(t *testing.T) {
 		for i := 0; i < pageCount; i++ {
 			links += fmt.Sprintf(`<a href="/slow%d">Slow %d</a>`, i, i)
 		}
-		fmt.Fprintf(w, `<html><body>%s</body></html>`, links)
+		_, _ = fmt.Fprintf(w, `<html><body>%s</body></html>`, links)
 	})
 
 	// Each slow page takes 2 seconds.
@@ -711,7 +698,7 @@ func TestDiscoverLinks_ParallelContextCancel(t *testing.T) {
 				return
 			case <-time.After(2 * time.Second):
 			}
-			fmt.Fprintf(w, `<html><body>Slow page %d</body></html>`, i)
+			_, _ = fmt.Fprintf(w, `<html><body>Slow page %d</body></html>`, i)
 		})
 	}
 

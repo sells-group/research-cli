@@ -24,7 +24,7 @@ func buildTestMux() *http.ServeMux {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
 	mux.HandleFunc("POST /webhook/enrich", func(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +47,7 @@ func buildTestMux() *http.ServeMux {
 		// For testing we just verify the response format.
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status":  "accepted",
 			"company": req.URL,
 		})
@@ -243,7 +243,7 @@ func TestWebhookEnrich_SemaphoreFull(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		json.NewEncoder(w).Encode(map[string]string{"status": "accepted", "company": req.URL})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "accepted", "company": req.URL})
 	})
 
 	ts := httptest.NewServer(mux)
@@ -256,14 +256,14 @@ func TestWebhookEnrich_SemaphoreFull(t *testing.T) {
 		resp, err := http.Post(ts.URL+"/webhook/enrich", "application/json", bytes.NewReader(payload))
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusAccepted, resp.StatusCode, "request %d should be accepted", i)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 
 	// The next request must be rejected with 503.
 	resp, err := http.Post(ts.URL+"/webhook/enrich", "application/json", bytes.NewReader(payload))
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Release blocking goroutines so they don't leak.
 	close(block)
@@ -293,7 +293,7 @@ func TestWebhookEnrich_AcceptsUnderCapacity(t *testing.T) {
 			if err != nil {
 				return
 			}
-			defer resp.Body.Close()
+			defer resp.Body.Close() //nolint:errcheck
 			if resp.StatusCode == http.StatusAccepted {
 				accepted.Add(1)
 			}

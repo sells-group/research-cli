@@ -197,7 +197,7 @@ func (f *HTTPFetcher) doWithRetry(ctx context.Context, req *http.Request) (*http
 
 		// Handle 429 Too Many Requests with adaptive backoff.
 		if resp.StatusCode == http.StatusTooManyRequests {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			lastErr = eris.Errorf("http 429 from %s", req.URL.String())
 			if adaptive != nil {
 				adaptive.OnRateLimit()
@@ -211,7 +211,7 @@ func (f *HTTPFetcher) doWithRetry(ctx context.Context, req *http.Request) (*http
 		}
 
 		if resp.StatusCode >= 500 {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			lastErr = eris.Errorf("http %d from %s", resp.StatusCode, req.URL.String())
 			zap.L().Warn("server error, retrying",
 				zap.String("url", req.URL.String()),
@@ -265,7 +265,7 @@ func (f *HTTPFetcher) Download(ctx context.Context, rawURL string) (io.ReadClose
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, eris.Errorf("download: unexpected status %d from %s", resp.StatusCode, rawURL)
 	}
 
@@ -278,13 +278,13 @@ func (f *HTTPFetcher) DownloadToFile(ctx context.Context, rawURL string, path st
 	if err != nil {
 		return 0, err
 	}
-	defer body.Close()
+	defer body.Close() //nolint:errcheck
 
 	file, err := os.Create(path)
 	if err != nil {
 		return 0, eris.Wrap(err, "create file")
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	n, err := io.Copy(file, body)
 	if err != nil {
@@ -311,7 +311,7 @@ func (f *HTTPFetcher) HeadETag(ctx context.Context, rawURL string) (string, erro
 	if err != nil {
 		return "", eris.Wrap(err, "head request")
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	return resp.Header.Get("ETag"), nil
 }
@@ -338,12 +338,12 @@ func (f *HTTPFetcher) DownloadIfChanged(ctx context.Context, rawURL string, etag
 	}
 
 	if resp.StatusCode == http.StatusNotModified {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, etag, false, nil
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, "", false, eris.Errorf("download if changed: unexpected status %d from %s", resp.StatusCode, rawURL)
 	}
 

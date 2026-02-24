@@ -27,7 +27,7 @@ func createMultiZIP(t *testing.T, zipPath string, files map[string][]byte) {
 	t.Helper()
 	f, err := os.Create(zipPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 	w := zip.NewWriter(f)
 	for name, data := range files {
 		entry, err := w.Create(name)

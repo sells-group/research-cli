@@ -36,7 +36,7 @@ func TestStartServer_GracefulShutdown(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	port := l.Addr().(*net.TCPAddr).Port
-	l.Close()
+	_ = l.Close()
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -48,7 +48,7 @@ func TestStartServer_GracefulShutdown(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/health", port))
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			ready = true
 			break
 		}
@@ -59,7 +59,7 @@ func TestStartServer_GracefulShutdown(t *testing.T) {
 	// Verify the server responds.
 	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/health", port))
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var body map[string]string

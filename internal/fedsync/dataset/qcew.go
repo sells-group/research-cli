@@ -91,7 +91,7 @@ func (d *QCEW) processZip(ctx context.Context, pool db.Pool, zipPath string, yea
 	if err != nil {
 		return 0, eris.Wrap(err, "qcew: open zip")
 	}
-	defer zr.Close()
+	defer zr.Close() //nolint:errcheck
 
 	var totalRows int64
 
@@ -110,7 +110,7 @@ func (d *QCEW) processZip(ctx context.Context, pool db.Pool, zipPath string, yea
 			return totalRows, eris.Wrapf(err, "qcew: open file %s", zf.Name)
 		}
 		n, err := d.parseCSV(ctx, pool, rc, year)
-		rc.Close()
+		_ = rc.Close()
 		if err != nil {
 			return totalRows, eris.Wrapf(err, "qcew: parse file %s", zf.Name)
 		}

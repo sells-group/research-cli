@@ -206,12 +206,6 @@ type jsonLDOrg struct {
 	Address interface{} `json:"address"`
 }
 
-// jsonLDAddress represents a JSON-LD PostalAddress.
-type jsonLDAddress struct {
-	Locality string `json:"addressLocality"`
-	Region   string `json:"addressRegion"`
-}
-
 var jsonLDRe = regexp.MustCompile(`(?is)<script[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>(.*?)</script>`)
 
 // extractJSONLDOrg extracts name, city, state from JSON-LD Organization markup.

@@ -55,7 +55,7 @@ func TestImportCmd_BadCSVPath(t *testing.T) {
 	}
 
 	importCmd.SetContext(context.Background())
-	defer importCmd.SetContext(nil)
+	defer importCmd.SetContext(context.TODO())
 
 	// Set importCSVPath to a nonexistent file.
 	oldCSV := importCSVPath

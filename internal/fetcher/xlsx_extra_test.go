@@ -52,9 +52,7 @@ func TestStreamXLSX_InvalidFile(t *testing.T) {
 
 	rowCh, errCh := StreamXLSX(context.Background(), path, XLSXOptions{})
 
-	var rows [][]string
-	for row := range rowCh {
-		rows = append(rows, row)
+	for range rowCh {
 	}
 
 	var gotErr error
@@ -74,9 +72,7 @@ func TestStreamXLSX_SheetNotFound(t *testing.T) {
 
 	rowCh, errCh := StreamXLSX(context.Background(), path, XLSXOptions{SheetName: "Missing"})
 
-	var rows [][]string
-	for row := range rowCh {
-		rows = append(rows, row)
+	for range rowCh {
 	}
 
 	var gotErr error
@@ -96,9 +92,7 @@ func TestStreamXLSX_SheetIndexOutOfRange(t *testing.T) {
 
 	rowCh, errCh := StreamXLSX(context.Background(), path, XLSXOptions{SheetIndex: 10})
 
-	var rows [][]string
-	for row := range rowCh {
-		rows = append(rows, row)
+	for range rowCh {
 	}
 
 	var gotErr error

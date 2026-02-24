@@ -17,7 +17,7 @@ func newTestSQLiteStore(t *testing.T) *SQLiteStore {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	st, err := NewSQLite(dbPath)
 	require.NoError(t, err)
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { st.Close() }) //nolint:errcheck
 	require.NoError(t, st.Migrate(context.Background()))
 	return st
 }

@@ -130,10 +130,10 @@ func (d *IACompilation) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetche
 
 	var manifest iaCompManifest
 	if err := json.NewDecoder(rc).Decode(&manifest); err != nil {
-		rc.Close()
+		_ = rc.Close()
 		return nil, eris.Wrap(err, "ia_compilation: parse manifest JSON")
 	}
-	rc.Close()
+	_ = rc.Close()
 
 	// Find the IA_FIRM_SEC_Feed file (SEC-registered firms, gzipped XML).
 	var feedURL string
@@ -157,20 +157,20 @@ func (d *IACompilation) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetche
 	if _, err := f.DownloadToFile(ctx, feedURL, gzPath); err != nil {
 		return nil, eris.Wrap(err, "ia_compilation: download feed")
 	}
-	defer os.Remove(gzPath)
+	defer os.Remove(gzPath) //nolint:errcheck
 
 	// Decompress gzip → parse XML.
 	gzFile, err := os.Open(gzPath)
 	if err != nil {
 		return nil, eris.Wrap(err, "ia_compilation: open gzip file")
 	}
-	defer gzFile.Close()
+	defer gzFile.Close() //nolint:errcheck
 
 	gzReader, err := gzip.NewReader(gzFile)
 	if err != nil {
 		return nil, eris.Wrap(err, "ia_compilation: create gzip reader")
 	}
-	defer gzReader.Close()
+	defer gzReader.Close() //nolint:errcheck
 
 	result, err := d.parseAndLoad(ctx, pool, gzReader, log)
 	if err != nil {

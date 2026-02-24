@@ -28,7 +28,7 @@ func TestInitStore_SQLite(t *testing.T) {
 	st, err := initStore(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, st)
-	defer st.Close()
+	defer st.Close() //nolint:errcheck
 }
 
 func TestInitStore_SQLiteDefaultDSN(t *testing.T) {
@@ -37,7 +37,7 @@ func TestInitStore_SQLiteDefaultDSN(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(tmpDir))
-	defer os.Chdir(origDir)
+	defer os.Chdir(origDir) //nolint:errcheck
 
 	cfg = &config.Config{
 		Store: config.StoreConfig{
@@ -49,7 +49,7 @@ func TestInitStore_SQLiteDefaultDSN(t *testing.T) {
 	st, err := initStore(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, st)
-	defer st.Close()
+	defer st.Close() //nolint:errcheck
 
 	// Verify the default file was created.
 	_, statErr := os.Stat(filepath.Join(tmpDir, "research.db"))

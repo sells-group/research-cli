@@ -207,7 +207,7 @@ func (c *httpClient) do(req *http.Request, out any) error {
 	if err != nil {
 		return eris.Wrap(err, "execute request")
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -53,7 +53,7 @@ func TestFedsyncSyncCmd_RunE_NoDSN(t *testing.T) {
 	}
 
 	fedsyncSyncCmd.SetContext(context.Background())
-	defer fedsyncSyncCmd.SetContext(nil)
+	defer fedsyncSyncCmd.SetContext(context.TODO())
 
 	err := fedsyncSyncCmd.RunE(fedsyncSyncCmd, nil)
 	require.Error(t, err)
@@ -71,7 +71,7 @@ func TestFedsyncXrefCmd_RunE_NoDSN(t *testing.T) {
 	}
 
 	fedsyncXrefCmd.SetContext(context.Background())
-	defer fedsyncXrefCmd.SetContext(nil)
+	defer fedsyncXrefCmd.SetContext(context.TODO())
 
 	err := fedsyncXrefCmd.RunE(fedsyncXrefCmd, nil)
 	require.Error(t, err)
@@ -86,7 +86,7 @@ func TestFedsyncMigrateCmd_RunE_InvalidDSN(t *testing.T) {
 	}
 
 	fedsyncMigrateCmd.SetContext(context.Background())
-	defer fedsyncMigrateCmd.SetContext(nil)
+	defer fedsyncMigrateCmd.SetContext(context.TODO())
 
 	err := fedsyncMigrateCmd.RunE(fedsyncMigrateCmd, nil)
 	require.Error(t, err)
@@ -100,7 +100,7 @@ func TestFedsyncStatusCmd_RunE_InvalidDSN(t *testing.T) {
 	}
 
 	fedsyncStatusCmd.SetContext(context.Background())
-	defer fedsyncStatusCmd.SetContext(nil)
+	defer fedsyncStatusCmd.SetContext(context.TODO())
 
 	err := fedsyncStatusCmd.RunE(fedsyncStatusCmd, nil)
 	require.Error(t, err)
@@ -114,7 +114,7 @@ func TestFedsyncSyncCmd_RunE_InvalidDSN(t *testing.T) {
 	}
 
 	fedsyncSyncCmd.SetContext(context.Background())
-	defer fedsyncSyncCmd.SetContext(nil)
+	defer fedsyncSyncCmd.SetContext(context.TODO())
 
 	err := fedsyncSyncCmd.RunE(fedsyncSyncCmd, nil)
 	require.Error(t, err)
@@ -128,7 +128,7 @@ func TestFedsyncXrefCmd_RunE_InvalidDSN(t *testing.T) {
 	}
 
 	fedsyncXrefCmd.SetContext(context.Background())
-	defer fedsyncXrefCmd.SetContext(nil)
+	defer fedsyncXrefCmd.SetContext(context.TODO())
 
 	err := fedsyncXrefCmd.RunE(fedsyncXrefCmd, nil)
 	require.Error(t, err)

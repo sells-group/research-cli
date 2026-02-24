@@ -23,7 +23,7 @@ func getFreePort(t *testing.T) int {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	port := l.Addr().(*net.TCPAddr).Port
-	l.Close()
+	_ = l.Close()
 	return port
 }
 
@@ -54,7 +54,7 @@ func TestBuildMux_ServerLifecycle(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/health", port))
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			ready = true
 			break
 		}
@@ -65,7 +65,7 @@ func TestBuildMux_ServerLifecycle(t *testing.T) {
 	// Make a real health request.
 	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/health", port))
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var body map[string]string

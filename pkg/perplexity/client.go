@@ -150,7 +150,7 @@ func (c *httpClient) ChatCompletion(ctx context.Context, req ChatCompletionReque
 		}
 
 		respBody, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return nil, eris.Wrap(err, "perplexity: read response")
 		}

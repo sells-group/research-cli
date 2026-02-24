@@ -313,10 +313,6 @@ func dlqBackoff(retryCount int) time.Duration {
 // updateNotionFailed sets the Notion page status to "Failed" when enrichment errors out.
 func updateNotionFailed(ctx context.Context, client notion.Client, pageID string, enrichErr error) error {
 	now := notionapi.Date(time.Now())
-	errMsg := enrichErr.Error()
-	if len(errMsg) > 200 {
-		errMsg = errMsg[:200]
-	}
 	_, err := client.UpdatePage(ctx, pageID, &notionapi.PageUpdateRequest{
 		Properties: notionapi.Properties{
 			"Status": notionapi.StatusProperty{
