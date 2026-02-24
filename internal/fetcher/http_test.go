@@ -43,7 +43,7 @@ func TestDownload(t *testing.T) {
 }
 
 func TestDownloadToFile(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("file content here")) //nolint:errcheck
 	}))
 	defer srv.Close()
@@ -94,7 +94,7 @@ func TestDownloadIfChanged_NotModified(t *testing.T) {
 }
 
 func TestDownloadIfChanged_Changed(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("ETag", `"etag2"`)
 		_, _ = w.Write([]byte("new content")) //nolint:errcheck
 	}))
@@ -114,7 +114,7 @@ func TestDownloadIfChanged_Changed(t *testing.T) {
 
 func TestRetryOnServerError(t *testing.T) {
 	var attempts atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := attempts.Add(1)
 		if n < 3 {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -142,7 +142,7 @@ func TestRetryOnServerError(t *testing.T) {
 }
 
 func TestRetryExhausted(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
@@ -160,7 +160,7 @@ func TestRetryExhausted(t *testing.T) {
 
 func TestRateLimiting(t *testing.T) {
 	var reqTimes []time.Time
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		reqTimes = append(reqTimes, time.Now())
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -193,7 +193,7 @@ func TestRateLimiting(t *testing.T) {
 }
 
 func TestDownloadIfChanged_Error(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer srv.Close()
@@ -252,7 +252,7 @@ func TestLimiterFor_InvalidURL(t *testing.T) {
 }
 
 func TestDownload_Non200(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer srv.Close()
@@ -264,7 +264,7 @@ func TestDownload_Non200(t *testing.T) {
 }
 
 func TestDownloadToFile_Error(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
@@ -290,7 +290,7 @@ func TestNewHTTPFetcher_Defaults(t *testing.T) {
 }
 
 func TestDownload_ContextCancelled(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	}))
 	defer srv.Close()
@@ -365,7 +365,7 @@ func TestAdaptiveLimiter_Wait_ContextCancelled(t *testing.T) {
 
 func TestDoWithRetry_429_AdaptiveBackoff(t *testing.T) {
 	var attempts atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := attempts.Add(1)
 		if n <= 2 {
 			w.WriteHeader(http.StatusTooManyRequests)

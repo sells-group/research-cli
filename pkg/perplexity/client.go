@@ -1,3 +1,4 @@
+// Package perplexity provides a client for the Perplexity chat completions API.
 package perplexity
 
 import (

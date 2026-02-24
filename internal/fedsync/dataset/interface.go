@@ -13,6 +13,7 @@ import (
 // Phase represents a pipeline phase for grouping datasets.
 type Phase int
 
+// Phase1 and following constants define the pipeline phases for grouping datasets.
 const (
 	Phase1  Phase = iota + 1 // Market Intelligence (Census, BLS, SAM)
 	Phase1B                  // Buyer Intelligence (SEC/EDGAR)
@@ -55,6 +56,7 @@ func ParsePhase(s string) (Phase, error) {
 // Cadence describes how often a dataset should be synced.
 type Cadence string
 
+// Daily and following constants define sync cadence intervals.
 const (
 	Daily     Cadence = "daily"
 	Weekly    Cadence = "weekly"

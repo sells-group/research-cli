@@ -1,3 +1,4 @@
+// Package jina provides a client for the Jina AI reader and search API.
 package jina
 
 import (

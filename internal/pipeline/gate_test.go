@@ -45,7 +45,7 @@ func TestQualityGate_PassesAndUpdatesSF(t *testing.T) {
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{
 			QualityScoreThreshold: 0.5,
-			QualityWeights: config.QualityWeights{Confidence: 1.0},
+			QualityWeights:        config.QualityWeights{Confidence: 1.0},
 		},
 	}
 
@@ -64,7 +64,7 @@ func TestQualityGate_FailsSendsToManualReview(t *testing.T) {
 
 	// Set up a ToolJet webhook server.
 	webhookCalled := false
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		webhookCalled = true
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -91,7 +91,7 @@ func TestQualityGate_FailsSendsToManualReview(t *testing.T) {
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{
 			QualityScoreThreshold: 0.6,
-			QualityWeights: config.QualityWeights{Confidence: 1.0},
+			QualityWeights:        config.QualityWeights{Confidence: 1.0},
 		},
 		ToolJet: config.ToolJetConfig{
 			WebhookURL: ts.URL,
@@ -537,8 +537,8 @@ func TestExtractContactsForSF_RequiresLastName(t *testing.T) {
 
 	fieldValues := map[string]model.FieldValue{
 		"contacts": {FieldKey: "contacts", Value: []map[string]string{
-			{"first_name": "Jane", "last_name": "", "title": "CEO"},        // No last name — skipped.
-			{"first_name": "John", "last_name": "Smith", "title": "VP"},    // Valid.
+			{"first_name": "Jane", "last_name": "", "title": "CEO"},     // No last name — skipped.
+			{"first_name": "John", "last_name": "Smith", "title": "VP"}, // Valid.
 		}},
 	}
 

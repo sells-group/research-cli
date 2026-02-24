@@ -22,11 +22,19 @@ type FRED struct {
 	cfg *config.Config
 }
 
-func (d *FRED) Name() string     { return "fred" }
-func (d *FRED) Table() string    { return "fed_data.fred_series" }
-func (d *FRED) Phase() Phase     { return Phase3 }
+// Name implements Dataset.
+func (d *FRED) Name() string { return "fred" }
+
+// Table implements Dataset.
+func (d *FRED) Table() string { return "fed_data.fred_series" }
+
+// Phase implements Dataset.
+func (d *FRED) Phase() Phase { return Phase3 }
+
+// Cadence implements Dataset.
 func (d *FRED) Cadence() Cadence { return Monthly }
 
+// ShouldRun implements Dataset.
 func (d *FRED) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }
@@ -57,7 +65,8 @@ type fredResponse struct {
 	} `json:"observations"`
 }
 
-func (d *FRED) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+// Sync fetches and loads FRED economic series data.
+func (d *FRED) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _ string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing FRED data")
 
@@ -68,7 +77,6 @@ func (d *FRED) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDi
 	g.SetLimit(5)
 
 	for _, seriesID := range fredTargetSeries {
-		seriesID := seriesID
 		g.Go(func() error {
 			select {
 			case <-gctx.Done():
@@ -88,12 +96,14 @@ func (d *FRED) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDi
 			data, err := io.ReadAll(body)
 			_ = body.Close()
 			if err != nil {
-				return nil
+				log.Warn("skip series: read failed", zap.String("series", seriesID), zap.Error(err))
+				return nil //nolint:nilerr // intentionally skip series on read failure
 			}
 
 			var resp fredResponse
 			if err := json.Unmarshal(data, &resp); err != nil {
-				return nil
+				log.Warn("skip series: unmarshal failed", zap.String("series", seriesID), zap.Error(err))
+				return nil //nolint:nilerr // intentionally skip series on parse failure
 			}
 
 			var rows [][]any

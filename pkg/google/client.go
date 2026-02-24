@@ -1,3 +1,4 @@
+// Package google provides a client for Google APIs used in enrichment.
 package google
 
 import (

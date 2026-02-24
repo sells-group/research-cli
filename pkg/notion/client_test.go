@@ -39,6 +39,7 @@ func (m *MockClient) UpdatePage(ctx context.Context, pageID string, req *notiona
 }
 
 func TestMockClientSatisfiesInterface(t *testing.T) {
+	t.Parallel()
 	var _ Client = (*MockClient)(nil)
 }
 

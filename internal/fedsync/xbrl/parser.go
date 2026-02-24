@@ -1,3 +1,4 @@
+// Package xbrl parses XBRL JSON-LD fact data from EDGAR filings.
 package xbrl
 
 import (
@@ -19,8 +20,8 @@ type FactNS map[string]Fact
 
 // Fact is a single XBRL fact with its units and values.
 type Fact struct {
-	Label       string                `json:"label"`
-	Description string                `json:"description"`
+	Label       string                 `json:"label"`
+	Description string                 `json:"description"`
 	Units       map[string][]FactValue `json:"units"`
 }
 

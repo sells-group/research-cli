@@ -67,28 +67,28 @@ func buildGrataRow(r *model.EnrichmentResult) []string {
 	fv := r.FieldValues
 
 	return []string{
-		stripScheme(r.Company.URL),                     // Domain
-		r.Company.Name,                                 // Name
-		fieldStr(fv, "description"),                    // Description
-		formatRevenue(fv),                              // Revenue Estimate
-		fieldStr(fv, "employees"),                       // Employee Estimate
-		fieldStr(fv, "review_count"),                   // Total Review Count
-		fieldStr(fv, "review_rating"),                  // Aggregate Rating
-		fieldStr(fv, "naics_code"),                     // NAICS 6
-		fieldStr(fv, "business_model"),                 // Business Model
-		fieldStr(fv, "email"),                          // Primary Email
-		fieldStr(fv, "phone"),                          // Primary Phone
-		fieldStr(fv, "exec_first_name"),                // Executive First Name
-		fieldStr(fv, "exec_last_name"),                 // Executive Last Name
-		fieldStr(fv, "exec_title"),                     // Executive Title
-		fieldStr(fv, "exec_linkedin"),                  // Executive Linkedin
-		fieldStr(fv, "key_people"),                     // Key People
-		fieldStr(fv, "year_founded"),                   // Year Founded
-		"Bootstrapped",                                 // Ownership (default)
-		r.Company.City,                                 // City
-		r.Company.State,                                // State
-		r.Company.ZipCode,                              // Zip Code
-		r.Company.Street,                               // Mailing Address
+		stripScheme(r.Company.URL),      // Domain
+		r.Company.Name,                  // Name
+		fieldStr(fv, "description"),     // Description
+		formatRevenue(fv),               // Revenue Estimate
+		fieldStr(fv, "employees"),       // Employee Estimate
+		fieldStr(fv, "review_count"),    // Total Review Count
+		fieldStr(fv, "review_rating"),   // Aggregate Rating
+		fieldStr(fv, "naics_code"),      // NAICS 6
+		fieldStr(fv, "business_model"),  // Business Model
+		fieldStr(fv, "email"),           // Primary Email
+		fieldStr(fv, "phone"),           // Primary Phone
+		fieldStr(fv, "exec_first_name"), // Executive First Name
+		fieldStr(fv, "exec_last_name"),  // Executive Last Name
+		fieldStr(fv, "exec_title"),      // Executive Title
+		fieldStr(fv, "exec_linkedin"),   // Executive Linkedin
+		fieldStr(fv, "key_people"),      // Key People
+		fieldStr(fv, "year_founded"),    // Year Founded
+		"Bootstrapped",                  // Ownership (default)
+		r.Company.City,                  // City
+		r.Company.State,                 // State
+		r.Company.ZipCode,               // Zip Code
+		r.Company.Street,                // Mailing Address
 	}
 }
 

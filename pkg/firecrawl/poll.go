@@ -40,8 +40,8 @@ func WithPollInterval(d time.Duration) PollOption {
 
 // WithPollStep is a no-op retained for backward compatibility.
 // Polling now uses exponential backoff (doubling) instead of linear increments.
-func WithPollStep(d time.Duration) PollOption {
-	return func(c *pollConfig) {}
+func WithPollStep(_ time.Duration) PollOption {
+	return func(_ *pollConfig) {}
 }
 
 // WithPollCap overrides the maximum poll interval.

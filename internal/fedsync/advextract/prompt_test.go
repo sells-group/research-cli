@@ -233,9 +233,9 @@ func TestFormatPart1Structured(t *testing.T) {
 		TotalEmployees: &employees,
 		FilingDate:     &fd,
 		Filing: map[string]any{
-			"comp_pct_aum":    true,
-			"sec_registered":  true,
-			"has_any_drp":     false,
+			"comp_pct_aum":        true,
+			"sec_registered":      true,
+			"has_any_drp":         false,
 			"custody_client_cash": true,
 		},
 	}

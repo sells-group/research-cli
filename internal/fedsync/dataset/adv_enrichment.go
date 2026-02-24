@@ -34,16 +34,25 @@ type ADVEnrichment struct {
 	client anthropic.Client // nil in production → created from cfg; set directly in tests
 }
 
-func (d *ADVEnrichment) Name() string     { return "adv_enrichment" }
-func (d *ADVEnrichment) Table() string    { return "fed_data.adv_brochure_enrichment" }
-func (d *ADVEnrichment) Phase() Phase     { return Phase3 }
+// Name implements Dataset.
+func (d *ADVEnrichment) Name() string { return "adv_enrichment" }
+
+// Table implements Dataset.
+func (d *ADVEnrichment) Table() string { return "fed_data.adv_brochure_enrichment" }
+
+// Phase implements Dataset.
+func (d *ADVEnrichment) Phase() Phase { return Phase3 }
+
+// Cadence implements Dataset.
 func (d *ADVEnrichment) Cadence() Cadence { return Monthly }
 
+// ShouldRun implements Dataset.
 func (d *ADVEnrichment) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }
 
-func (d *ADVEnrichment) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+// Sync fetches and loads ADV brochure and CRS enrichment data.
+func (d *ADVEnrichment) Sync(ctx context.Context, pool db.Pool, _ fetcher.Fetcher, _ string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 
 	client := d.client
@@ -74,7 +83,7 @@ func (d *ADVEnrichment) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetche
 		RowsSynced: total,
 		Metadata: map[string]any{
 			"brochures_enriched": brochureRows,
-			"crs_enriched":      crsRows,
+			"crs_enriched":       crsRows,
 		},
 	}, nil
 }

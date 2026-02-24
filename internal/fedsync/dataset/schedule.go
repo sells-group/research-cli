@@ -34,7 +34,7 @@ func QuarterlyWithLag(now time.Time, lastSync *time.Time, lagMonths int) bool {
 	return lastSync.Before(available)
 }
 
-// Monthly returns true if a sync is needed for a monthly dataset.
+// MonthlySchedule returns true if a sync is needed for a monthly dataset.
 func MonthlySchedule(now time.Time, lastSync *time.Time) bool {
 	if lastSync == nil {
 		return true
@@ -43,7 +43,7 @@ func MonthlySchedule(now time.Time, lastSync *time.Time) bool {
 	return lastSync.Before(thisMonth)
 }
 
-// Weekly returns true if a sync is needed for a weekly dataset.
+// WeeklySchedule returns true if a sync is needed for a weekly dataset.
 func WeeklySchedule(now time.Time, lastSync *time.Time) bool {
 	if lastSync == nil {
 		return true
@@ -57,7 +57,7 @@ func WeeklySchedule(now time.Time, lastSync *time.Time) bool {
 	return lastSync.Before(weekStart)
 }
 
-// Daily returns true if a sync is needed for a daily dataset.
+// DailySchedule returns true if a sync is needed for a daily dataset.
 func DailySchedule(now time.Time, lastSync *time.Time) bool {
 	if lastSync == nil {
 		return true

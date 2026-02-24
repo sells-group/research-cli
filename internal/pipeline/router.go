@@ -101,8 +101,8 @@ func EscalateQuestions(answers []model.ExtractionAnswer, questions []model.Quest
 
 	// Aggregate per-question success rates.
 	type qStats struct {
-		total   int
-		failed  int // null value or low confidence
+		total  int
+		failed int // null value or low confidence
 	}
 	byQ := make(map[string]*qStats)
 	for _, a := range answers {

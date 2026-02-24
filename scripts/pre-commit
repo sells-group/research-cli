@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Pre-commit hook: runs go fmt, go vet, and golangci-lint on staged Go files.
+# Install: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+#   — or — ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+
+set -euo pipefail
+
+# Only check staged .go files.
+STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+# Collect the packages that contain staged files.
+PACKAGES=$(echo "$STAGED" | xargs -I{} dirname {} | sort -u | sed 's|^|./|')
+
+echo "pre-commit: checking $(echo "$STAGED" | wc -l | tr -d ' ') staged Go files..."
+
+# 1. go fmt — check only, no auto-rewrite (fail if unformatted).
+UNFORMATTED=$(gofmt -l $STAGED 2>/dev/null || true)
+if [ -n "$UNFORMATTED" ]; then
+  echo "ERROR: the following files are not gofmt'd:"
+  echo "$UNFORMATTED" | sed 's/^/  /'
+  echo ""
+  echo "Run: gofmt -w \$(git diff --cached --name-only --diff-filter=ACM | grep '\\.go\$')"
+  exit 1
+fi
+
+# 2. go vet — run on affected packages.
+echo "pre-commit: go vet..."
+if ! go vet $PACKAGES 2>&1; then
+  echo "ERROR: go vet failed"
+  exit 1
+fi
+
+# 3. golangci-lint — run on affected packages (uses .golangci.yml config).
+if command -v golangci-lint &>/dev/null; then
+  LINTER=golangci-lint
+elif [ -x "$HOME/go/bin/golangci-lint" ]; then
+  LINTER="$HOME/go/bin/golangci-lint"
+else
+  echo "pre-commit: golangci-lint not found, skipping lint check"
+  echo "  Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
+  exit 0
+fi
+
+echo "pre-commit: golangci-lint..."
+if ! $LINTER run $PACKAGES 2>&1; then
+  echo "ERROR: golangci-lint failed"
+  exit 1
+fi
+
+echo "pre-commit: all checks passed"

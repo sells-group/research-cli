@@ -29,7 +29,7 @@ const webhookSemSize = 20
 // It returns the mux and a drain function that waits for all in-flight
 // enrichment jobs to complete. The caller should invoke drain after the
 // HTTP server has stopped accepting new requests.
-func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store, webhookSecret string, collector *monitoring.Collector) (*http.ServeMux, func()) {
+func buildMux(_ context.Context, p *pipeline.Pipeline, st store.Store, webhookSecret string, collector *monitoring.Collector) (*http.ServeMux, func()) {
 	mux := http.NewServeMux()
 	sem := make(chan struct{}, webhookSemSize)
 	var wg sync.WaitGroup
@@ -157,7 +157,7 @@ func buildMux(ctx context.Context, p *pipeline.Pipeline, st store.Store, webhook
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start webhook server for enrichment requests",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 

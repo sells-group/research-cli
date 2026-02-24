@@ -144,9 +144,9 @@ func TestValidateField_NumberType(t *testing.T) {
 	field := &model.FieldMapping{Key: "employees", SFField: "NumberOfEmployees", DataType: "number"}
 
 	tests := []struct {
-		name string
+		name  string
 		value any
-		want any
+		want  any
 	}{
 		{"float64", float64(100), int(100)},
 		{"int", 50, int(50)},
@@ -851,7 +851,7 @@ func TestMergeContacts_Dedup(t *testing.T) {
 			{"first_name": "John", "last_name": "Smith", "title": "VP"},
 		}, Confidence: 0.75, Source: "linkedin"},
 		{FieldKey: "contacts", Value: []map[string]string{
-			{"first_name": "Jane", "last_name": "Doe", "title": "CEO & Founder"},       // Duplicate.
+			{"first_name": "Jane", "last_name": "Doe", "title": "CEO & Founder"},        // Duplicate.
 			{"first_name": "Bob", "last_name": "Jones", "title": "Director of Finance"}, // New.
 		}, Confidence: 0.7, Source: "web_extraction"},
 	}

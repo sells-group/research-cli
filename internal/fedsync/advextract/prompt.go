@@ -182,7 +182,7 @@ func StructuredBypassAnswer(q Question, advisor *AdvisorRow, fund *FundRow, fund
 
 	case "client_types_breakdown":
 		if len(advisor.ClientTypes) > 0 && string(advisor.ClientTypes) != "null" {
-			a.Value = json.RawMessage(advisor.ClientTypes)
+			a.Value = advisor.ClientTypes
 			a.Reasoning = "Extracted directly from ADV Part 1 Item 5D client type data"
 		} else {
 			a.Value = nil
@@ -429,8 +429,8 @@ func extractHNWConcentration(a *AdvisorRow) any {
 		return nil
 	}
 	return map[string]any{
-		"hnw_client_pct":  round2(hnwCount / totalCount * 100),
-		"hnw_raum_pct":    round2(hnwRAUM),
+		"hnw_client_pct":   round2(hnwCount / totalCount * 100),
+		"hnw_raum_pct":     round2(hnwRAUM),
 		"hnw_client_count": int(hnwCount),
 	}
 }
@@ -563,11 +563,11 @@ func extractCrossTradingFlags(a *AdvisorRow) any {
 		return nil
 	}
 	return map[string]any{
-		"agency_cross":        isTruthy(a.Filing["txn_agency_cross"]),
-		"principal":           isTruthy(a.Filing["txn_principal"]),
-		"proprietary_interest": isTruthy(a.Filing["txn_proprietary_interest"]),
+		"agency_cross":          isTruthy(a.Filing["txn_agency_cross"]),
+		"principal":             isTruthy(a.Filing["txn_principal"]),
+		"proprietary_interest":  isTruthy(a.Filing["txn_proprietary_interest"]),
 		"referral_compensation": isTruthy(a.Filing["txn_referral_compensation"]),
-		"revenue_sharing":     isTruthy(a.Filing["txn_revenue_sharing"]),
+		"revenue_sharing":       isTruthy(a.Filing["txn_revenue_sharing"]),
 	}
 }
 

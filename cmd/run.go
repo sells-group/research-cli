@@ -36,7 +36,7 @@ func writeRunResult(w io.Writer, company model.Company, result *model.Enrichment
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run enrichment for a single company",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 

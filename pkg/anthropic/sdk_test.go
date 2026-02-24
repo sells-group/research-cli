@@ -296,9 +296,7 @@ func TestBatchRequest_Fields(t *testing.T) {
 
 func TestBatchResponse_Fields(t *testing.T) {
 	resp := BatchResponse{
-		ID:               "batch_789",
-		ProcessingStatus: "ended",
-		ResultsURL:       "https://example.com/results",
+		ID: "batch_789",
 		RequestCounts: RequestCounts{
 			Processing: 0,
 			Succeeded:  5,

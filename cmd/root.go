@@ -17,7 +17,7 @@ var rootCmd = &cobra.Command{
 	Use:   "research-cli",
 	Short: "Automated account enrichment pipeline",
 	Long:  "Crawls company websites, classifies pages, extracts structured data via tiered Claude models, writes to Salesforce.",
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 		c, err := config.Load()
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
@@ -46,7 +46,7 @@ var rootCmd = &cobra.Command{
 
 		return nil
 	},
-	PersistentPostRun: func(cmd *cobra.Command, args []string) {
+	PersistentPostRun: func(_ *cobra.Command, _ []string) {
 		_ = zap.L().Sync()
 	},
 }

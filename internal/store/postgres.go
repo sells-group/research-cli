@@ -32,16 +32,16 @@ type PoolConfig struct {
 // preparedStatements lists queries to prepare on each new connection for
 // faster execution of the most frequently used store operations.
 var preparedStatements = map[string]string{
-	"insert_run":         `INSERT INTO runs (id, company, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)`,
-	"update_run_status":  `UPDATE runs SET status = $1, updated_at = $2 WHERE id = $3`,
-	"update_run_result":  `UPDATE runs SET result = $1, status = $2, updated_at = $3 WHERE id = $4`,
-	"get_run":            `SELECT id, company, status, result, created_at, updated_at FROM runs WHERE id = $1`,
-	"insert_phase":       `INSERT INTO run_phases (id, run_id, name, status, started_at) VALUES ($1, $2, $3, $4, $5)`,
-	"complete_phase":     `UPDATE run_phases SET status = $1, result = $2 WHERE id = $3`,
-	"get_cached_crawl":   `SELECT id, company_url, pages, crawled_at, expires_at FROM crawl_cache WHERE company_url = $1 AND expires_at > now() ORDER BY crawled_at DESC LIMIT 1`,
-	"set_cached_crawl":   `INSERT INTO crawl_cache (id, company_url, pages, crawled_at, expires_at) VALUES ($1, $2, $3, $4, $5)`,
-	"get_cached_linkedin": `SELECT data FROM linkedin_cache WHERE domain = $1 AND expires_at > now() ORDER BY cached_at DESC LIMIT 1`,
-	"set_cached_linkedin": `INSERT INTO linkedin_cache (id, domain, data, cached_at, expires_at) VALUES ($1, $2, $3, $4, $5)`,
+	"insert_run":            `INSERT INTO runs (id, company, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)`,
+	"update_run_status":     `UPDATE runs SET status = $1, updated_at = $2 WHERE id = $3`,
+	"update_run_result":     `UPDATE runs SET result = $1, status = $2, updated_at = $3 WHERE id = $4`,
+	"get_run":               `SELECT id, company, status, result, created_at, updated_at FROM runs WHERE id = $1`,
+	"insert_phase":          `INSERT INTO run_phases (id, run_id, name, status, started_at) VALUES ($1, $2, $3, $4, $5)`,
+	"complete_phase":        `UPDATE run_phases SET status = $1, result = $2 WHERE id = $3`,
+	"get_cached_crawl":      `SELECT id, company_url, pages, crawled_at, expires_at FROM crawl_cache WHERE company_url = $1 AND expires_at > now() ORDER BY crawled_at DESC LIMIT 1`,
+	"set_cached_crawl":      `INSERT INTO crawl_cache (id, company_url, pages, crawled_at, expires_at) VALUES ($1, $2, $3, $4, $5)`,
+	"get_cached_linkedin":   `SELECT data FROM linkedin_cache WHERE domain = $1 AND expires_at > now() ORDER BY cached_at DESC LIMIT 1`,
+	"set_cached_linkedin":   `INSERT INTO linkedin_cache (id, domain, data, cached_at, expires_at) VALUES ($1, $2, $3, $4, $5)`,
 	"delete_expired_crawls": `DELETE FROM crawl_cache WHERE expires_at <= now()`,
 }
 
@@ -174,16 +174,19 @@ CREATE INDEX IF NOT EXISTS idx_dlq_error_type ON dead_letter_queue(error_type);
 CREATE INDEX IF NOT EXISTS idx_dlq_next_retry ON dead_letter_queue(next_retry_at);
 `
 
+// Ping implements Store.
 func (s *PostgresStore) Ping(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, "SELECT 1")
 	return eris.Wrap(err, "postgres: ping")
 }
 
+// Migrate implements Store.
 func (s *PostgresStore) Migrate(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, postgresMigration)
 	return eris.Wrap(err, "postgres: migrate")
 }
 
+// Close implements Store.
 func (s *PostgresStore) Close() error {
 	if s.closeFn != nil {
 		s.closeFn()
@@ -191,6 +194,7 @@ func (s *PostgresStore) Close() error {
 	return nil
 }
 
+// CreateRun implements Store.
 func (s *PostgresStore) CreateRun(ctx context.Context, company model.Company) (*model.Run, error) {
 	id := uuid.New().String()
 	now := time.Now().UTC()
@@ -217,6 +221,7 @@ func (s *PostgresStore) CreateRun(ctx context.Context, company model.Company) (*
 	}, nil
 }
 
+// UpdateRunStatus implements Store.
 func (s *PostgresStore) UpdateRunStatus(ctx context.Context, runID string, status model.RunStatus) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE runs SET status = $1, updated_at = $2 WHERE id = $3`,
@@ -231,6 +236,7 @@ func (s *PostgresStore) UpdateRunStatus(ctx context.Context, runID string, statu
 	return nil
 }
 
+// UpdateRunResult implements Store.
 func (s *PostgresStore) UpdateRunResult(ctx context.Context, runID string, result *model.RunResult) error {
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
@@ -250,6 +256,7 @@ func (s *PostgresStore) UpdateRunResult(ctx context.Context, runID string, resul
 	return nil
 }
 
+// GetRun implements Store.
 func (s *PostgresStore) GetRun(ctx context.Context, runID string) (*model.Run, error) {
 	var r model.Run
 	var companyJSON, resultJSON []byte
@@ -276,6 +283,7 @@ func (s *PostgresStore) GetRun(ctx context.Context, runID string) (*model.Run, e
 	return &r, nil
 }
 
+// ListRuns implements Store.
 func (s *PostgresStore) ListRuns(ctx context.Context, filter RunFilter) ([]model.Run, error) {
 	query := `SELECT id, company, status, result, created_at, updated_at FROM runs WHERE true`
 	args := []any{}
@@ -341,6 +349,7 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunFilter) ([]model
 	return runs, eris.Wrap(rows.Err(), "postgres: list runs iterate")
 }
 
+// CreatePhase implements Store.
 func (s *PostgresStore) CreatePhase(ctx context.Context, runID string, name string) (*model.RunPhase, error) {
 	id := uuid.New().String()
 	now := time.Now().UTC()
@@ -362,6 +371,7 @@ func (s *PostgresStore) CreatePhase(ctx context.Context, runID string, name stri
 	}, nil
 }
 
+// CompletePhase implements Store.
 func (s *PostgresStore) CompletePhase(ctx context.Context, phaseID string, result *model.PhaseResult) error {
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
@@ -381,6 +391,7 @@ func (s *PostgresStore) CompletePhase(ctx context.Context, phaseID string, resul
 	return nil
 }
 
+// GetCachedCrawl implements Store.
 func (s *PostgresStore) GetCachedCrawl(ctx context.Context, companyURL string) (*model.CrawlCache, error) {
 	var cc model.CrawlCache
 	var pagesJSON []byte
@@ -403,6 +414,7 @@ func (s *PostgresStore) GetCachedCrawl(ctx context.Context, companyURL string) (
 	return &cc, nil
 }
 
+// SetCachedCrawl implements Store.
 func (s *PostgresStore) SetCachedCrawl(ctx context.Context, companyURL string, pages []model.CrawledPage, ttl time.Duration) error {
 	id := uuid.New().String()
 	now := time.Now().UTC()
@@ -421,6 +433,7 @@ func (s *PostgresStore) SetCachedCrawl(ctx context.Context, companyURL string, p
 	return eris.Wrap(err, "postgres: set cached crawl")
 }
 
+// GetCachedLinkedIn implements Store.
 func (s *PostgresStore) GetCachedLinkedIn(ctx context.Context, domain string) ([]byte, error) {
 	var data []byte
 	err := s.pool.QueryRow(ctx,
@@ -438,6 +451,7 @@ func (s *PostgresStore) GetCachedLinkedIn(ctx context.Context, domain string) ([
 	return data, nil
 }
 
+// SetCachedLinkedIn implements Store.
 func (s *PostgresStore) SetCachedLinkedIn(ctx context.Context, domain string, data []byte, ttl time.Duration) error {
 	id := uuid.New().String()
 	now := time.Now().UTC()
@@ -451,6 +465,7 @@ func (s *PostgresStore) SetCachedLinkedIn(ctx context.Context, domain string, da
 	return eris.Wrap(err, "postgres: set cached linkedin")
 }
 
+// DeleteExpiredCrawls implements Store.
 func (s *PostgresStore) DeleteExpiredCrawls(ctx context.Context) (int, error) {
 	tag, err := s.pool.Exec(ctx,
 		`DELETE FROM crawl_cache WHERE expires_at <= now()`,
@@ -461,6 +476,7 @@ func (s *PostgresStore) DeleteExpiredCrawls(ctx context.Context) (int, error) {
 	return int(tag.RowsAffected()), nil
 }
 
+// DeleteExpiredLinkedIn implements Store.
 func (s *PostgresStore) DeleteExpiredLinkedIn(ctx context.Context) (int, error) {
 	tag, err := s.pool.Exec(ctx,
 		`DELETE FROM linkedin_cache WHERE expires_at <= now()`,
@@ -471,6 +487,7 @@ func (s *PostgresStore) DeleteExpiredLinkedIn(ctx context.Context) (int, error) 
 	return int(tag.RowsAffected()), nil
 }
 
+// DeleteExpiredScrapes implements Store.
 func (s *PostgresStore) DeleteExpiredScrapes(ctx context.Context) (int, error) {
 	tag, err := s.pool.Exec(ctx,
 		`DELETE FROM scrape_cache WHERE expires_at <= now()`,
@@ -481,6 +498,7 @@ func (s *PostgresStore) DeleteExpiredScrapes(ctx context.Context) (int, error) {
 	return int(tag.RowsAffected()), nil
 }
 
+// GetCachedScrape implements Store.
 func (s *PostgresStore) GetCachedScrape(ctx context.Context, urlHash string) ([]byte, error) {
 	var content []byte
 	err := s.pool.QueryRow(ctx,
@@ -497,6 +515,7 @@ func (s *PostgresStore) GetCachedScrape(ctx context.Context, urlHash string) ([]
 	return content, nil
 }
 
+// SetCachedScrape implements Store.
 func (s *PostgresStore) SetCachedScrape(ctx context.Context, urlHash string, content []byte, ttl time.Duration) error {
 	id := uuid.New().String()
 	now := time.Now().UTC()
@@ -511,6 +530,7 @@ func (s *PostgresStore) SetCachedScrape(ctx context.Context, urlHash string, con
 	return eris.Wrap(err, "postgres: set cached scrape")
 }
 
+// GetHighConfidenceAnswers implements Store.
 func (s *PostgresStore) GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64) ([]model.ExtractionAnswer, error) {
 	var resultJSON []byte
 	err := s.pool.QueryRow(ctx,
@@ -540,6 +560,7 @@ func (s *PostgresStore) GetHighConfidenceAnswers(ctx context.Context, companyURL
 	return highConf, nil
 }
 
+// SaveCheckpoint implements Store.
 func (s *PostgresStore) SaveCheckpoint(ctx context.Context, companyID string, phase string, data []byte) error {
 	now := time.Now().UTC()
 	_, err := s.pool.Exec(ctx,
@@ -551,6 +572,7 @@ func (s *PostgresStore) SaveCheckpoint(ctx context.Context, companyID string, ph
 	return eris.Wrap(err, "postgres: save checkpoint")
 }
 
+// LoadCheckpoint implements Store.
 func (s *PostgresStore) LoadCheckpoint(ctx context.Context, companyID string) (*model.Checkpoint, error) {
 	var cp model.Checkpoint
 	err := s.pool.QueryRow(ctx,
@@ -566,6 +588,7 @@ func (s *PostgresStore) LoadCheckpoint(ctx context.Context, companyID string) (*
 	return &cp, nil
 }
 
+// DeleteCheckpoint implements Store.
 func (s *PostgresStore) DeleteCheckpoint(ctx context.Context, companyID string) error {
 	_, err := s.pool.Exec(ctx,
 		`DELETE FROM checkpoints WHERE company_id = $1`,
@@ -574,8 +597,7 @@ func (s *PostgresStore) DeleteCheckpoint(ctx context.Context, companyID string) 
 	return eris.Wrap(err, "postgres: delete checkpoint")
 }
 
-// Dead letter queue methods
-
+// EnqueueDLQ implements Store.
 func (s *PostgresStore) EnqueueDLQ(ctx context.Context, entry resilience.DLQEntry) error {
 	companyJSON, err := json.Marshal(entry.Company)
 	if err != nil {
@@ -600,6 +622,7 @@ func (s *PostgresStore) EnqueueDLQ(ctx context.Context, entry resilience.DLQEntr
 	return eris.Wrap(err, "postgres: enqueue dlq")
 }
 
+// DequeueDLQ implements Store.
 func (s *PostgresStore) DequeueDLQ(ctx context.Context, filter resilience.DLQFilter) ([]resilience.DLQEntry, error) {
 	query := `SELECT id, company, error, error_type, failed_phase, retry_count, max_retries, next_retry_at, created_at, last_failed_at
 	          FROM dead_letter_queue
@@ -649,6 +672,7 @@ func (s *PostgresStore) DequeueDLQ(ctx context.Context, filter resilience.DLQFil
 	return entries, eris.Wrap(rows.Err(), "postgres: dequeue dlq iterate")
 }
 
+// IncrementDLQRetry implements Store.
 func (s *PostgresStore) IncrementDLQRetry(ctx context.Context, id string, nextRetryAt time.Time, lastErr string) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE dead_letter_queue
@@ -665,11 +689,13 @@ func (s *PostgresStore) IncrementDLQRetry(ctx context.Context, id string, nextRe
 	return nil
 }
 
+// RemoveDLQ implements Store.
 func (s *PostgresStore) RemoveDLQ(ctx context.Context, id string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM dead_letter_queue WHERE id = $1`, id)
 	return eris.Wrap(err, "postgres: remove dlq")
 }
 
+// CountDLQ implements Store.
 func (s *PostgresStore) CountDLQ(ctx context.Context) (int, error) {
 	var count int
 	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM dead_letter_queue`).Scan(&count)

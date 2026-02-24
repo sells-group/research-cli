@@ -1,3 +1,4 @@
+// Package dataset implements 26 federal dataset sync operations for the fedsync subsystem.
 package dataset
 
 import (
@@ -21,16 +22,25 @@ type ABS struct {
 	cfg *config.Config
 }
 
-func (d *ABS) Name() string     { return "abs" }
-func (d *ABS) Table() string    { return "fed_data.abs_data" }
-func (d *ABS) Phase() Phase     { return Phase3 }
+// Name implements Dataset.
+func (d *ABS) Name() string { return "abs" }
+
+// Table implements Dataset.
+func (d *ABS) Table() string { return "fed_data.abs_data" }
+
+// Phase implements Dataset.
+func (d *ABS) Phase() Phase { return Phase3 }
+
+// Cadence implements Dataset.
 func (d *ABS) Cadence() Cadence { return Annual }
 
+// ShouldRun implements Dataset.
 func (d *ABS) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return AnnualAfter(now, lastSync, time.March)
 }
 
-func (d *ABS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+// Sync fetches and loads Census Annual Business Survey data.
+func (d *ABS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _ string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing ABS data")
 

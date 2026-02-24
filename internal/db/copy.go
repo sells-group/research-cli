@@ -1,3 +1,4 @@
+// Package db provides shared database helpers for bulk upsert and copy operations.
 package db
 
 import (

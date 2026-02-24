@@ -1,3 +1,4 @@
+// Package resilience provides circuit breaker and retry patterns for external service calls.
 package resilience
 
 import (
@@ -113,7 +114,7 @@ func (cb *CircuitBreaker) Execute(ctx context.Context, fn func(ctx context.Conte
 }
 
 // ExecuteVal is like Execute but preserves a return value.
-func ExecuteVal[T any](cb *CircuitBreaker, ctx context.Context, fn func(ctx context.Context) (T, error)) (T, error) {
+func ExecuteVal[T any](ctx context.Context, cb *CircuitBreaker, fn func(ctx context.Context) (T, error)) (T, error) {
 	var zero T
 	if err := cb.allowRequest(); err != nil {
 		return zero, err

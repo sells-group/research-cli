@@ -64,7 +64,7 @@ func init() {
 	fedsyncCmd.AddCommand(fedsyncExtractADVCmd)
 }
 
-func runExtractADV(cmd *cobra.Command, args []string) error {
+func runExtractADV(cmd *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

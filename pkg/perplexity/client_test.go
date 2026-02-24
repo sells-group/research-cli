@@ -150,7 +150,7 @@ func TestRequestModelOverridesDefault(t *testing.T) {
 }
 
 func TestContextCancellation(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"1","choices":[],"usage":{}}`))
 	}))
@@ -188,7 +188,7 @@ func TestNewClient_Defaults(t *testing.T) {
 }
 
 func TestErrorResponseIncludesBody(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"error":"invalid api key","message":"check your credentials"}`))
 	}))
@@ -279,7 +279,7 @@ func TestChatCompletion_MaxTokens(t *testing.T) {
 
 func TestChatCompletion_Retries5xx(t *testing.T) {
 	var attempts atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := attempts.Add(1)
 		if n <= 2 {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -303,7 +303,7 @@ func TestChatCompletion_Retries5xx(t *testing.T) {
 
 func TestChatCompletion_Retries429(t *testing.T) {
 	var attempts atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := attempts.Add(1)
 		if n == 1 {
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -327,7 +327,7 @@ func TestChatCompletion_Retries429(t *testing.T) {
 
 func TestChatCompletion_NoRetryOn4xx(t *testing.T) {
 	var attempts atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts.Add(1)
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":"bad request"}`))
@@ -345,7 +345,7 @@ func TestChatCompletion_NoRetryOn4xx(t *testing.T) {
 
 func TestChatCompletion_ExhaustsRetries(t *testing.T) {
 	var attempts atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"error":"internal server error"}`))
@@ -363,7 +363,7 @@ func TestChatCompletion_ExhaustsRetries(t *testing.T) {
 
 func TestChatCompletion_RetryRespectsContextCancel(t *testing.T) {
 	var attempts atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"error":"internal server error"}`))
@@ -391,7 +391,7 @@ func TestChatCompletion_RetryRespectsContextCancel(t *testing.T) {
 
 func TestChatCompletion_RetrySucceedsOnSecondAttempt(t *testing.T) {
 	var attempts atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := attempts.Add(1)
 		if n == 1 {
 			w.WriteHeader(http.StatusInternalServerError)

@@ -29,15 +29,24 @@ const (
 // PPP is a one-time load — the program ended in 2021 and data is static.
 type PPP struct{}
 
-func (d *PPP) Name() string     { return "ppp" }
-func (d *PPP) Table() string    { return "fed_data.ppp_loans" }
-func (d *PPP) Phase() Phase     { return Phase1 }
+// Name implements Dataset.
+func (d *PPP) Name() string { return "ppp" }
+
+// Table implements Dataset.
+func (d *PPP) Table() string { return "fed_data.ppp_loans" }
+
+// Phase implements Dataset.
+func (d *PPP) Phase() Phase { return Phase1 }
+
+// Cadence implements Dataset.
 func (d *PPP) Cadence() Cadence { return Annual }
 
+// ShouldRun implements Dataset.
 func (d *PPP) ShouldRun(_ time.Time, lastSync *time.Time) bool {
 	return lastSync == nil // one-time load
 }
 
+// Sync fetches and loads SBA PPP loan data.
 func (d *PPP) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "ppp"))
 
@@ -54,7 +63,6 @@ func (d *PPP) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir
 	g.SetLimit(3)
 
 	for i, res := range resources {
-		res := res
 		idx := i
 		g.Go(func() error {
 			csvPath := filepath.Join(tempDir, fmt.Sprintf("ppp_%d.csv", idx))

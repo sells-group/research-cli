@@ -275,4 +275,3 @@ func TestSDKTypeConversion_fromSDKBatchResult(t *testing.T) {
 	assert.Equal(t, "succeeded", item.Type)
 	assert.Equal(t, "result", item.Message.Content[0].Text)
 }
-

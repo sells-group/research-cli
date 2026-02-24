@@ -1,3 +1,4 @@
+// Package mocks provides test doubles for the google client.
 package mocks
 
 import (

@@ -14,7 +14,7 @@ import (
 // FeeTier represents one AUM breakpoint in a fee schedule.
 type FeeTier struct {
 	MinAUM        int64   `json:"min_aum"`
-	MaxAUM        int64   `json:"max_aum"`        // 0 = no upper limit
+	MaxAUM        int64   `json:"max_aum"`         // 0 = no upper limit
 	AnnualRatePct float64 `json:"annual_rate_pct"` // e.g. 1.00 = 1%
 }
 
@@ -42,7 +42,7 @@ type Scores struct {
 type ComputedMetrics struct {
 	CRDNumber               int
 	RevenueEstimate         *int64
-	BlendedFeeRateBPS       *int     // basis points
+	BlendedFeeRateBPS       *int // basis points
 	RevenuePerClient        *int
 	AUMGrowthCAGR           *float64
 	ClientGrowthRate        *float64
@@ -69,19 +69,19 @@ type ComputedMetrics struct {
 	KeyPersonDependencyScore *int // 0-10
 
 	// Profitability estimates (Gap 7)
-	HybridRevenueEstimate *int64
-	EstimatedExpenseRatio *float64
+	HybridRevenueEstimate    *int64
+	EstimatedExpenseRatio    *float64
 	EstimatedOperatingMargin *float64
-	RevenuePerEmployee    *int64
+	RevenuePerEmployee       *int64
 
 	// Benchmark percentiles (Gap 7.2)
 	BenchmarkAUMPerEmployeePctile *float64
 	BenchmarkFeeRatePctile        *float64
 
 	// Amendment tracking (Gap 10.2)
-	AmendmentsLastYear     *int
-	AmendmentsPerYearAvg   *float64
-	HasFrequentAmendments  bool
+	AmendmentsLastYear    *int
+	AmendmentsPerYearAvg  *float64
+	HasFrequentAmendments bool
 
 	// Regulatory risk (Gap 8.3)
 	RegulatoryRiskScore *int // 0-100
@@ -397,19 +397,19 @@ var affFlags = []string{
 
 // drp weights for DRP severity scoring.
 var drpWeights = map[string]int{
-	"drp_criminal_firm":       3,
-	"drp_criminal_affiliate":  3,
-	"drp_regulatory_firm":     2,
-	"drp_regulatory_affiliate": 2,
-	"drp_civil_firm":          2,
-	"drp_civil_affiliate":     2,
-	"drp_complaint_firm":      1,
-	"drp_complaint_affiliate": 1,
-	"drp_termination_firm":    1,
+	"drp_criminal_firm":         3,
+	"drp_criminal_affiliate":    3,
+	"drp_regulatory_firm":       2,
+	"drp_regulatory_affiliate":  2,
+	"drp_civil_firm":            2,
+	"drp_civil_affiliate":       2,
+	"drp_complaint_firm":        1,
+	"drp_complaint_affiliate":   1,
+	"drp_termination_firm":      1,
 	"drp_termination_affiliate": 1,
-	"drp_judgment":            2,
-	"drp_financial_firm":      1,
-	"drp_financial_affiliate": 1,
+	"drp_judgment":              2,
+	"drp_financial_firm":        1,
+	"drp_financial_affiliate":   1,
 }
 
 // ComputeScores computes scoring metrics from filing data and extracted answers.
@@ -600,12 +600,12 @@ func ComputeKeyPersonDependency(answers map[string]Answer, owners []OwnerRow) *i
 		score += 2
 	}
 	if a, ok := answers["personnel_succession_identified"]; ok && !isTruthy(a.Value) {
-		score += 1
+		score++
 	}
 
 	// No non-compete.
 	if a, ok := answers["personnel_non_compete_exists"]; ok && !isTruthy(a.Value) {
-		score += 1
+		score++
 	}
 
 	// Key person handles high % AUM.
@@ -614,13 +614,13 @@ func ComputeKeyPersonDependency(answers map[string]Answer, owners []OwnerRow) *i
 		if pct > 50 {
 			score += 2
 		} else if pct > 25 {
-			score += 1
+			score++
 		}
 	}
 
 	// No equity incentives (less retention).
 	if a, ok := answers["personnel_has_equity_incentives"]; ok && !isTruthy(a.Value) {
-		score += 1
+		score++
 	}
 
 	result := int(math.Min(score, 10))

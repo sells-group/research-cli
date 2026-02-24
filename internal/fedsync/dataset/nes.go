@@ -21,16 +21,25 @@ type NES struct {
 	cfg *config.Config
 }
 
-func (d *NES) Name() string     { return "nes" }
-func (d *NES) Table() string    { return "fed_data.nes_data" }
-func (d *NES) Phase() Phase     { return Phase2 }
+// Name implements Dataset.
+func (d *NES) Name() string { return "nes" }
+
+// Table implements Dataset.
+func (d *NES) Table() string { return "fed_data.nes_data" }
+
+// Phase implements Dataset.
+func (d *NES) Phase() Phase { return Phase2 }
+
+// Cadence implements Dataset.
 func (d *NES) Cadence() Cadence { return Annual }
 
+// ShouldRun implements Dataset.
 func (d *NES) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return AnnualAfter(now, lastSync, time.March)
 }
 
-func (d *NES) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+// Sync fetches and loads Census Nonemployer Statistics data.
+func (d *NES) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _ string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing NES data")
 

@@ -700,17 +700,17 @@ func TestFormD_ParseFormDXML(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, row, 11)
 
-	assert.Equal(t, "0001234567-24-000001", row[0]) // accession
-	assert.Equal(t, "1234567", row[1])               // cik
+	assert.Equal(t, "0001234567-24-000001", row[0])   // accession
+	assert.Equal(t, "1234567", row[1])                // cik
 	assert.Equal(t, "Acme Fund LP", row[2])           // entity_name
-	assert.Equal(t, "Limited Partnership", row[3])     // entity_type
-	assert.Equal(t, "2020", row[4])                    // year_of_inc
-	assert.Equal(t, "DE", row[5])                      // state_of_inc
-	assert.Equal(t, "Pooled Investment Fund", row[6])  // industry_group
-	assert.Equal(t, "Decline to Disclose", row[7])     // revenue_range
-	assert.Equal(t, int64(50000000), row[8])           // total_offering
-	assert.Equal(t, int64(25000000), row[9])           // total_sold
-	assert.NotNil(t, row[10])                          // filing_date
+	assert.Equal(t, "Limited Partnership", row[3])    // entity_type
+	assert.Equal(t, "2020", row[4])                   // year_of_inc
+	assert.Equal(t, "DE", row[5])                     // state_of_inc
+	assert.Equal(t, "Pooled Investment Fund", row[6]) // industry_group
+	assert.Equal(t, "Decline to Disclose", row[7])    // revenue_range
+	assert.Equal(t, int64(50000000), row[8])          // total_offering
+	assert.Equal(t, int64(25000000), row[9])          // total_sold
+	assert.NotNil(t, row[10])                         // filing_date
 }
 
 func TestFormD_ParseFormDXML_TruncatesLongState(t *testing.T) {
@@ -1193,7 +1193,6 @@ func TestNewRegistry_AllDatasets(t *testing.T) {
 		}
 	}
 }
-
 
 // --- getColIdx ---
 
@@ -1938,7 +1937,6 @@ func TestIACompilation_ParseAndLoad_MidBatchFlush(t *testing.T) {
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
-
 // =====================================================================
 // Mid-batch flush tests — CBP parseCSV (>10000 rows)
 // =====================================================================
@@ -2140,7 +2138,6 @@ func TestOEWS_ParseCSV_MidBatchFlush(t *testing.T) {
 	assert.NoError(t, pool.ExpectationsWereMet())
 }
 
-
 // =====================================================================
 // EDGAR Submissions — mid-batch flush (entity+filing batches)
 // =====================================================================
@@ -2169,15 +2166,15 @@ func TestEDGARSubmissions_Sync_MidBatchFlush(t *testing.T) {
 			"tickers": []string{"TKR"}, "exchanges": []string{"NYSE"},
 			"filings": map[string]any{
 				"recent": map[string]any{
-					"accessionNumber": []string{fmt.Sprintf("0001-%010d", i)},
-					"filingDate":      []string{"2024-06-01"},
-					"form":            []string{"10-K"},
-					"primaryDocument": []string{"doc.htm"},
+					"accessionNumber":       []string{fmt.Sprintf("0001-%010d", i)},
+					"filingDate":            []string{"2024-06-01"},
+					"form":                  []string{"10-K"},
+					"primaryDocument":       []string{"doc.htm"},
 					"primaryDocDescription": []string{"Annual Report"},
-					"items":           []string{""},
-					"size":            []int{1000},
-					"isXBRL":          []int{1},
-					"isInlineXBRL":    []int{1},
+					"items":                 []string{""},
+					"size":                  []int{1000},
+					"isXBRL":                []int{1},
+					"isInlineXBRL":          []int{1},
 				},
 			},
 		}
@@ -2289,7 +2286,7 @@ func TestFPDS_ParseResponse_WithAward(t *testing.T) {
 	require.Len(t, rows, 1)
 
 	row := rows[0]
-	assert.Equal(t, "N1", row[0])       // contract_id
+	assert.Equal(t, "N1", row[0])         // contract_id
 	assert.Equal(t, "Vendor LLC", row[4]) // vendor_name
 	assert.Equal(t, "DUNS123", row[5])    // vendor_duns
 	assert.Equal(t, "UEI123", row[6])     // vendor_uei
@@ -2345,7 +2342,7 @@ func TestM3_Sync_ReadAllError(t *testing.T) {
 
 type failReader struct{}
 
-func (r *failReader) Read(p []byte) (int, error) { return 0, errors.New("read error") }
+func (r *failReader) Read(_ []byte) (int, error) { return 0, errors.New("read error") }
 
 func TestM3_Sync_InvalidJSON(t *testing.T) {
 	pool, err := pgxmock.NewPool()
@@ -2559,4 +2556,3 @@ func TestEDGARSubmissions_DecodeSubmission_Invalid(t *testing.T) {
 	_, err := ds.decodeSubmission(strings.NewReader("invalid"))
 	assert.Error(t, err)
 }
-

@@ -1,3 +1,4 @@
+// Package model defines shared data types for companies, pages, questions, and fields.
 package model
 
 import (
@@ -9,24 +10,26 @@ import (
 // RunStatus represents the current state of an enrichment run.
 type RunStatus string
 
+// RunStatusQueued and following constants enumerate the enrichment run states.
 const (
-	RunStatusQueued       RunStatus = "queued"
-	RunStatusCrawling     RunStatus = "crawling"
-	RunStatusClassifying  RunStatus = "classifying"
-	RunStatusExtracting   RunStatus = "extracting"
-	RunStatusAggregating  RunStatus = "aggregating"
-	RunStatusWritingSF    RunStatus = "writing_sf"
-	RunStatusComplete     RunStatus = "complete"
-	RunStatusFailed       RunStatus = "failed"
+	RunStatusQueued      RunStatus = "queued"
+	RunStatusCrawling    RunStatus = "crawling"
+	RunStatusClassifying RunStatus = "classifying"
+	RunStatusExtracting  RunStatus = "extracting"
+	RunStatusAggregating RunStatus = "aggregating"
+	RunStatusWritingSF   RunStatus = "writing_sf"
+	RunStatusComplete    RunStatus = "complete"
+	RunStatusFailed      RunStatus = "failed"
 )
 
 // InputMode describes what data was available at pipeline start.
 type InputMode string
 
+// InputModeURLOnly and following constants describe the data available at pipeline start.
 const (
-	InputModeURLOnly  InputMode = "url_only"   // Only URL
-	InputModeMinimal  InputMode = "minimal"    // URL + Name
-	InputModeStandard InputMode = "standard"   // URL + Name + Location
+	InputModeURLOnly   InputMode = "url_only"   // Only URL
+	InputModeMinimal   InputMode = "minimal"    // URL + Name
+	InputModeStandard  InputMode = "standard"   // URL + Name + Location
 	InputModePreSeeded InputMode = "pre_seeded" // URL + Name + Location + PreSeeded
 )
 
@@ -41,18 +44,18 @@ type Company struct {
 	State        string         `json:"state,omitempty"`
 	ZipCode      string         `json:"zip_code,omitempty"`
 	Street       string         `json:"street,omitempty"`
-	PreSeeded    map[string]any `json:"pre_seeded,omitempty"`  // CSV-sourced field values for gap-filling
-	InputMode    InputMode      `json:"input_mode,omitempty"`  // Observability: what data was available at start
+	PreSeeded    map[string]any `json:"pre_seeded,omitempty"` // CSV-sourced field values for gap-filling
+	InputMode    InputMode      `json:"input_mode,omitempty"` // Observability: what data was available at start
 }
 
 // Run represents a single enrichment run for a company.
 type Run struct {
-	ID        string    `json:"id"`
-	Company   Company   `json:"company"`
-	Status    RunStatus `json:"status"`
+	ID        string     `json:"id"`
+	Company   Company    `json:"company"`
+	Status    RunStatus  `json:"status"`
 	Result    *RunResult `json:"result,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 // RunResult holds the final outcome of a run.
@@ -71,31 +74,32 @@ type RunResult struct {
 
 // RunPhase represents a phase within a run.
 type RunPhase struct {
-	ID     string      `json:"id"`
-	RunID  string      `json:"run_id"`
-	Name   string      `json:"name"`
-	Status PhaseStatus `json:"status"`
-	Result *PhaseResult `json:"result,omitempty"`
-	StartedAt time.Time `json:"started_at"`
+	ID        string       `json:"id"`
+	RunID     string       `json:"run_id"`
+	Name      string       `json:"name"`
+	Status    PhaseStatus  `json:"status"`
+	Result    *PhaseResult `json:"result,omitempty"`
+	StartedAt time.Time    `json:"started_at"`
 }
 
 // PhaseStatus represents the current state of a pipeline phase.
 type PhaseStatus string
 
+// PhaseStatusRunning and following constants enumerate the pipeline phase states.
 const (
-	PhaseStatusRunning   PhaseStatus = "running"
-	PhaseStatusComplete  PhaseStatus = "complete"
-	PhaseStatusFailed    PhaseStatus = "failed"
-	PhaseStatusSkipped   PhaseStatus = "skipped"
+	PhaseStatusRunning  PhaseStatus = "running"
+	PhaseStatusComplete PhaseStatus = "complete"
+	PhaseStatusFailed   PhaseStatus = "failed"
+	PhaseStatusSkipped  PhaseStatus = "skipped"
 )
 
 // PhaseResult holds the outcome of a pipeline phase.
 type PhaseResult struct {
-	Name       string     `json:"name"`
-	Status     PhaseStatus `json:"status"`
-	Duration   int64      `json:"duration_ms"`
-	TokenUsage TokenUsage `json:"token_usage"`
-	Error      string     `json:"error,omitempty"`
+	Name       string         `json:"name"`
+	Status     PhaseStatus    `json:"status"`
+	Duration   int64          `json:"duration_ms"`
+	TokenUsage TokenUsage     `json:"token_usage"`
+	Error      string         `json:"error,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
@@ -126,8 +130,8 @@ type FieldValue struct {
 
 // Checkpoint stores intermediate pipeline state for resume after failure.
 type Checkpoint struct {
-	CompanyID string `json:"company_id"`
-	Phase     string `json:"phase"`
-	Data      []byte `json:"data"`
+	CompanyID string    `json:"company_id"`
+	Phase     string    `json:"phase"`
+	Data      []byte    `json:"data"`
 	CreatedAt time.Time `json:"created_at"`
 }

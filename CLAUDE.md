@@ -8,7 +8,7 @@ Automated account enrichment pipeline + federal data sync in Go. Two subsystems:
 
 | Layer | Tech |
 |---|---|
-| Language | Go 1.23+ |
+| Language | Go 1.25+ |
 | CLI | cobra + viper + zap + eris |
 | Compute | Fly.io (per-second billing, auto-stop) |
 | DB (prod) | Neon Postgres (pgx) |
@@ -236,6 +236,98 @@ Each external API gets its own package in `pkg/`:
 - **Env prefix:** `RESEARCH_` (e.g., `RESEARCH_ANTHROPIC_KEY`)
 - **Parallel phases:** 1A/1B/1C fan out via `errgroup`
 - **Notion rate limit:** 3 req/s — pace imports with `time.Ticker` at 300ms
+
+## Style Guide
+
+### Pre-commit hook
+
+A pre-commit hook runs `gofmt`, `go vet`, and `golangci-lint` on staged Go files. Install it:
+
+```bash
+ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+```
+
+The hook only checks packages containing staged `.go` files, so it's fast for small changes.
+
+### Formatting
+
+- **Always run `gofmt`** before committing. The pre-commit hook enforces this.
+- **No tabs vs spaces debates** — `gofmt` decides.
+- **Import grouping:** stdlib first, then external, then internal. Use `goimports` or let the formatter handle it.
+- **No trailing whitespace** or unnecessary blank lines inside function bodies.
+
+### Naming
+
+| Context | Convention | Example |
+|---|---|---|
+| Go types | `CamelCase` | `AdvisorRow`, `SyncResult` |
+| Go functions | `CamelCase` | `FormatPart1Structured` |
+| Go variables | `camelCase` | `brochureSections`, `fundName` |
+| JSON/YAML keys | `snake_case` | `"firm_name"`, `"aum_total"` |
+| SQL columns | `snake_case` | `crd_number`, `filing_date` |
+| Env vars | `SCREAMING_SNAKE` | `RESEARCH_ANTHROPIC_KEY` |
+| File names | `snake_case.go` | `adv_part1.go`, `entity_xref.go` |
+| Test files | `*_test.go` | `sync_test.go` |
+| Constants | `CamelCase` | `Phase1`, `ModelHaiku` |
+
+- **Avoid stuttering:** Don't repeat the package name in type names. Use `dataset.Registry` not `dataset.DatasetRegistry`.
+- **Acronyms:** Keep standard acronyms uppercase: `CRD`, `AUM`, `URL`, `HTTP`, `JSON`, `SQL`, `API`.
+- **Interface names:** Single-method interfaces use `-er` suffix (`Fetcher`, `Closer`). Multi-method interfaces use descriptive nouns (`Store`, `Dataset`).
+- **Unused parameters:** Rename to `_` (e.g., `func(cmd *cobra.Command, _ []string)`). Never leave named-but-unused params.
+
+### Documentation
+
+- **Every exported type, function, method, and constant** must have a doc comment.
+- **Format:** `// TypeName does X.` — start with the identifier name, one line preferred.
+- **Interface methods** on concrete types: `// Name implements Dataset.` is sufficient.
+- **Package comments:** Every package needs `// Package <name> <description>.` in exactly one file.
+- **No fluff:** Keep doc comments factual and concise. Don't restate the function signature.
+- **Internal helpers** (unexported) don't require doc comments unless the logic is non-obvious.
+
+### Error handling
+
+- **Always wrap with context:** `eris.Wrap(err, "sf: update account %s", id)`
+- **Never silently swallow errors.** If you intentionally ignore an error, assign to `_` explicitly: `_ = f.Close()`
+- **Deferred close:** Use `defer f.Close() //nolint:errcheck` or `defer func() { _ = f.Close() }()`
+- **Check all return values.** The `errcheck` linter enforces this.
+- **Don't return nil when err is non-nil** — either return the error or log it with an explicit comment.
+
+### Functions & methods
+
+- **`context.Context` is always the first parameter.**
+- **Don't shadow builtins:** Avoid naming variables `max`, `new`, `copy`, `len`, `cap`, etc.
+- **Use `score++`** not `score += 1`.
+- **Prefer early returns** over deep nesting.
+- **Builder pattern:** Use `fmt.Fprintf(&sb, ...)` not `sb.WriteString(fmt.Sprintf(...))`.
+
+### Testing
+
+- **Mock at the boundary:** Use `httptest.Server` for HTTP clients, interfaces for internal deps.
+- **No external API calls in tests.** Everything is mocked.
+- **Unused HTTP handler params:** `func(w http.ResponseWriter, _ *http.Request)` — always underscore unused `r`.
+- **Empty channel drains:** Always add a `// drain` comment inside empty `for range ch {}` blocks.
+- **Test data:** Use `testdata/` fixtures or inline literals. No test file I/O outside `t.TempDir()`.
+
+### Linting
+
+The project uses `golangci-lint` v2.10+ with config in `.golangci.yml`. Active linters beyond the defaults:
+
+| Linter | Purpose |
+|---|---|
+| `errcheck` | Unchecked error returns |
+| `govet` | Suspicious constructs (`go vet`) |
+| `ineffassign` | Unused assignments |
+| `staticcheck` | Advanced static analysis |
+| `unused` | Unused code |
+| `revive` | Exported docs, naming, empty blocks |
+| `misspell` | Typos in comments and strings |
+| `copyloopvar` | Loop variable capture bugs |
+| `durationcheck` | Incorrect `time.Duration` math |
+| `nilerr` | Returning nil when err is non-nil |
+| `unconvert` | Unnecessary type conversions |
+| `whitespace` | Trailing whitespace, blank lines |
+
+Run locally: `golangci-lint run ./...` (or `~/go/bin/golangci-lint run ./...`)
 
 ## Environment Variables
 

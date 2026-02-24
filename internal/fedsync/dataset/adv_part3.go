@@ -30,15 +30,24 @@ type ADVPart3 struct {
 	cfg *config.Config
 }
 
-func (d *ADVPart3) Name() string     { return "adv_part3" }
-func (d *ADVPart3) Table() string    { return "fed_data.adv_crs" }
-func (d *ADVPart3) Phase() Phase     { return Phase3 }
+// Name implements Dataset.
+func (d *ADVPart3) Name() string { return "adv_part3" }
+
+// Table implements Dataset.
+func (d *ADVPart3) Table() string { return "fed_data.adv_crs" }
+
+// Phase implements Dataset.
+func (d *ADVPart3) Phase() Phase { return Phase3 }
+
+// Cadence implements Dataset.
 func (d *ADVPart3) Cadence() Cadence { return Monthly }
 
+// ShouldRun implements Dataset.
 func (d *ADVPart3) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }
 
+// Sync fetches and loads CRS (Client Relationship Summary) data.
 func (d *ADVPart3) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 

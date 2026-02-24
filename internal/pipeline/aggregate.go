@@ -428,15 +428,15 @@ func intProximity(a, b int) float64 {
 	if a == 0 && b == 0 {
 		return 1
 	}
-	max := a
-	if b > max {
-		max = b
+	maxVal := a
+	if b > maxVal {
+		maxVal = b
 	}
 	diff := a - b
 	if diff < 0 {
 		diff = -diff
 	}
-	return 1 - float64(diff)/float64(max)
+	return 1 - float64(diff)/float64(maxVal)
 }
 
 // appendOrUpgrade adds an answer if no existing answer has the same field key,

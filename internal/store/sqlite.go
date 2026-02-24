@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rotisserie/eris"
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // Register the pure-Go SQLite driver.
 
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/resilience"
@@ -125,19 +125,23 @@ CREATE INDEX IF NOT EXISTS idx_dlq_error_type ON dead_letter_queue(error_type);
 CREATE INDEX IF NOT EXISTS idx_dlq_next_retry ON dead_letter_queue(next_retry_at);
 `
 
+// Ping implements Store.
 func (s *SQLiteStore) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
 
+// Migrate implements Store.
 func (s *SQLiteStore) Migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, sqliteMigration)
 	return eris.Wrap(err, "sqlite: migrate")
 }
 
+// Close implements Store.
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
+// CreateRun implements Store.
 func (s *SQLiteStore) CreateRun(ctx context.Context, company model.Company) (*model.Run, error) {
 	id := uuid.New().String()
 	now := time.Now().UTC()
@@ -164,6 +168,7 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, company model.Company) (*mo
 	}, nil
 }
 
+// UpdateRunStatus implements Store.
 func (s *SQLiteStore) UpdateRunStatus(ctx context.Context, runID string, status model.RunStatus) error {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status = ?, updated_at = ? WHERE id = ?`,
@@ -175,6 +180,7 @@ func (s *SQLiteStore) UpdateRunStatus(ctx context.Context, runID string, status 
 	return checkRowsAffected(res, "run", runID)
 }
 
+// UpdateRunResult implements Store.
 func (s *SQLiteStore) UpdateRunResult(ctx context.Context, runID string, result *model.RunResult) error {
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
@@ -191,6 +197,7 @@ func (s *SQLiteStore) UpdateRunResult(ctx context.Context, runID string, result 
 	return checkRowsAffected(res, "run", runID)
 }
 
+// GetRun implements Store.
 func (s *SQLiteStore) GetRun(ctx context.Context, runID string) (*model.Run, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, company, status, result, created_at, updated_at FROM runs WHERE id = ?`,
@@ -199,6 +206,7 @@ func (s *SQLiteStore) GetRun(ctx context.Context, runID string) (*model.Run, err
 	return scanRun(row)
 }
 
+// ListRuns implements Store.
 func (s *SQLiteStore) ListRuns(ctx context.Context, filter RunFilter) ([]model.Run, error) {
 	query := `SELECT id, company, status, result, created_at, updated_at FROM runs WHERE 1=1`
 	var args []any
@@ -246,6 +254,7 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, filter RunFilter) ([]model.R
 	return runs, eris.Wrap(rows.Err(), "sqlite: list runs iterate")
 }
 
+// CreatePhase implements Store.
 func (s *SQLiteStore) CreatePhase(ctx context.Context, runID string, name string) (*model.RunPhase, error) {
 	id := uuid.New().String()
 	now := time.Now().UTC()
@@ -267,6 +276,7 @@ func (s *SQLiteStore) CreatePhase(ctx context.Context, runID string, name string
 	}, nil
 }
 
+// CompletePhase implements Store.
 func (s *SQLiteStore) CompletePhase(ctx context.Context, phaseID string, result *model.PhaseResult) error {
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
@@ -283,6 +293,7 @@ func (s *SQLiteStore) CompletePhase(ctx context.Context, phaseID string, result 
 	return checkRowsAffected(res, "phase", phaseID)
 }
 
+// GetCachedCrawl implements Store.
 func (s *SQLiteStore) GetCachedCrawl(ctx context.Context, companyURL string) (*model.CrawlCache, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, company_url, pages, crawled_at, expires_at FROM crawl_cache
@@ -306,6 +317,7 @@ func (s *SQLiteStore) GetCachedCrawl(ctx context.Context, companyURL string) (*m
 	return &cc, nil
 }
 
+// SetCachedCrawl implements Store.
 func (s *SQLiteStore) SetCachedCrawl(ctx context.Context, companyURL string, pages []model.CrawledPage, ttl time.Duration) error {
 	id := uuid.New().String()
 	now := time.Now().UTC()
@@ -323,6 +335,7 @@ func (s *SQLiteStore) SetCachedCrawl(ctx context.Context, companyURL string, pag
 	return eris.Wrap(err, "sqlite: set cached crawl")
 }
 
+// GetCachedLinkedIn implements Store.
 func (s *SQLiteStore) GetCachedLinkedIn(ctx context.Context, domain string) ([]byte, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT data FROM linkedin_cache
@@ -341,6 +354,7 @@ func (s *SQLiteStore) GetCachedLinkedIn(ctx context.Context, domain string) ([]b
 	return []byte(data), nil
 }
 
+// SetCachedLinkedIn implements Store.
 func (s *SQLiteStore) SetCachedLinkedIn(ctx context.Context, domain string, data []byte, ttl time.Duration) error {
 	id := uuid.New().String()
 	now := time.Now().UTC()
@@ -353,6 +367,7 @@ func (s *SQLiteStore) SetCachedLinkedIn(ctx context.Context, domain string, data
 	return eris.Wrap(err, "sqlite: set cached linkedin")
 }
 
+// DeleteExpiredCrawls implements Store.
 func (s *SQLiteStore) DeleteExpiredCrawls(ctx context.Context) (int, error) {
 	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM crawl_cache WHERE expires_at <= datetime('now')`,
@@ -364,6 +379,7 @@ func (s *SQLiteStore) DeleteExpiredCrawls(ctx context.Context) (int, error) {
 	return int(n), eris.Wrap(err, "sqlite: rows affected")
 }
 
+// DeleteExpiredLinkedIn implements Store.
 func (s *SQLiteStore) DeleteExpiredLinkedIn(ctx context.Context) (int, error) {
 	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM linkedin_cache WHERE expires_at <= datetime('now')`,
@@ -375,6 +391,7 @@ func (s *SQLiteStore) DeleteExpiredLinkedIn(ctx context.Context) (int, error) {
 	return int(n), eris.Wrap(err, "sqlite: rows affected")
 }
 
+// DeleteExpiredScrapes implements Store.
 func (s *SQLiteStore) DeleteExpiredScrapes(ctx context.Context) (int, error) {
 	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM scrape_cache WHERE expires_at <= datetime('now')`,
@@ -386,6 +403,7 @@ func (s *SQLiteStore) DeleteExpiredScrapes(ctx context.Context) (int, error) {
 	return int(n), eris.Wrap(err, "sqlite: rows affected")
 }
 
+// GetCachedScrape implements Store.
 func (s *SQLiteStore) GetCachedScrape(ctx context.Context, urlHash string) ([]byte, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT content FROM scrape_cache
@@ -403,6 +421,7 @@ func (s *SQLiteStore) GetCachedScrape(ctx context.Context, urlHash string) ([]by
 	return []byte(content), nil
 }
 
+// SetCachedScrape implements Store.
 func (s *SQLiteStore) SetCachedScrape(ctx context.Context, urlHash string, content []byte, ttl time.Duration) error {
 	id := uuid.New().String()
 	now := time.Now().UTC()
@@ -415,6 +434,7 @@ func (s *SQLiteStore) SetCachedScrape(ctx context.Context, urlHash string, conte
 	return eris.Wrap(err, "sqlite: set cached scrape")
 }
 
+// GetHighConfidenceAnswers implements Store.
 func (s *SQLiteStore) GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64) ([]model.ExtractionAnswer, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT result FROM runs
@@ -450,6 +470,7 @@ func (s *SQLiteStore) GetHighConfidenceAnswers(ctx context.Context, companyURL s
 	return highConf, nil
 }
 
+// SaveCheckpoint implements Store.
 func (s *SQLiteStore) SaveCheckpoint(ctx context.Context, companyID string, phase string, data []byte) error {
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx,
@@ -459,6 +480,7 @@ func (s *SQLiteStore) SaveCheckpoint(ctx context.Context, companyID string, phas
 	return eris.Wrap(err, "sqlite: save checkpoint")
 }
 
+// LoadCheckpoint implements Store.
 func (s *SQLiteStore) LoadCheckpoint(ctx context.Context, companyID string) (*model.Checkpoint, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT company_id, phase, data, created_at FROM checkpoints WHERE company_id = ?`,
@@ -477,6 +499,7 @@ func (s *SQLiteStore) LoadCheckpoint(ctx context.Context, companyID string) (*mo
 	return &cp, nil
 }
 
+// DeleteCheckpoint implements Store.
 func (s *SQLiteStore) DeleteCheckpoint(ctx context.Context, companyID string) error {
 	_, err := s.db.ExecContext(ctx,
 		`DELETE FROM checkpoints WHERE company_id = ?`,
@@ -531,8 +554,7 @@ func scanRunFromRows(rows *sql.Rows) (*model.Run, error) {
 	return scanRun(rows)
 }
 
-// Dead letter queue methods
-
+// EnqueueDLQ implements Store.
 func (s *SQLiteStore) EnqueueDLQ(ctx context.Context, entry resilience.DLQEntry) error {
 	companyJSON, err := json.Marshal(entry.Company)
 	if err != nil {
@@ -554,6 +576,7 @@ func (s *SQLiteStore) EnqueueDLQ(ctx context.Context, entry resilience.DLQEntry)
 	return eris.Wrap(err, "sqlite: enqueue dlq")
 }
 
+// DequeueDLQ implements Store.
 func (s *SQLiteStore) DequeueDLQ(ctx context.Context, filter resilience.DLQFilter) ([]resilience.DLQEntry, error) {
 	now := time.Now().UTC()
 	query := `SELECT id, company, error, error_type, failed_phase, retry_count, max_retries, next_retry_at, created_at, last_failed_at
@@ -602,6 +625,7 @@ func (s *SQLiteStore) DequeueDLQ(ctx context.Context, filter resilience.DLQFilte
 	return entries, eris.Wrap(rows.Err(), "sqlite: dequeue dlq iterate")
 }
 
+// IncrementDLQRetry implements Store.
 func (s *SQLiteStore) IncrementDLQRetry(ctx context.Context, id string, nextRetryAt time.Time, lastErr string) error {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE dead_letter_queue
@@ -615,11 +639,13 @@ func (s *SQLiteStore) IncrementDLQRetry(ctx context.Context, id string, nextRetr
 	return checkRowsAffected(res, "dlq_entry", id)
 }
 
+// RemoveDLQ implements Store.
 func (s *SQLiteStore) RemoveDLQ(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM dead_letter_queue WHERE id = ?`, id)
 	return eris.Wrap(err, "sqlite: remove dlq")
 }
 
+// CountDLQ implements Store.
 func (s *SQLiteStore) CountDLQ(ctx context.Context) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dead_letter_queue`).Scan(&count)

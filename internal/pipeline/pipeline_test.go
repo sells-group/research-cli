@@ -11,10 +11,10 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/scrape"
-	"github.com/sells-group/research-cli/internal/waterfall"
-	"github.com/sells-group/research-cli/internal/waterfall/provider"
 	scrapemocks "github.com/sells-group/research-cli/internal/scrape/mocks"
 	storemocks "github.com/sells-group/research-cli/internal/store/mocks"
+	"github.com/sells-group/research-cli/internal/waterfall"
+	"github.com/sells-group/research-cli/internal/waterfall/provider"
 	"github.com/sells-group/research-cli/pkg/anthropic"
 	anthropicmocks "github.com/sells-group/research-cli/pkg/anthropic/mocks"
 	firecrawlmocks "github.com/sells-group/research-cli/pkg/firecrawl/mocks"
@@ -525,8 +525,8 @@ type waterfallMockProvider struct {
 	queryResult     *provider.QueryResult
 }
 
-func (m *waterfallMockProvider) Name() string              { return m.name }
-func (m *waterfallMockProvider) SupportedFields() []string  { return m.supportedFields }
+func (m *waterfallMockProvider) Name() string                    { return m.name }
+func (m *waterfallMockProvider) SupportedFields() []string       { return m.supportedFields }
 func (m *waterfallMockProvider) CostPerQuery(_ []string) float64 { return m.costPerQuery }
 func (m *waterfallMockProvider) CanProvide(fieldKey string) bool {
 	for _, f := range m.supportedFields {
@@ -642,7 +642,7 @@ func TestPipeline_WithWaterfall(t *testing.T) {
 	s.On("Name").Return("mock").Maybe()
 	s.On("Supports", mock.Anything).Return(true).Maybe()
 	s.On("Scrape", mock.Anything, mock.Anything).Return(&scrape.Result{
-		Page: model.CrawledPage{URL: "https://example.com", Title: "External", Markdown: "Acme Corp info."},
+		Page:   model.CrawledPage{URL: "https://example.com", Title: "External", Markdown: "Acme Corp info."},
 		Source: "mock",
 	}, nil).Maybe()
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)

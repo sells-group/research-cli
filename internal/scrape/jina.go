@@ -15,13 +15,13 @@ import (
 
 // circuitBreaker tracks consecutive failures to skip a flaky upstream.
 type circuitBreaker struct {
-	mu           sync.Mutex
-	failures     int
-	lastFailure  time.Time
-	openUntil    time.Time
-	threshold    int           // consecutive failures to trip
-	window       time.Duration // failures must occur within this window
-	cooldown     time.Duration // how long the circuit stays open
+	mu          sync.Mutex
+	failures    int
+	lastFailure time.Time
+	openUntil   time.Time
+	threshold   int           // consecutive failures to trip
+	window      time.Duration // failures must occur within this window
+	cooldown    time.Duration // how long the circuit stays open
 }
 
 func newCircuitBreaker(threshold int, window, cooldown time.Duration) *circuitBreaker {
@@ -78,6 +78,7 @@ func NewJinaAdapter(client jina.Client) *JinaAdapter {
 	}
 }
 
+// Name implements Scraper.
 func (j *JinaAdapter) Name() string { return "jina" }
 
 // Supports returns true unless the circuit breaker is open.

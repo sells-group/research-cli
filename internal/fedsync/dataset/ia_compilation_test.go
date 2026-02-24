@@ -49,6 +49,7 @@ func TestIACompilation_ShouldRun_Yesterday(t *testing.T) {
 }
 
 func TestIACompilation_ImplementsDataset(t *testing.T) {
+	t.Parallel()
 	var _ Dataset = &IACompilation{}
 }
 

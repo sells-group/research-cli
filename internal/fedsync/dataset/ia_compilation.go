@@ -35,11 +35,19 @@ type IACompilation struct {
 	cfg *config.Config
 }
 
-func (d *IACompilation) Name() string     { return "ia_compilation" }
-func (d *IACompilation) Table() string    { return "fed_data.adv_firms" }
-func (d *IACompilation) Phase() Phase     { return Phase1B }
+// Name implements Dataset.
+func (d *IACompilation) Name() string { return "ia_compilation" }
+
+// Table implements Dataset.
+func (d *IACompilation) Table() string { return "fed_data.adv_firms" }
+
+// Phase implements Dataset.
+func (d *IACompilation) Phase() Phase { return Phase1B }
+
+// Cadence implements Dataset.
 func (d *IACompilation) Cadence() Cadence { return Daily }
 
+// ShouldRun implements Dataset.
 func (d *IACompilation) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return DailySchedule(now, lastSync)
 }
@@ -115,6 +123,7 @@ type iaItem5F struct {
 	NumAccounts int   `xml:"Q5F2F,attr"`
 }
 
+// Sync fetches and loads IARD daily compilation XML data.
 func (d *IACompilation) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "ia_compilation"))
 

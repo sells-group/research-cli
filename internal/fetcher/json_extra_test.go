@@ -14,7 +14,7 @@ func TestDecodeJSONArray_InvalidOpeningToken(t *testing.T) {
 	input := `"not an array"`
 	ch, errCh := DecodeJSONArray[testRecord](context.Background(), strings.NewReader(input))
 
-	for range ch {
+	for range ch { //nolint:revive // drain
 	}
 
 	var gotErr error
@@ -69,7 +69,7 @@ func TestDecodeJSONArray_ContextCancelDuringSend(t *testing.T) {
 	cancel()
 
 	// Drain
-	for range ch {
+	for range ch { //nolint:revive // drain
 	}
 	var gotErr error
 	for err := range errCh {
@@ -83,6 +83,7 @@ func TestDecodeJSONArray_ContextCancelDuringSend(t *testing.T) {
 }
 
 func TestDecodeJSONArray_ClosingTokenError(t *testing.T) {
+	t.Parallel()
 	// Truncated JSON array - missing closing bracket
 	// The JSON decoder may handle this differently, but we test the path
 	input := `[{"id":1,"name":"ok"}`
@@ -110,7 +111,7 @@ func TestDecodeJSONArray_MalformedOpeningJSON(t *testing.T) {
 	input := `{{{invalid`
 	ch, errCh := DecodeJSONArray[testRecord](context.Background(), strings.NewReader(input))
 
-	for range ch {
+	for range ch { //nolint:revive // drain
 	}
 
 	var gotErr error
@@ -127,7 +128,7 @@ func TestDecodeJSONArray_NumberOpeningToken(t *testing.T) {
 	input := `42`
 	ch, errCh := DecodeJSONArray[testRecord](context.Background(), strings.NewReader(input))
 
-	for range ch {
+	for range ch { //nolint:revive // drain
 	}
 
 	var gotErr error

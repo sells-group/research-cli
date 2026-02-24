@@ -28,7 +28,7 @@ func TestEscalateQuestions_AllAboveThreshold(t *testing.T) {
 
 func TestEscalateQuestions_SomeBelowThreshold(t *testing.T) {
 	answers := []model.ExtractionAnswer{
-		{QuestionID: "q1", FieldKey: "industry", Confidence: 0.2},           // Low conf + nil value → fails.
+		{QuestionID: "q1", FieldKey: "industry", Confidence: 0.2},               // Low conf + nil value → fails.
 		{QuestionID: "q2", FieldKey: "revenue", Confidence: 0.8, Value: "$10M"}, // High conf + value → succeeds.
 	}
 

@@ -51,7 +51,7 @@ Examples:
 
   # Real APIs, single company
   research-cli csvrun --csv companies.csv --limit 1 --output results.json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 
 		// Parse CSV.

@@ -32,28 +32,36 @@ type EDGARSubmissions struct {
 	cfg *config.Config
 }
 
-func (d *EDGARSubmissions) Name() string     { return "edgar_submissions" }
-func (d *EDGARSubmissions) Table() string    { return "fed_data.edgar_entities" }
-func (d *EDGARSubmissions) Phase() Phase     { return Phase1B }
+// Name implements Dataset.
+func (d *EDGARSubmissions) Name() string { return "edgar_submissions" }
+
+// Table implements Dataset.
+func (d *EDGARSubmissions) Table() string { return "fed_data.edgar_entities" }
+
+// Phase implements Dataset.
+func (d *EDGARSubmissions) Phase() Phase { return Phase1B }
+
+// Cadence implements Dataset.
 func (d *EDGARSubmissions) Cadence() Cadence { return Weekly }
 
+// ShouldRun implements Dataset.
 func (d *EDGARSubmissions) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return WeeklySchedule(now, lastSync)
 }
 
 // submissionJSON represents a single company submission JSON file from the bulk download.
 type submissionJSON struct {
-	CIK            string           `json:"cik"`
-	EntityType     string           `json:"entityType"`
-	SIC            string           `json:"sic"`
-	SICDescription string           `json:"sicDescription"`
-	Name           string           `json:"name"`
-	StateOfInc     string           `json:"stateOfIncorporation"`
-	Addresses      submissionAddrs  `json:"addresses"`
-	EIN            string           `json:"ein"`
-	Tickers        []string         `json:"tickers"`
-	Exchanges      []string         `json:"exchanges"`
-	RecentFilings  recentFilings    `json:"filings"`
+	CIK            string          `json:"cik"`
+	EntityType     string          `json:"entityType"`
+	SIC            string          `json:"sic"`
+	SICDescription string          `json:"sicDescription"`
+	Name           string          `json:"name"`
+	StateOfInc     string          `json:"stateOfIncorporation"`
+	Addresses      submissionAddrs `json:"addresses"`
+	EIN            string          `json:"ein"`
+	Tickers        []string        `json:"tickers"`
+	Exchanges      []string        `json:"exchanges"`
+	RecentFilings  recentFilings   `json:"filings"`
 }
 
 type submissionAddrs struct {
@@ -80,6 +88,7 @@ type filingList struct {
 	IsInlineXBRL    []int    `json:"isInlineXBRL"`
 }
 
+// Sync fetches and loads EDGAR bulk submissions data.
 func (d *EDGARSubmissions) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "edgar_submissions"))
 
@@ -121,7 +130,6 @@ func (d *EDGARSubmissions) Sync(ctx context.Context, pool db.Pool, f fetcher.Fet
 	g.SetLimit(5)
 
 	for _, fp := range files {
-		fp := fp
 		if !strings.HasSuffix(fp, ".json") {
 			continue
 		}

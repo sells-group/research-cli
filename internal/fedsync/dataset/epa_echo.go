@@ -18,15 +18,24 @@ const epaEchoURL = "https://ordsext.epa.gov/FLA/www3/state_files/national_single
 // EPAECHO syncs EPA ECHO facility data.
 type EPAECHO struct{}
 
-func (d *EPAECHO) Name() string     { return "epa_echo" }
-func (d *EPAECHO) Table() string    { return "fed_data.epa_facilities" }
-func (d *EPAECHO) Phase() Phase     { return Phase2 }
+// Name implements Dataset.
+func (d *EPAECHO) Name() string { return "epa_echo" }
+
+// Table implements Dataset.
+func (d *EPAECHO) Table() string { return "fed_data.epa_facilities" }
+
+// Phase implements Dataset.
+func (d *EPAECHO) Phase() Phase { return Phase2 }
+
+// Cadence implements Dataset.
 func (d *EPAECHO) Cadence() Cadence { return Monthly }
 
+// ShouldRun implements Dataset.
 func (d *EPAECHO) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }
 
+// Sync fetches and loads EPA ECHO facility data.
 func (d *EPAECHO) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("downloading EPA ECHO data")

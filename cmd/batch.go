@@ -1,3 +1,4 @@
+// Package main implements the research-cli command-line tool for account enrichment and federal data sync.
 package main
 
 import (
@@ -26,7 +27,7 @@ var batchLimit int
 var batchCmd = &cobra.Command{
 	Use:   "batch",
 	Short: "Batch enrich companies from Notion queue",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
@@ -76,7 +77,7 @@ var batchCmd = &cobra.Command{
 var retryFailedCmd = &cobra.Command{
 	Use:   "retry-failed",
 	Short: "Retry companies from the dead letter queue",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
@@ -311,7 +312,7 @@ func dlqBackoff(retryCount int) time.Duration {
 }
 
 // updateNotionFailed sets the Notion page status to "Failed" when enrichment errors out.
-func updateNotionFailed(ctx context.Context, client notion.Client, pageID string, enrichErr error) error {
+func updateNotionFailed(ctx context.Context, client notion.Client, pageID string, _ error) error {
 	now := notionapi.Date(time.Now())
 	_, err := client.UpdatePage(ctx, pageID, &notionapi.PageUpdateRequest{
 		Properties: notionapi.Properties{

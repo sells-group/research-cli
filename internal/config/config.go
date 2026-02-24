@@ -1,3 +1,4 @@
+// Package config loads and validates application configuration via viper.
 package config
 
 import (

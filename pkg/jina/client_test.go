@@ -51,7 +51,7 @@ func TestRead_Success(t *testing.T) {
 func TestRead_HTTPError(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		w.Write([]byte(`{"error":"rate limit exceeded"}`)) //nolint:errcheck
 	}))
@@ -67,7 +67,7 @@ func TestRead_HTTPError(t *testing.T) {
 func TestRead_ServerError(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`internal error`)) //nolint:errcheck
 	}))
@@ -83,7 +83,7 @@ func TestRead_ServerError(t *testing.T) {
 func TestRead_MalformedJSON(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{not json`)) //nolint:errcheck
 	}))
@@ -99,7 +99,7 @@ func TestRead_MalformedJSON(t *testing.T) {
 func TestRead_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// This handler should not be reached because context is cancelled
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -127,7 +127,7 @@ func TestRead_EmptyContent(t *testing.T) {
 		},
 	}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(want) //nolint:errcheck
 	}))
@@ -217,7 +217,7 @@ func TestSearch_WithSiteFilter(t *testing.T) {
 func TestSearch_HTTPError(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error":"rate limit"}`)) //nolint:errcheck
 	}))
@@ -233,7 +233,7 @@ func TestSearch_HTTPError(t *testing.T) {
 func TestSearch_MalformedJSON(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{not json`)) //nolint:errcheck
 	}))
@@ -262,7 +262,7 @@ func TestRead_RetryOn429(t *testing.T) {
 		Data: ReadData{Title: "Acme", URL: "https://acme.com", Content: "content"},
 	}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := attempts.Add(1)
 		if n <= 2 {
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -287,7 +287,7 @@ func TestRead_RetryExhausted(t *testing.T) {
 
 	var attempts atomic.Int32
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`service unavailable`)) //nolint:errcheck
@@ -311,7 +311,7 @@ func TestSearch_RetryOn500(t *testing.T) {
 		Data: []SearchResult{{Title: "Result", URL: "https://example.com"}},
 	}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := attempts.Add(1)
 		if n == 1 {
 			w.WriteHeader(http.StatusInternalServerError)

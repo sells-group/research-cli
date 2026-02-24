@@ -32,24 +32,24 @@ import (
 
 // Pipeline orchestrates phases 1-9 of the enrichment pipeline.
 type Pipeline struct {
-	cfg        *config.Config
-	store      store.Store
-	chain      *scrape.Chain
-	jina       jina.Client
-	firecrawl  firecrawl.Client
-	perplexity perplexity.Client
-	anthropic  anthropic.Client
-	salesforce salesforce.Client
-	notion     notion.Client
-	google     google.Client
-	ppp        ppp.Querier
-	costCalc       *cost.Calculator
-	estimator      *estimate.RevenueEstimator
-	waterfallExec  *waterfall.Executor
-	questions      []model.Question
-	fields         *model.FieldRegistry
-	breakers       *resilience.ServiceBreakers
-	retryCfg       resilience.RetryConfig
+	cfg           *config.Config
+	store         store.Store
+	chain         *scrape.Chain
+	jina          jina.Client
+	firecrawl     firecrawl.Client
+	perplexity    perplexity.Client
+	anthropic     anthropic.Client
+	salesforce    salesforce.Client
+	notion        notion.Client
+	google        google.Client
+	ppp           ppp.Querier
+	costCalc      *cost.Calculator
+	estimator     *estimate.RevenueEstimator
+	waterfallExec *waterfall.Executor
+	questions     []model.Question
+	fields        *model.FieldRegistry
+	breakers      *resilience.ServiceBreakers
+	retryCfg      resilience.RetryConfig
 }
 
 // New creates a new Pipeline with all dependencies.
@@ -95,17 +95,17 @@ func New(
 	)
 
 	return &Pipeline{
-		cfg:        cfg,
-		store:      st,
-		chain:      chain,
-		jina:       jinaClient,
-		firecrawl:  fcClient,
-		perplexity: pplxClient,
-		anthropic:  aiClient,
-		salesforce: sfClient,
-		notion:     notionClient,
-		google:     googleClient,
-		ppp:        pppClient,
+		cfg:           cfg,
+		store:         st,
+		chain:         chain,
+		jina:          jinaClient,
+		firecrawl:     fcClient,
+		perplexity:    pplxClient,
+		anthropic:     aiClient,
+		salesforce:    sfClient,
+		notion:        notionClient,
+		google:        googleClient,
+		ppp:           pppClient,
 		costCalc:      cost.NewCalculator(rates),
 		estimator:     estimator,
 		waterfallExec: waterfallExec,
@@ -179,7 +179,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 				)
 			}
 			err := cb.Execute(ctx, func(cbCtx context.Context) error {
-				return resilience.Do(cbCtx, retryCfg, func(retryCtx context.Context) error {
+				return resilience.Do(cbCtx, retryCfg, func(_ context.Context) error {
 					pr, fnErr := fn()
 					lastResult = pr
 					if fnErr != nil && resilience.IsTransient(fnErr) {
@@ -540,7 +540,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 				return &model.PhaseResult{
 					Status: model.PhaseStatusComplete,
 					Metadata: map[string]any{
-						"answers":        len(checkpointT1),
+						"answers":         len(checkpointT1),
 						"from_checkpoint": true,
 					},
 				}, nil
@@ -763,10 +763,10 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		populateOwnerFromContacts(fieldValues, p.fields)
 		return &model.PhaseResult{
 			Metadata: map[string]any{
-				"total_answers":         len(allAnswers),
-				"field_values":          len(fieldValues),
-				"reused_from_existing":  len(existingAnswers),
-				"skipped_by_existing":   skippedByExisting,
+				"total_answers":        len(allAnswers),
+				"field_values":         len(fieldValues),
+				"reused_from_existing": len(existingAnswers),
+				"skipped_by_existing":  skippedByExisting,
 			},
 		}, nil
 	})
@@ -789,9 +789,9 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 					Cost: wr.TotalPremiumUSD,
 				},
 				Metadata: map[string]any{
-					"fields_resolved":   wr.FieldsResolved,
-					"fields_total":      wr.FieldsTotal,
-					"premium_cost_usd":  wr.TotalPremiumUSD,
+					"fields_resolved":  wr.FieldsResolved,
+					"fields_total":     wr.FieldsTotal,
+					"premium_cost_usd": wr.TotalPremiumUSD,
 				},
 			}, nil
 		})

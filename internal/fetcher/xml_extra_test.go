@@ -11,6 +11,7 @@ import (
 )
 
 func TestStreamXML_MalformedXML(t *testing.T) {
+	t.Parallel()
 	// XML with invalid content that triggers a token read error
 	input := `<root><item><name>ok</name></item><item><name>bad&invalid;</name></item></root>`
 	ch, errCh := StreamXML[testItem](context.Background(), strings.NewReader(input), "item")
@@ -78,7 +79,7 @@ func TestStreamXML_ContextCancelDuringSend(t *testing.T) {
 	cancel()
 
 	// Drain
-	for range ch {
+	for range ch { //nolint:revive // drain
 	}
 	var gotErr error
 	for err := range errCh {
@@ -96,7 +97,7 @@ func TestStreamXML_InvalidXMLSyntax(t *testing.T) {
 	input := `<root><item><unclosed`
 	ch, errCh := StreamXML[testItem](context.Background(), strings.NewReader(input), "item")
 
-	for range ch {
+	for range ch { //nolint:revive // drain
 	}
 
 	var gotErr error
@@ -116,7 +117,7 @@ func TestStreamXML_BrokenTokenOnly(t *testing.T) {
 	input := "\x00"
 	ch, errCh := StreamXML[testItem](context.Background(), strings.NewReader(input), "item")
 
-	for range ch {
+	for range ch { //nolint:revive // drain
 	}
 
 	var gotErr error
@@ -137,7 +138,7 @@ func TestStreamXML_ContextAlreadyCancelled(t *testing.T) {
 	input := `<root><item><name>a</name><value>1</value></item></root>`
 	ch, errCh := StreamXML[testItem](ctx, strings.NewReader(input), "item")
 
-	for range ch {
+	for range ch { //nolint:revive // drain
 	}
 	var gotErr error
 	for err := range errCh {

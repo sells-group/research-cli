@@ -18,15 +18,24 @@ const brokerCheckURL = "https://files.brokercheck.finra.org/firm/firm.zip"
 // BrokerCheck syncs FINRA BrokerCheck firm data (pipe-delimited).
 type BrokerCheck struct{}
 
-func (d *BrokerCheck) Name() string     { return "brokercheck" }
-func (d *BrokerCheck) Table() string    { return "fed_data.brokercheck" }
-func (d *BrokerCheck) Phase() Phase     { return Phase2 }
+// Name implements Dataset.
+func (d *BrokerCheck) Name() string { return "brokercheck" }
+
+// Table implements Dataset.
+func (d *BrokerCheck) Table() string { return "fed_data.brokercheck" }
+
+// Phase implements Dataset.
+func (d *BrokerCheck) Phase() Phase { return Phase2 }
+
+// Cadence implements Dataset.
 func (d *BrokerCheck) Cadence() Cadence { return Monthly }
 
+// ShouldRun implements Dataset.
 func (d *BrokerCheck) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }
 
+// Sync fetches and loads FINRA BrokerCheck firm data.
 func (d *BrokerCheck) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("downloading BrokerCheck data")

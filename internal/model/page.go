@@ -5,6 +5,7 @@ import "time"
 // PageType represents a classified page category.
 type PageType string
 
+// PageTypeHomepage and following constants enumerate the classified page categories.
 const (
 	PageTypeHomepage     PageType = "homepage"
 	PageTypeAbout        PageType = "about"
@@ -24,7 +25,8 @@ const (
 	PageTypeInvestors    PageType = "investors"
 	PageTypeOther        PageType = "other"
 
-	// External source page types (auto-classified by title prefix).
+	// PageTypeBBB and following constants represent external source page types
+	// (auto-classified by title prefix).
 	PageTypeBBB        PageType = "bbb_profile"
 	PageTypeGoogleMaps PageType = "google_maps"
 	PageTypeSoS        PageType = "government_registry"
@@ -114,11 +116,11 @@ type PageIndex map[PageType][]ClassifiedPage
 
 // CrawlCache stores a cached crawl result.
 type CrawlCache struct {
-	ID         string       `json:"id"`
-	CompanyURL string       `json:"company_url"`
+	ID         string        `json:"id"`
+	CompanyURL string        `json:"company_url"`
 	Pages      []CrawledPage `json:"pages"`
-	CrawledAt  time.Time    `json:"crawled_at"`
-	ExpiresAt  time.Time    `json:"expires_at"`
+	CrawledAt  time.Time     `json:"crawled_at"`
+	ExpiresAt  time.Time     `json:"expires_at"`
 }
 
 // CrawlResult holds the outcome of a crawl phase.

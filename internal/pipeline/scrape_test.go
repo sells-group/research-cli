@@ -44,7 +44,7 @@ func TestScrapePhase_SearchThenScrape(t *testing.T) {
 	s.On("Name").Return("mock").Maybe()
 	s.On("Supports", mock.Anything).Return(true).Maybe()
 	s.On("Scrape", mock.Anything, mock.Anything).Return(
-		func(ctx context.Context, u string) *scrape.Result {
+		func(_ context.Context, u string) *scrape.Result {
 			return &scrape.Result{
 				Page: model.CrawledPage{
 					URL:      u,
@@ -54,7 +54,7 @@ func TestScrapePhase_SearchThenScrape(t *testing.T) {
 				Source: "mock",
 			}
 		},
-		func(ctx context.Context, u string) error {
+		func(_ context.Context, _ string) error {
 			return nil
 		},
 	).Maybe()
@@ -144,7 +144,7 @@ func TestScrapePhase_PartialFailure(t *testing.T) {
 	s.On("Name").Return("mock").Maybe()
 	s.On("Supports", mock.Anything).Return(true).Maybe()
 	s.On("Scrape", mock.Anything, mock.Anything).Return(
-		func(ctx context.Context, u string) *scrape.Result {
+		func(_ context.Context, u string) *scrape.Result {
 			n := callCount.Add(1)
 			if n == 1 {
 				return &scrape.Result{
@@ -158,7 +158,7 @@ func TestScrapePhase_PartialFailure(t *testing.T) {
 			}
 			return nil
 		},
-		func(ctx context.Context, u string) error {
+		func(_ context.Context, _ string) error {
 			n := callCount.Load()
 			if n == 1 {
 				return nil
@@ -228,7 +228,7 @@ func TestScrapeSource_RetryOnFailure(t *testing.T) {
 	jinaClient := jinamocks.NewMockClient(t)
 	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string"), mock.Anything).
 		Return(
-			func(ctx context.Context, query string, opts ...jina.SearchOption) *jina.SearchResponse {
+			func(_ context.Context, _ string, _ ...jina.SearchOption) *jina.SearchResponse {
 				n := callCount.Add(1)
 				if n == 1 {
 					return nil
@@ -240,7 +240,7 @@ func TestScrapeSource_RetryOnFailure(t *testing.T) {
 					},
 				}
 			},
-			func(ctx context.Context, query string, opts ...jina.SearchOption) error {
+			func(_ context.Context, _ string, _ ...jina.SearchOption) error {
 				if callCount.Load() == 1 {
 					return errors.New("temporary failure")
 				}
@@ -322,7 +322,7 @@ func TestScrapeSource_NoDuplicatePrefix(t *testing.T) {
 
 	src := ExternalSource{
 		Name: "google_maps",
-		URLFunc: func(c model.Company) string {
+		URLFunc: func(_ model.Company) string {
 			return "https://www.google.com/maps/search/Acme+Corp"
 		},
 	}
@@ -652,7 +652,7 @@ func TestScrapeSource_GoogleMaps_FallbackOnScrapeFailure(t *testing.T) {
 
 	src := ExternalSource{
 		Name: "google_maps",
-		URLFunc: func(c model.Company) string {
+		URLFunc: func(_ model.Company) string {
 			return "https://www.google.com/maps/search/Acme+Corp"
 		},
 	}

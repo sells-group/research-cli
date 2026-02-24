@@ -185,11 +185,11 @@ func TestCleanExternalMarkdown_UnknownSource(t *testing.T) {
 
 func TestParseReviewMetadata_GoogleMaps(t *testing.T) {
 	tests := []struct {
-		name        string
-		md          string
-		wantRating  float64
-		wantCount   int
-		wantNil     bool
+		name       string
+		md         string
+		wantRating float64
+		wantCount  int
+		wantNil    bool
 	}{
 		{
 			name:       "stars parenthesized reviews",

@@ -17,15 +17,24 @@ const oshaURL = "https://www.osha.gov/severeinjury/xml/severeinjury.zip"
 // OSHITA syncs OSHA ITA (Injury Tracking Application) inspection data.
 type OSHITA struct{}
 
-func (d *OSHITA) Name() string     { return "osha_ita" }
-func (d *OSHITA) Table() string    { return "fed_data.osha_inspections" }
-func (d *OSHITA) Phase() Phase     { return Phase2 }
+// Name implements Dataset.
+func (d *OSHITA) Name() string { return "osha_ita" }
+
+// Table implements Dataset.
+func (d *OSHITA) Table() string { return "fed_data.osha_inspections" }
+
+// Phase implements Dataset.
+func (d *OSHITA) Phase() Phase { return Phase2 }
+
+// Cadence implements Dataset.
 func (d *OSHITA) Cadence() Cadence { return Annual }
 
+// ShouldRun implements Dataset.
 func (d *OSHITA) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return AnnualAfter(now, lastSync, time.March)
 }
 
+// Sync fetches and loads OSHA ITA inspection data.
 func (d *OSHITA) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("downloading OSHA ITA data")

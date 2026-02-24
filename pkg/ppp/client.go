@@ -1,3 +1,4 @@
+// Package ppp provides a client for querying PPP loan data.
 package ppp
 
 import (

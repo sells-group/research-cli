@@ -24,7 +24,7 @@ type FieldResolution struct {
 }
 
 // WaterfallResult is the overall output of running the waterfall for a company.
-type WaterfallResult struct {
+type WaterfallResult struct { //nolint:revive // stutters but widely used across codebase
 	Resolutions     map[string]FieldResolution `json:"resolutions"`
 	TotalPremiumUSD float64                    `json:"total_premium_usd"`
 	FieldsResolved  int                        `json:"fields_resolved"`

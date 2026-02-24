@@ -19,6 +19,7 @@ func NewFirecrawlAdapter(client firecrawl.Client) *FirecrawlAdapter {
 	return &FirecrawlAdapter{client: client}
 }
 
+// Name implements Scraper.
 func (f *FirecrawlAdapter) Name() string { return "firecrawl" }
 
 // Supports returns true — Firecrawl can attempt any URL as a fallback.

@@ -27,7 +27,7 @@ By default, syncs all datasets whose ShouldRun() returns true.
 Use --phase to restrict to a specific phase, or --datasets for specific datasets.
 Use --force to ignore ShouldRun() scheduling logic.
 Use --full to perform a full reload instead of incremental sync.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 

@@ -1,3 +1,4 @@
+// Package notion wraps the Notion API for database queries and page management.
 package notion
 
 import (

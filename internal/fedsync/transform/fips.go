@@ -1,3 +1,4 @@
+// Package transform normalizes NAICS, FIPS, and SIC codes for federal datasets.
 package transform
 
 import (

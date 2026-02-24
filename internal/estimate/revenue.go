@@ -1,3 +1,4 @@
+// Package estimate provides revenue estimation logic from multiple data sources.
 package estimate
 
 import (
@@ -15,11 +16,11 @@ import (
 
 // RevenueEstimate holds the result of a revenue estimation from CBP data.
 type RevenueEstimate struct {
-	Amount     int64   `json:"amount"`      // estimated annual revenue in dollars
-	Confidence float64 `json:"confidence"`  // 0.0-1.0
-	Method     string  `json:"method"`      // "cbp_payroll_ratio"
-	NAICSUsed  string  `json:"naics_used"`  // NAICS code used for lookup
-	Year       int     `json:"year"`        // data year
+	Amount     int64   `json:"amount"`     // estimated annual revenue in dollars
+	Confidence float64 `json:"confidence"` // 0.0-1.0
+	Method     string  `json:"method"`     // "cbp_payroll_ratio"
+	NAICSUsed  string  `json:"naics_used"` // NAICS code used for lookup
+	Year       int     `json:"year"`       // data year
 }
 
 // RevenueEstimator estimates company revenue using CBP payroll-per-employee

@@ -46,7 +46,7 @@ func TestTextSearch_Success(t *testing.T) {
 }
 
 func TestTextSearch_NoResults(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(TextSearchResponse{Places: nil})
 	}))
@@ -60,7 +60,7 @@ func TestTextSearch_NoResults(t *testing.T) {
 }
 
 func TestTextSearch_APIError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"error": "invalid API key"}`)) //nolint:errcheck
 	}))
@@ -75,7 +75,7 @@ func TestTextSearch_APIError(t *testing.T) {
 }
 
 func TestTextSearch_ContextCanceled(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		// Simulate slow response — context should cancel first.
 		<-r.Context().Done()
 	}))

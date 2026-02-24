@@ -10,6 +10,7 @@ import (
 // BlockType describes the kind of block detected.
 type BlockType string
 
+// BlockNone and following constants classify detected anti-bot protections.
 const (
 	BlockNone       BlockType = ""
 	BlockCloudflare BlockType = "cloudflare"

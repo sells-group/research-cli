@@ -1,3 +1,4 @@
+// Package cost tracks and calculates API usage costs across providers.
 package cost
 
 // Rates holds per-provider pricing configuration.
@@ -79,8 +80,8 @@ func RatesFromConfig(cfg PricingConfig) Rates {
 	defaults := DefaultRates()
 
 	rates := Rates{
-		Anthropic: make(map[string]ModelRate),
-		Jina:      defaults.Jina,
+		Anthropic:  make(map[string]ModelRate),
+		Jina:       defaults.Jina,
 		Perplexity: defaults.Perplexity,
 		Firecrawl:  defaults.Firecrawl,
 	}

@@ -129,7 +129,7 @@ func TestQueryAll_PrefetchTiming(t *testing.T) {
 		Results:    []notionapi.Page{{ID: "p1"}},
 		HasMore:    true,
 		NextCursor: notionapi.Cursor("cursor-1"),
-	}, nil).Run(func(args mock.Arguments) {
+	}, nil).Run(func(_ mock.Arguments) {
 		callCount.Add(1)
 		time.Sleep(20 * time.Millisecond) // Simulate API latency
 	}).Once()
@@ -141,7 +141,7 @@ func TestQueryAll_PrefetchTiming(t *testing.T) {
 		Results:    []notionapi.Page{{ID: "p2"}},
 		HasMore:    true,
 		NextCursor: notionapi.Cursor("cursor-2"),
-	}, nil).Run(func(args mock.Arguments) {
+	}, nil).Run(func(_ mock.Arguments) {
 		callCount.Add(1)
 		time.Sleep(20 * time.Millisecond)
 	}).Once()
@@ -152,7 +152,7 @@ func TestQueryAll_PrefetchTiming(t *testing.T) {
 	})).Return(&notionapi.DatabaseQueryResponse{
 		Results: []notionapi.Page{{ID: "p3"}},
 		HasMore: false,
-	}, nil).Run(func(args mock.Arguments) {
+	}, nil).Run(func(_ mock.Arguments) {
 		callCount.Add(1)
 		time.Sleep(20 * time.Millisecond)
 	}).Once()

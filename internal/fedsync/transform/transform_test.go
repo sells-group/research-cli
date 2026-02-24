@@ -11,13 +11,13 @@ func TestIsRelevantNAICS(t *testing.T) {
 		code     string
 		relevant bool
 	}{
-		{"523110", true},  // Finance
-		{"541110", true},  // Professional services
-		{"311111", true},  // Food manufacturing
-		{"236115", true},  // Construction
-		{"", true},        // Empty = include
-		{"-", true},       // Dash = include
-		{"52", true},      // Sector-level
+		{"523110", true}, // Finance
+		{"541110", true}, // Professional services
+		{"311111", true}, // Food manufacturing
+		{"236115", true}, // Construction
+		{"", true},       // Empty = include
+		{"-", true},      // Dash = include
+		{"52", true},     // Sector-level
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.relevant, IsRelevantNAICS(tt.code), "code: %q", tt.code)

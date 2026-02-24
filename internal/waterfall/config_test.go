@@ -53,7 +53,7 @@ waterfall:
 
 	// employee_count should have inherited defaults.
 	ec := cfg.Fields["employee_count"]
-	assert.Equal(t, 0.7, ec.ConfidenceThreshold) // inherited
+	assert.Equal(t, 0.7, ec.ConfidenceThreshold)    // inherited
 	assert.Equal(t, 365, ec.TimeDecay.HalfLifeDays) // inherited
 }
 
@@ -66,12 +66,12 @@ func TestGetFieldConfig_Known(t *testing.T) {
 	cfg := &Config{
 		Defaults: DefaultConfig{
 			ConfidenceThreshold: 0.7,
-			TimeDecay: DecayConfig{HalfLifeDays: 365, Floor: 0.2},
+			TimeDecay:           DecayConfig{HalfLifeDays: 365, Floor: 0.2},
 		},
 		Fields: map[string]FieldConfig{
 			"phone": {
 				ConfidenceThreshold: 0.8,
-				TimeDecay: &DecayConfig{HalfLifeDays: 180, Floor: 0.15},
+				TimeDecay:           &DecayConfig{HalfLifeDays: 180, Floor: 0.15},
 			},
 		},
 	}
@@ -207,7 +207,7 @@ func TestGetFieldConfig_Unknown(t *testing.T) {
 	cfg := &Config{
 		Defaults: DefaultConfig{
 			ConfidenceThreshold: 0.7,
-			TimeDecay: DecayConfig{HalfLifeDays: 365, Floor: 0.2},
+			TimeDecay:           DecayConfig{HalfLifeDays: 365, Floor: 0.2},
 		},
 		Fields: map[string]FieldConfig{},
 	}

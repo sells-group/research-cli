@@ -54,5 +54,6 @@ func TestFormD_ShouldRun_LastWeek(t *testing.T) {
 }
 
 func TestFormD_ImplementsDataset(t *testing.T) {
+	t.Parallel()
 	var _ Dataset = &FormD{}
 }

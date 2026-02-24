@@ -339,7 +339,7 @@ func updateNotionStatus(ctx context.Context, client notion.Client, pageID, statu
 
 // extractContactsForSF builds up to 3 SF Contact field maps from the contacts
 // FieldValue. Returns nil if no contacts field is found or it's empty.
-func extractContactsForSF(fieldValues map[string]model.FieldValue, registry *model.FieldRegistry) []map[string]any {
+func extractContactsForSF(fieldValues map[string]model.FieldValue, _ *model.FieldRegistry) []map[string]any {
 	fv, ok := fieldValues["contacts"]
 	if !ok {
 		return nil

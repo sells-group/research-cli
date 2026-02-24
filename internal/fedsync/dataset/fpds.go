@@ -28,16 +28,25 @@ type FPDS struct {
 	cfg *config.Config
 }
 
-func (d *FPDS) Name() string     { return "fpds" }
-func (d *FPDS) Table() string    { return "fed_data.fpds_contracts" }
-func (d *FPDS) Phase() Phase     { return Phase1 }
+// Name implements Dataset.
+func (d *FPDS) Name() string { return "fpds" }
+
+// Table implements Dataset.
+func (d *FPDS) Table() string { return "fed_data.fpds_contracts" }
+
+// Phase implements Dataset.
+func (d *FPDS) Phase() Phase { return Phase1 }
+
+// Cadence implements Dataset.
 func (d *FPDS) Cadence() Cadence { return Daily }
 
+// ShouldRun implements Dataset.
 func (d *FPDS) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return DailySchedule(now, lastSync)
 }
 
-func (d *FPDS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+// Sync fetches and loads SAM.gov FPDS contract data.
+func (d *FPDS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _ string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "fpds"))
 
 	apiKey := ""

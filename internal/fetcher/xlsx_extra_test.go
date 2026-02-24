@@ -52,7 +52,7 @@ func TestStreamXLSX_InvalidFile(t *testing.T) {
 
 	rowCh, errCh := StreamXLSX(context.Background(), path, XLSXOptions{})
 
-	for range rowCh {
+	for range rowCh { //nolint:revive // drain
 	}
 
 	var gotErr error
@@ -72,7 +72,7 @@ func TestStreamXLSX_SheetNotFound(t *testing.T) {
 
 	rowCh, errCh := StreamXLSX(context.Background(), path, XLSXOptions{SheetName: "Missing"})
 
-	for range rowCh {
+	for range rowCh { //nolint:revive // drain
 	}
 
 	var gotErr error
@@ -92,7 +92,7 @@ func TestStreamXLSX_SheetIndexOutOfRange(t *testing.T) {
 
 	rowCh, errCh := StreamXLSX(context.Background(), path, XLSXOptions{SheetIndex: 10})
 
-	for range rowCh {
+	for range rowCh { //nolint:revive // drain
 	}
 
 	var gotErr error
@@ -127,7 +127,7 @@ func TestStreamXLSX_HeaderSendContextCancelled(t *testing.T) {
 	cancel()
 
 	// Drain
-	for range rowCh {
+	for range rowCh { //nolint:revive // drain
 	}
 	var gotErr error
 	for err := range errCh {
@@ -156,7 +156,7 @@ func TestStreamXLSX_RowSendContextCancelled(t *testing.T) {
 	cancel()
 
 	// Drain
-	for range rowCh {
+	for range rowCh { //nolint:revive // drain
 	}
 	var gotErr error
 	for err := range errCh {

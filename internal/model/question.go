@@ -28,23 +28,23 @@ type SkippedQuestion struct {
 
 // RoutedBatches groups routed questions by tier.
 type RoutedBatches struct {
-	Tier1    []RoutedQuestion  `json:"tier1"`
-	Tier2    []RoutedQuestion  `json:"tier2"`
-	Tier3    []RoutedQuestion  `json:"tier3"`
-	Skipped  []SkippedQuestion `json:"skipped"`
+	Tier1   []RoutedQuestion  `json:"tier1"`
+	Tier2   []RoutedQuestion  `json:"tier2"`
+	Tier3   []RoutedQuestion  `json:"tier3"`
+	Skipped []SkippedQuestion `json:"skipped"`
 }
 
 // ExtractionAnswer holds the result of extracting an answer for a question.
 type ExtractionAnswer struct {
-	QuestionID    string        `json:"question_id"`
-	FieldKey      string        `json:"field_key"`
-	Value         any           `json:"value"`
-	Confidence    float64       `json:"confidence"`
-	Source        string        `json:"source"`
-	SourceURL     string        `json:"source_url"`
-	Tier          int           `json:"tier"`
-	Reasoning     string        `json:"reasoning"`
-	DataAsOf      *time.Time    `json:"data_as_of,omitempty"`
+	QuestionID    string         `json:"question_id"`
+	FieldKey      string         `json:"field_key"`
+	Value         any            `json:"value"`
+	Confidence    float64        `json:"confidence"`
+	Source        string         `json:"source"`
+	SourceURL     string         `json:"source_url"`
+	Tier          int            `json:"tier"`
+	Reasoning     string         `json:"reasoning"`
+	DataAsOf      *time.Time     `json:"data_as_of,omitempty"`
 	Contradiction *Contradiction `json:"contradiction,omitempty"`
 }
 
@@ -66,11 +66,11 @@ type TierResult struct {
 
 // TokenUsage tracks token consumption.
 type TokenUsage struct {
-	InputTokens       int     `json:"input_tokens"`
-	OutputTokens      int     `json:"output_tokens"`
-	CacheCreationTokens int   `json:"cache_creation_tokens"`
-	CacheReadTokens   int     `json:"cache_read_tokens"`
-	Cost              float64 `json:"cost"`
+	InputTokens         int     `json:"input_tokens"`
+	OutputTokens        int     `json:"output_tokens"`
+	CacheCreationTokens int     `json:"cache_creation_tokens"`
+	CacheReadTokens     int     `json:"cache_read_tokens"`
+	Cost                float64 `json:"cost"`
 }
 
 // Add merges token usage from another instance.

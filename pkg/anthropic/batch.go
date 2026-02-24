@@ -1,3 +1,4 @@
+// Package anthropic wraps the Anthropic SDK for Messages, Batch, and cache primer operations.
 package anthropic
 
 import (

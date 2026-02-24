@@ -10,19 +10,19 @@ import (
 
 // Account represents a Salesforce Account record.
 type Account struct {
-	ID                 string `json:"Id" salesforce:"Id"`
-	Name               string `json:"Name" salesforce:"Name"`
-	Website            string `json:"Website" salesforce:"Website"`
-	Industry           string `json:"Industry" salesforce:"Industry"`
-	Description        string `json:"Description" salesforce:"Description"`
-	BillingCity        string `json:"BillingCity" salesforce:"BillingCity"`
-	BillingState       string `json:"BillingState" salesforce:"BillingState"`
-	BillingCountry     string `json:"BillingCountry" salesforce:"BillingCountry"`
-	BillingPostalCode  string `json:"BillingPostalCode" salesforce:"BillingPostalCode"`
-	Phone              string `json:"Phone" salesforce:"Phone"`
-	NumberOfEmployees  int    `json:"NumberOfEmployees" salesforce:"NumberOfEmployees"`
-	AnnualRevenue      float64 `json:"AnnualRevenue" salesforce:"AnnualRevenue"`
-	Type               string `json:"Type" salesforce:"Type"`
+	ID                string  `json:"Id" salesforce:"Id"`
+	Name              string  `json:"Name" salesforce:"Name"`
+	Website           string  `json:"Website" salesforce:"Website"`
+	Industry          string  `json:"Industry" salesforce:"Industry"`
+	Description       string  `json:"Description" salesforce:"Description"`
+	BillingCity       string  `json:"BillingCity" salesforce:"BillingCity"`
+	BillingState      string  `json:"BillingState" salesforce:"BillingState"`
+	BillingCountry    string  `json:"BillingCountry" salesforce:"BillingCountry"`
+	BillingPostalCode string  `json:"BillingPostalCode" salesforce:"BillingPostalCode"`
+	Phone             string  `json:"Phone" salesforce:"Phone"`
+	NumberOfEmployees int     `json:"NumberOfEmployees" salesforce:"NumberOfEmployees"`
+	AnnualRevenue     float64 `json:"AnnualRevenue" salesforce:"AnnualRevenue"`
+	Type              string  `json:"Type" salesforce:"Type"`
 }
 
 // accountFields are the SOQL fields selected for Account queries.

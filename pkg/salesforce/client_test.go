@@ -57,6 +57,7 @@ func (m *mockClient) DescribeSObject(ctx context.Context, name string) (*SObject
 }
 
 func TestMockClientImplementsInterface(t *testing.T) {
+	t.Parallel()
 	var _ Client = (*mockClient)(nil)
 }
 

@@ -47,7 +47,7 @@ func TestCrawl(t *testing.T) {
 		},
 		{
 			name: "auth error",
-			handler: func(w http.ResponseWriter, r *http.Request) {
+			handler: func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusUnauthorized)
 				w.Write([]byte(`{"error":"Unauthorized"}`)) //nolint:errcheck
 			},
@@ -57,7 +57,7 @@ func TestCrawl(t *testing.T) {
 		},
 		{
 			name: "server error",
-			handler: func(w http.ResponseWriter, r *http.Request) {
+			handler: func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusInternalServerError)
 				w.Write([]byte(`{"error":"internal server error"}`)) //nolint:errcheck
 			},
@@ -117,7 +117,7 @@ func TestGetCrawlStatus(t *testing.T) {
 		},
 		{
 			name: "still scraping",
-			handler: func(w http.ResponseWriter, r *http.Request) {
+			handler: func(w http.ResponseWriter, _ *http.Request) {
 				json.NewEncoder(w).Encode(CrawlStatusResponse{ //nolint:errcheck
 					Status: "scraping",
 					Total:  5,
@@ -177,7 +177,7 @@ func TestScrape(t *testing.T) {
 		},
 		{
 			name: "rate limited",
-			handler: func(w http.ResponseWriter, r *http.Request) {
+			handler: func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusTooManyRequests)
 				w.Write([]byte(`{"error":"rate limited"}`)) //nolint:errcheck
 			},
@@ -253,7 +253,7 @@ func TestGetBatchScrapeStatus(t *testing.T) {
 }
 
 func TestContextCancellation(t *testing.T) {
-	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, c := newTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
 		// Should never reach here
 		t.Fatal("request should have been cancelled")
 	})
@@ -280,7 +280,7 @@ func TestWithHTTPClient(t *testing.T) {
 }
 
 func TestMalformedJSON(t *testing.T) {
-	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, c := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{not json`)) //nolint:errcheck
 	})
@@ -291,7 +291,7 @@ func TestMalformedJSON(t *testing.T) {
 }
 
 func TestGetCrawlStatus_Error(t *testing.T) {
-	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, c := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":"not found"}`)) //nolint:errcheck
 	})
@@ -304,7 +304,7 @@ func TestGetCrawlStatus_Error(t *testing.T) {
 }
 
 func TestGetBatchScrapeStatus_Error(t *testing.T) {
-	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, c := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":"not found"}`))
 	})
@@ -317,7 +317,7 @@ func TestGetBatchScrapeStatus_Error(t *testing.T) {
 }
 
 func TestBatchScrape_Error(t *testing.T) {
-	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, c := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error":"rate limited"}`))
 	})
