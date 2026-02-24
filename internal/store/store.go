@@ -64,6 +64,11 @@ type Store interface {
 	RemoveDLQ(ctx context.Context, id string) error
 	CountDLQ(ctx context.Context) (int, error)
 
+	// Provenance
+	SaveProvenance(ctx context.Context, records []model.FieldProvenance) error
+	GetProvenance(ctx context.Context, runID string) ([]model.FieldProvenance, error)
+	GetLatestProvenance(ctx context.Context, companyURL string) ([]model.FieldProvenance, error)
+
 	// Lifecycle
 	Ping(ctx context.Context) error
 	Migrate(ctx context.Context) error

@@ -84,9 +84,16 @@ func (m *mockStore) DequeueDLQ(context.Context, resilience.DLQFilter) ([]resilie
 }
 func (m *mockStore) IncrementDLQRetry(context.Context, string, time.Time, string) error { return nil }
 func (m *mockStore) RemoveDLQ(context.Context, string) error                            { return nil }
-func (m *mockStore) Ping(context.Context) error                                         { return nil }
-func (m *mockStore) Migrate(context.Context) error                                      { return nil }
-func (m *mockStore) Close() error                                                       { return nil }
+func (m *mockStore) SaveProvenance(context.Context, []model.FieldProvenance) error      { return nil }
+func (m *mockStore) GetProvenance(context.Context, string) ([]model.FieldProvenance, error) {
+	return nil, nil
+}
+func (m *mockStore) GetLatestProvenance(context.Context, string) ([]model.FieldProvenance, error) {
+	return nil, nil
+}
+func (m *mockStore) Ping(context.Context) error    { return nil }
+func (m *mockStore) Migrate(context.Context) error { return nil }
+func (m *mockStore) Close() error                  { return nil }
 
 // mockSyncLog implements SyncLogQuerier for testing.
 type mockSyncLog struct {

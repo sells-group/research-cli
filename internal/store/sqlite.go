@@ -123,6 +123,29 @@ CREATE TABLE IF NOT EXISTS dead_letter_queue (
 
 CREATE INDEX IF NOT EXISTS idx_dlq_error_type ON dead_letter_queue(error_type);
 CREATE INDEX IF NOT EXISTS idx_dlq_next_retry ON dead_letter_queue(next_retry_at);
+
+CREATE TABLE IF NOT EXISTS field_provenance (
+	id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+	run_id               TEXT NOT NULL REFERENCES runs(id),
+	company_url          TEXT NOT NULL,
+	field_key            TEXT NOT NULL,
+	winner_source        TEXT,
+	winner_value         TEXT,
+	raw_confidence       REAL,
+	effective_confidence REAL,
+	data_as_of           DATETIME,
+	threshold            REAL,
+	threshold_met        INTEGER NOT NULL DEFAULT 0,
+	attempts             TEXT,
+	premium_cost_usd     REAL DEFAULT 0,
+	previous_value       TEXT,
+	previous_run_id      TEXT,
+	value_changed        INTEGER DEFAULT 0,
+	created_at           DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_field_provenance_run ON field_provenance(run_id);
+CREATE INDEX IF NOT EXISTS idx_field_provenance_company ON field_provenance(company_url, field_key);
 `
 
 // Ping implements Store.
@@ -682,4 +705,133 @@ func (s *SQLiteStore) CountDLQ(ctx context.Context) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dead_letter_queue`).Scan(&count)
 	return count, eris.Wrap(err, "sqlite: count dlq")
+}
+
+// SaveProvenance implements Store.
+func (s *SQLiteStore) SaveProvenance(ctx context.Context, records []model.FieldProvenance) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return eris.Wrap(err, "sqlite: begin provenance tx")
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO field_provenance
+		 (run_id, company_url, field_key, winner_source, winner_value,
+		  raw_confidence, effective_confidence, data_as_of, threshold, threshold_met,
+		  attempts, premium_cost_usd, previous_value, previous_run_id, value_changed, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return eris.Wrap(err, "sqlite: prepare provenance insert")
+	}
+	defer stmt.Close() //nolint:errcheck
+
+	now := time.Now().UTC()
+	for _, r := range records {
+		attemptsJSON, marshalErr := json.Marshal(r.Attempts)
+		if marshalErr != nil {
+			return eris.Wrap(marshalErr, "sqlite: marshal provenance attempts")
+		}
+
+		var thresholdMet int
+		if r.ThresholdMet {
+			thresholdMet = 1
+		}
+		var valueChanged int
+		if r.ValueChanged {
+			valueChanged = 1
+		}
+
+		_, err = stmt.ExecContext(ctx,
+			r.RunID, r.CompanyURL, r.FieldKey, r.WinnerSource, r.WinnerValue,
+			r.RawConfidence, r.EffectiveConfidence, r.DataAsOf, r.Threshold, thresholdMet,
+			string(attemptsJSON), r.PremiumCostUSD, r.PreviousValue, r.PreviousRunID, valueChanged, now,
+		)
+		if err != nil {
+			return eris.Wrapf(err, "sqlite: insert provenance for field %s", r.FieldKey)
+		}
+	}
+
+	return eris.Wrap(tx.Commit(), "sqlite: commit provenance tx")
+}
+
+// GetProvenance implements Store.
+func (s *SQLiteStore) GetProvenance(ctx context.Context, runID string) ([]model.FieldProvenance, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, run_id, company_url, field_key, winner_source, winner_value,
+		        raw_confidence, effective_confidence, data_as_of, threshold, threshold_met,
+		        attempts, premium_cost_usd, previous_value, previous_run_id, value_changed, created_at
+		 FROM field_provenance WHERE run_id = ?
+		 ORDER BY field_key`, runID)
+	if err != nil {
+		return nil, eris.Wrap(err, "sqlite: get provenance")
+	}
+	defer rows.Close() //nolint:errcheck
+
+	return scanProvenanceRows(rows)
+}
+
+// GetLatestProvenance implements Store.
+func (s *SQLiteStore) GetLatestProvenance(ctx context.Context, companyURL string) ([]model.FieldProvenance, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, run_id, company_url, field_key, winner_source, winner_value,
+		        raw_confidence, effective_confidence, data_as_of, threshold, threshold_met,
+		        attempts, premium_cost_usd, previous_value, previous_run_id, value_changed, created_at
+		 FROM field_provenance
+		 WHERE run_id = (
+		     SELECT run_id FROM field_provenance WHERE company_url = ?
+		     ORDER BY created_at DESC LIMIT 1
+		 )
+		 ORDER BY field_key`, companyURL)
+	if err != nil {
+		return nil, eris.Wrap(err, "sqlite: get latest provenance")
+	}
+	defer rows.Close() //nolint:errcheck
+
+	return scanProvenanceRows(rows)
+}
+
+// scanProvenanceRows scans field_provenance rows into a slice.
+func scanProvenanceRows(rows *sql.Rows) ([]model.FieldProvenance, error) {
+	var results []model.FieldProvenance
+	for rows.Next() {
+		var fp model.FieldProvenance
+		var attemptsJSON sql.NullString
+		var dataAsOf sql.NullTime
+		var thresholdMet int
+		var valueChanged int
+		var prevValue, prevRunID sql.NullString
+
+		if err := rows.Scan(
+			&fp.ID, &fp.RunID, &fp.CompanyURL, &fp.FieldKey, &fp.WinnerSource, &fp.WinnerValue,
+			&fp.RawConfidence, &fp.EffectiveConfidence, &dataAsOf, &fp.Threshold, &thresholdMet,
+			&attemptsJSON, &fp.PremiumCostUSD, &prevValue, &prevRunID, &valueChanged, &fp.CreatedAt,
+		); err != nil {
+			return nil, eris.Wrap(err, "sqlite: scan provenance row")
+		}
+
+		fp.ThresholdMet = thresholdMet != 0
+		fp.ValueChanged = valueChanged != 0
+		if dataAsOf.Valid {
+			fp.DataAsOf = &dataAsOf.Time
+		}
+		if prevValue.Valid {
+			fp.PreviousValue = prevValue.String
+		}
+		if prevRunID.Valid {
+			fp.PreviousRunID = prevRunID.String
+		}
+		if attemptsJSON.Valid && attemptsJSON.String != "" {
+			if err := json.Unmarshal([]byte(attemptsJSON.String), &fp.Attempts); err != nil {
+				return nil, eris.Wrap(err, "sqlite: unmarshal provenance attempts")
+			}
+		}
+
+		results = append(results, fp)
+	}
+	return results, eris.Wrap(rows.Err(), "sqlite: provenance rows iterate")
 }
