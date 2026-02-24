@@ -296,6 +296,54 @@ func (_c *MockStore_DeleteExpiredCrawls_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// FailRun provides a mock function with given fields: ctx, runID, runErr
+func (_m *MockStore) FailRun(ctx context.Context, runID string, runErr *model.RunError) error {
+	ret := _m.Called(ctx, runID, runErr)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FailRun")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, *model.RunError) error); ok {
+		r0 = rf(ctx, runID, runErr)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStore_FailRun_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FailRun'
+type MockStore_FailRun_Call struct {
+	*mock.Call
+}
+
+// FailRun is a helper method to define mock.On call
+//   - ctx context.Context
+//   - runID string
+//   - runErr *model.RunError
+func (_e *MockStore_Expecter) FailRun(ctx interface{}, runID interface{}, runErr interface{}) *MockStore_FailRun_Call {
+	return &MockStore_FailRun_Call{Call: _e.mock.On("FailRun", ctx, runID, runErr)}
+}
+
+func (_c *MockStore_FailRun_Call) Run(run func(ctx context.Context, runID string, runErr *model.RunError)) *MockStore_FailRun_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(*model.RunError))
+	})
+	return _c
+}
+
+func (_c *MockStore_FailRun_Call) Return(_a0 error) *MockStore_FailRun_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStore_FailRun_Call) RunAndReturn(run func(context.Context, string, *model.RunError) error) *MockStore_FailRun_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCachedCrawl provides a mock function with given fields: ctx, companyURL
 func (_m *MockStore) GetCachedCrawl(ctx context.Context, companyURL string) (*model.CrawlCache, error) {
 	ret := _m.Called(ctx, companyURL)

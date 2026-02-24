@@ -319,6 +319,85 @@ func storeTestSuite(t *testing.T, newStore func(t *testing.T) Store) {
 		assert.Len(t, got.Pages, 2)
 		assert.Equal(t, "New", got.Pages[0].Title)
 	})
+
+	t.Run("FailRun", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		run, err := s.CreateRun(ctx, model.Company{URL: "https://fail.com", Name: "FailCo"})
+		require.NoError(t, err)
+
+		runErr := &model.RunError{
+			Message:     "connection timeout",
+			Category:    model.ErrorCategoryTransient,
+			FailedPhase: "1_data_collection",
+			Phases: []model.PhaseResult{
+				{Name: "1a_crawl", Status: model.PhaseStatusFailed, Duration: 500, Error: "timeout"},
+			},
+		}
+		err = s.FailRun(ctx, run.ID, runErr)
+		require.NoError(t, err)
+
+		got, err := s.GetRun(ctx, run.ID)
+		require.NoError(t, err)
+		assert.Equal(t, model.RunStatusFailed, got.Status)
+		require.NotNil(t, got.Error)
+		assert.Equal(t, "connection timeout", got.Error.Message)
+		assert.Equal(t, model.ErrorCategoryTransient, got.Error.Category)
+		assert.Equal(t, "1_data_collection", got.Error.FailedPhase)
+		assert.Len(t, got.Error.Phases, 1)
+		assert.Nil(t, got.Result)
+	})
+
+	t.Run("FailRun_NotFound", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		err := s.FailRun(ctx, "nonexistent-id", &model.RunError{
+			Message:  "boom",
+			Category: model.ErrorCategoryPermanent,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("ListRuns_FilterByErrorCategory", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		r1, err := s.CreateRun(ctx, model.Company{URL: "https://a.com", Name: "A"})
+		require.NoError(t, err)
+		r2, err := s.CreateRun(ctx, model.Company{URL: "https://b.com", Name: "B"})
+		require.NoError(t, err)
+		_, err = s.CreateRun(ctx, model.Company{URL: "https://c.com", Name: "C"})
+		require.NoError(t, err)
+
+		// Fail r1 as transient.
+		err = s.FailRun(ctx, r1.ID, &model.RunError{
+			Message:  "timeout",
+			Category: model.ErrorCategoryTransient,
+		})
+		require.NoError(t, err)
+
+		// Fail r2 as permanent.
+		err = s.FailRun(ctx, r2.ID, &model.RunError{
+			Message:  "invalid url",
+			Category: model.ErrorCategoryPermanent,
+		})
+		require.NoError(t, err)
+
+		// Filter transient.
+		transient, err := s.ListRuns(ctx, RunFilter{ErrorCategory: model.ErrorCategoryTransient})
+		require.NoError(t, err)
+		assert.Len(t, transient, 1)
+		assert.Equal(t, "A", transient[0].Company.Name)
+
+		// Filter permanent.
+		permanent, err := s.ListRuns(ctx, RunFilter{ErrorCategory: model.ErrorCategoryPermanent})
+		require.NoError(t, err)
+		assert.Len(t, permanent, 1)
+		assert.Equal(t, "B", permanent[0].Company.Name)
+	})
 }
 
 func TestSQLiteStore(t *testing.T) {

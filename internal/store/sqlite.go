@@ -132,8 +132,12 @@ func (s *SQLiteStore) Ping(ctx context.Context) error {
 
 // Migrate implements Store.
 func (s *SQLiteStore) Migrate(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, sqliteMigration)
-	return eris.Wrap(err, "sqlite: migrate")
+	if _, err := s.db.ExecContext(ctx, sqliteMigration); err != nil {
+		return eris.Wrap(err, "sqlite: migrate")
+	}
+	// v2: add error column (ignore duplicate-column error).
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE runs ADD COLUMN error TEXT`)
+	return nil
 }
 
 // Close implements Store.
@@ -197,10 +201,27 @@ func (s *SQLiteStore) UpdateRunResult(ctx context.Context, runID string, result 
 	return checkRowsAffected(res, "run", runID)
 }
 
+// FailRun implements Store.
+func (s *SQLiteStore) FailRun(ctx context.Context, runID string, runErr *model.RunError) error {
+	errJSON, err := json.Marshal(runErr)
+	if err != nil {
+		return eris.Wrap(err, "sqlite: marshal run error")
+	}
+
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET status = ?, error = ?, updated_at = ? WHERE id = ?`,
+		string(model.RunStatusFailed), string(errJSON), time.Now().UTC(), runID,
+	)
+	if err != nil {
+		return eris.Wrapf(err, "sqlite: fail run %s", runID)
+	}
+	return checkRowsAffected(res, "run", runID)
+}
+
 // GetRun implements Store.
 func (s *SQLiteStore) GetRun(ctx context.Context, runID string) (*model.Run, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, company, status, result, created_at, updated_at FROM runs WHERE id = ?`,
+		`SELECT id, company, status, result, error, created_at, updated_at FROM runs WHERE id = ?`,
 		runID,
 	)
 	return scanRun(row)
@@ -208,7 +229,7 @@ func (s *SQLiteStore) GetRun(ctx context.Context, runID string) (*model.Run, err
 
 // ListRuns implements Store.
 func (s *SQLiteStore) ListRuns(ctx context.Context, filter RunFilter) ([]model.Run, error) {
-	query := `SELECT id, company, status, result, created_at, updated_at FROM runs WHERE 1=1`
+	query := `SELECT id, company, status, result, error, created_at, updated_at FROM runs WHERE 1=1`
 	var args []any
 
 	if filter.Status != "" {
@@ -218,6 +239,10 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, filter RunFilter) ([]model.R
 	if filter.CompanyURL != "" {
 		query += ` AND json_extract(company, '$.url') = ?`
 		args = append(args, filter.CompanyURL)
+	}
+	if filter.ErrorCategory != "" {
+		query += ` AND json_extract(error, '$.category') = ?`
+		args = append(args, string(filter.ErrorCategory))
 	}
 	if !filter.CreatedAfter.IsZero() {
 		query += ` AND created_at >= ?`
@@ -529,8 +554,9 @@ func scanRun(row scannable) (*model.Run, error) {
 	var r model.Run
 	var companyJSON string
 	var resultJSON sql.NullString
+	var errorJSON sql.NullString
 
-	err := row.Scan(&r.ID, &companyJSON, &r.Status, &resultJSON, &r.CreatedAt, &r.UpdatedAt)
+	err := row.Scan(&r.ID, &companyJSON, &r.Status, &resultJSON, &errorJSON, &r.CreatedAt, &r.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, eris.New("run not found")
 	}
@@ -545,6 +571,12 @@ func scanRun(row scannable) (*model.Run, error) {
 		r.Result = &model.RunResult{}
 		if err := json.Unmarshal([]byte(resultJSON.String), r.Result); err != nil {
 			return nil, eris.Wrap(err, "sqlite: unmarshal result")
+		}
+	}
+	if errorJSON.Valid {
+		r.Error = &model.RunError{}
+		if err := json.Unmarshal([]byte(errorJSON.String), r.Error); err != nil {
+			return nil, eris.Wrap(err, "sqlite: unmarshal error")
 		}
 	}
 	return &r, nil

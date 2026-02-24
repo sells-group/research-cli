@@ -35,7 +35,8 @@ var preparedStatements = map[string]string{
 	"insert_run":            `INSERT INTO runs (id, company, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)`,
 	"update_run_status":     `UPDATE runs SET status = $1, updated_at = $2 WHERE id = $3`,
 	"update_run_result":     `UPDATE runs SET result = $1, status = $2, updated_at = $3 WHERE id = $4`,
-	"get_run":               `SELECT id, company, status, result, created_at, updated_at FROM runs WHERE id = $1`,
+	"fail_run":              `UPDATE runs SET status = $1, error = $2, updated_at = $3 WHERE id = $4`,
+	"get_run":               `SELECT id, company, status, result, error, created_at, updated_at FROM runs WHERE id = $1`,
 	"insert_phase":          `INSERT INTO run_phases (id, run_id, name, status, started_at) VALUES ($1, $2, $3, $4, $5)`,
 	"complete_phase":        `UPDATE run_phases SET status = $1, result = $2 WHERE id = $3`,
 	"get_cached_crawl":      `SELECT id, company_url, pages, crawled_at, expires_at FROM crawl_cache WHERE company_url = $1 AND expires_at > now() ORDER BY crawled_at DESC LIMIT 1`,
@@ -172,6 +173,10 @@ CREATE TABLE IF NOT EXISTS dead_letter_queue (
 
 CREATE INDEX IF NOT EXISTS idx_dlq_error_type ON dead_letter_queue(error_type);
 CREATE INDEX IF NOT EXISTS idx_dlq_next_retry ON dead_letter_queue(next_retry_at);
+
+-- v2: structured error tracking
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS error JSONB;
+CREATE INDEX IF NOT EXISTS idx_runs_error_category ON runs ((error->>'category'));
 `
 
 // Ping implements Store.
@@ -256,16 +261,36 @@ func (s *PostgresStore) UpdateRunResult(ctx context.Context, runID string, resul
 	return nil
 }
 
+// FailRun implements Store.
+func (s *PostgresStore) FailRun(ctx context.Context, runID string, runErr *model.RunError) error {
+	errJSON, err := json.Marshal(runErr)
+	if err != nil {
+		return eris.Wrap(err, "postgres: marshal run error")
+	}
+
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE runs SET status = $1, error = $2, updated_at = $3 WHERE id = $4`,
+		string(model.RunStatusFailed), errJSON, time.Now().UTC(), runID,
+	)
+	if err != nil {
+		return eris.Wrapf(err, "postgres: fail run %s", runID)
+	}
+	if tag.RowsAffected() == 0 {
+		return eris.Errorf("run not found: %s", runID)
+	}
+	return nil
+}
+
 // GetRun implements Store.
 func (s *PostgresStore) GetRun(ctx context.Context, runID string) (*model.Run, error) {
 	var r model.Run
 	var companyJSON, resultJSON []byte
-	var resultNull *[]byte
+	var resultNull, errorNull *[]byte
 
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, company, status, result, created_at, updated_at FROM runs WHERE id = $1`,
+		`SELECT id, company, status, result, error, created_at, updated_at FROM runs WHERE id = $1`,
 		runID,
-	).Scan(&r.ID, &companyJSON, &r.Status, &resultNull, &r.CreatedAt, &r.UpdatedAt)
+	).Scan(&r.ID, &companyJSON, &r.Status, &resultNull, &errorNull, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return nil, eris.Wrapf(err, "postgres: get run %s", runID)
 	}
@@ -280,12 +305,18 @@ func (s *PostgresStore) GetRun(ctx context.Context, runID string) (*model.Run, e
 			return nil, eris.Wrap(err, "postgres: unmarshal result")
 		}
 	}
+	if errorNull != nil {
+		r.Error = &model.RunError{}
+		if err := json.Unmarshal(*errorNull, r.Error); err != nil {
+			return nil, eris.Wrap(err, "postgres: unmarshal error")
+		}
+	}
 	return &r, nil
 }
 
 // ListRuns implements Store.
 func (s *PostgresStore) ListRuns(ctx context.Context, filter RunFilter) ([]model.Run, error) {
-	query := `SELECT id, company, status, result, created_at, updated_at FROM runs WHERE true`
+	query := `SELECT id, company, status, result, error, created_at, updated_at FROM runs WHERE true`
 	args := []any{}
 	argIdx := 1
 
@@ -297,6 +328,11 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunFilter) ([]model
 	if filter.CompanyURL != "" {
 		query += fmt.Sprintf(` AND company->>'url' = $%d`, argIdx)
 		args = append(args, filter.CompanyURL)
+		argIdx++
+	}
+	if filter.ErrorCategory != "" {
+		query += fmt.Sprintf(` AND error->>'category' = $%d`, argIdx)
+		args = append(args, string(filter.ErrorCategory))
 		argIdx++
 	}
 	if !filter.CreatedAfter.IsZero() {
@@ -329,9 +365,9 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunFilter) ([]model
 	for rows.Next() {
 		var r model.Run
 		var companyJSON, resultJSON []byte
-		var resultNull *[]byte
+		var resultNull, errorNull *[]byte
 
-		if err := rows.Scan(&r.ID, &companyJSON, &r.Status, &resultNull, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &companyJSON, &r.Status, &resultNull, &errorNull, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, eris.Wrap(err, "postgres: scan run")
 		}
 		if err := json.Unmarshal(companyJSON, &r.Company); err != nil {
@@ -342,6 +378,12 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunFilter) ([]model
 			r.Result = &model.RunResult{}
 			if err := json.Unmarshal(resultJSON, r.Result); err != nil {
 				return nil, eris.Wrap(err, "postgres: unmarshal result")
+			}
+		}
+		if errorNull != nil {
+			r.Error = &model.RunError{}
+			if err := json.Unmarshal(*errorNull, r.Error); err != nil {
+				return nil, eris.Wrap(err, "postgres: unmarshal error")
 			}
 		}
 		runs = append(runs, r)

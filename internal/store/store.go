@@ -10,11 +10,12 @@ import (
 
 // RunFilter specifies criteria for listing runs.
 type RunFilter struct {
-	Status       model.RunStatus `json:"status,omitempty"`
-	CompanyURL   string          `json:"company_url,omitempty"`
-	CreatedAfter time.Time       `json:"created_after,omitempty"`
-	Limit        int             `json:"limit,omitempty"`
-	Offset       int             `json:"offset,omitempty"`
+	Status        model.RunStatus     `json:"status,omitempty"`
+	CompanyURL    string              `json:"company_url,omitempty"`
+	ErrorCategory model.ErrorCategory `json:"error_category,omitempty"`
+	CreatedAfter  time.Time           `json:"created_after,omitempty"`
+	Limit         int                 `json:"limit,omitempty"`
+	Offset        int                 `json:"offset,omitempty"`
 }
 
 // Store defines the persistence interface for the enrichment pipeline.
@@ -23,6 +24,7 @@ type Store interface {
 	CreateRun(ctx context.Context, company model.Company) (*model.Run, error)
 	UpdateRunStatus(ctx context.Context, runID string, status model.RunStatus) error
 	UpdateRunResult(ctx context.Context, runID string, result *model.RunResult) error
+	FailRun(ctx context.Context, runID string, runErr *model.RunError) error
 	GetRun(ctx context.Context, runID string) (*model.Run, error)
 	ListRuns(ctx context.Context, filter RunFilter) ([]model.Run, error)
 

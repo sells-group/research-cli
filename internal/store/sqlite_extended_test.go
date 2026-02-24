@@ -633,6 +633,103 @@ func TestClose_CreatePhaseAfterClose(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestFailRun_WithPhases verifies that a run error with a phase snapshot
+// round-trips correctly.
+func TestFailRun_WithPhases(t *testing.T) {
+	s := newTestSQLiteRaw(t)
+	ctx := context.Background()
+
+	run, err := s.CreateRun(ctx, model.Company{URL: "https://test.com", Name: "Test"})
+	require.NoError(t, err)
+
+	phases := []model.PhaseResult{
+		{Name: "1a_crawl", Status: model.PhaseStatusComplete, Duration: 1200},
+		{Name: "1b_scrape", Status: model.PhaseStatusFailed, Duration: 300, Error: "503 Service Unavailable"},
+		{Name: "1c_linkedin", Status: model.PhaseStatusComplete, Duration: 800},
+	}
+
+	runErr := &model.RunError{
+		Message:     "all data sources failed",
+		Category:    model.ErrorCategoryPermanent,
+		FailedPhase: "1_data_collection",
+		Phases:      phases,
+	}
+	err = s.FailRun(ctx, run.ID, runErr)
+	require.NoError(t, err)
+
+	got, err := s.GetRun(ctx, run.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.Error)
+	assert.Len(t, got.Error.Phases, 3)
+	assert.Equal(t, "1b_scrape", got.Error.Phases[1].Name)
+	assert.Equal(t, model.PhaseStatusFailed, got.Error.Phases[1].Status)
+	assert.Equal(t, "503 Service Unavailable", got.Error.Phases[1].Error)
+}
+
+// TestFailRun_ThenGetRun_ResultStillNil verifies that a failed run has
+// Error set but Result remains nil.
+func TestFailRun_ThenGetRun_ResultStillNil(t *testing.T) {
+	s := newTestSQLiteRaw(t)
+	ctx := context.Background()
+
+	run, err := s.CreateRun(ctx, model.Company{URL: "https://test.com", Name: "Test"})
+	require.NoError(t, err)
+
+	err = s.FailRun(ctx, run.ID, &model.RunError{
+		Message:     "no pages collected",
+		Category:    model.ErrorCategoryPermanent,
+		FailedPhase: "1_data_collection",
+	})
+	require.NoError(t, err)
+
+	got, err := s.GetRun(ctx, run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, model.RunStatusFailed, got.Status)
+	assert.NotNil(t, got.Error)
+	assert.Nil(t, got.Result)
+}
+
+// TestScanRun_WithErrorJSON verifies deserialization of a directly-inserted
+// error JSON column.
+func TestScanRun_WithErrorJSON(t *testing.T) {
+	s := newTestSQLiteRaw(t)
+	ctx := context.Background()
+
+	companyJSON, _ := json.Marshal(model.Company{URL: "https://test.com", Name: "Test"})
+	errorJSON := `{"message":"rate limited","category":"transient","failed_phase":"2_classify"}`
+
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO runs (id, company, status, error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		"direct-error-id", string(companyJSON), "failed", errorJSON, time.Now().UTC(), time.Now().UTC(),
+	)
+	require.NoError(t, err)
+
+	got, err := s.GetRun(ctx, "direct-error-id")
+	require.NoError(t, err)
+	require.NotNil(t, got.Error)
+	assert.Equal(t, "rate limited", got.Error.Message)
+	assert.Equal(t, model.ErrorCategoryTransient, got.Error.Category)
+	assert.Equal(t, "2_classify", got.Error.FailedPhase)
+}
+
+// TestScanRun_CorruptErrorJSON covers the error path where error JSON is
+// present but invalid.
+func TestScanRun_CorruptErrorJSON(t *testing.T) {
+	s := newTestSQLiteRaw(t)
+	ctx := context.Background()
+
+	companyJSON, _ := json.Marshal(model.Company{URL: "https://test.com", Name: "Test"})
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO runs (id, company, status, error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		"corrupt-error-id", string(companyJSON), "failed", "not-valid-json{{{", time.Now().UTC(), time.Now().UTC(),
+	)
+	require.NoError(t, err)
+
+	_, err = s.GetRun(ctx, "corrupt-error-id")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unmarshal error")
+}
+
 // -- helpers --
 
 // newTestSQLiteRaw returns a *SQLiteStore (not the Store interface) so we can

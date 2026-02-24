@@ -47,6 +47,7 @@ func (m *mockStore) CountDLQ(_ context.Context) (int, error) {
 func (m *mockStore) CreateRun(context.Context, model.Company) (*model.Run, error)    { return nil, nil }
 func (m *mockStore) UpdateRunStatus(context.Context, string, model.RunStatus) error  { return nil }
 func (m *mockStore) UpdateRunResult(context.Context, string, *model.RunResult) error { return nil }
+func (m *mockStore) FailRun(context.Context, string, *model.RunError) error          { return nil }
 func (m *mockStore) GetRun(context.Context, string) (*model.Run, error)              { return nil, nil }
 func (m *mockStore) CreatePhase(context.Context, string, string) (*model.RunPhase, error) {
 	return nil, nil
