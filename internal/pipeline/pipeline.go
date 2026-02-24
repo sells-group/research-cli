@@ -794,12 +794,14 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	result.FieldValues = fieldValues
 
 	// ===== Phase 7B: Waterfall Cascade =====
+	var waterfallRes *waterfall.WaterfallResult
 	if p.waterfallExec != nil {
 		trackPhase("7b_waterfall", func() (*model.PhaseResult, error) {
 			wr, wfErr := p.waterfallExec.Run(ctx, company, fieldValues)
 			if wfErr != nil {
 				return nil, wfErr
 			}
+			waterfallRes = wr
 			// Apply waterfall results back into field values.
 			fieldValues = waterfall.ApplyToFieldValues(fieldValues, wr)
 			result.FieldValues = fieldValues
@@ -815,6 +817,31 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			}, nil
 		})
 	}
+
+	// ===== Phase 7C: Field Provenance =====
+	trackPhase("7c_provenance", func() (*model.PhaseResult, error) {
+		// Load previous provenance for override detection (non-fatal).
+		prevProvenance, prevErr := p.store.GetLatestProvenance(ctx, company.URL)
+		if prevErr != nil {
+			log.Warn("pipeline: failed to load previous provenance", zap.Error(prevErr))
+		}
+
+		provenanceRecords := BuildProvenance(
+			run.ID, company.URL, fieldValues, allAnswers,
+			waterfallRes, prevProvenance, p.fields,
+		)
+
+		if saveErr := p.store.SaveProvenance(ctx, provenanceRecords); saveErr != nil {
+			log.Warn("pipeline: failed to save provenance", zap.Error(saveErr))
+		}
+
+		return &model.PhaseResult{
+			Metadata: map[string]any{
+				"fields_tracked": len(provenanceRecords),
+				"values_changed": CountChanged(provenanceRecords),
+			},
+		}, nil
+	})
 
 	// ===== Phase 8: Report =====
 	// Set totalUsage.Cost from per-phase costs so the report shows the correct total.

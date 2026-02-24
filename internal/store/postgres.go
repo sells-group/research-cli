@@ -44,6 +44,11 @@ var preparedStatements = map[string]string{
 	"get_cached_linkedin":   `SELECT data FROM linkedin_cache WHERE domain = $1 AND expires_at > now() ORDER BY cached_at DESC LIMIT 1`,
 	"set_cached_linkedin":   `INSERT INTO linkedin_cache (id, domain, data, cached_at, expires_at) VALUES ($1, $2, $3, $4, $5)`,
 	"delete_expired_crawls": `DELETE FROM crawl_cache WHERE expires_at <= now()`,
+	"insert_provenance": `INSERT INTO field_provenance
+		(run_id, company_url, field_key, winner_source, winner_value,
+		 raw_confidence, effective_confidence, data_as_of, threshold, threshold_met,
+		 attempts, premium_cost_usd, previous_value, previous_run_id, value_changed)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 }
 
 // NewPostgres creates a PostgresStore with a connection pool.
@@ -177,6 +182,29 @@ CREATE INDEX IF NOT EXISTS idx_dlq_next_retry ON dead_letter_queue(next_retry_at
 -- v2: structured error tracking
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS error JSONB;
 CREATE INDEX IF NOT EXISTS idx_runs_error_category ON runs ((error->>'category'));
+
+CREATE TABLE IF NOT EXISTS field_provenance (
+	id                   BIGSERIAL PRIMARY KEY,
+	run_id               TEXT REFERENCES runs(id),
+	company_url          VARCHAR(500) NOT NULL,
+	field_key            VARCHAR(100) NOT NULL,
+	winner_source        VARCHAR(50),
+	winner_value         TEXT,
+	raw_confidence       NUMERIC(4,3),
+	effective_confidence NUMERIC(4,3),
+	data_as_of           TIMESTAMPTZ,
+	threshold            NUMERIC(3,2),
+	threshold_met        BOOLEAN NOT NULL DEFAULT FALSE,
+	attempts             JSONB,
+	premium_cost_usd     NUMERIC(8,4) DEFAULT 0,
+	previous_value       TEXT,
+	previous_run_id      TEXT,
+	value_changed        BOOLEAN DEFAULT FALSE,
+	created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_field_provenance_run ON field_provenance(run_id);
+CREATE INDEX IF NOT EXISTS idx_field_provenance_company ON field_provenance(company_url, field_key);
 `
 
 // Ping implements Store.
@@ -742,4 +770,119 @@ func (s *PostgresStore) CountDLQ(ctx context.Context) (int, error) {
 	var count int
 	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM dead_letter_queue`).Scan(&count)
 	return count, eris.Wrap(err, "postgres: count dlq")
+}
+
+// SaveProvenance implements Store.
+func (s *PostgresStore) SaveProvenance(ctx context.Context, records []model.FieldProvenance) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return eris.Wrap(err, "postgres: begin provenance tx")
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	for _, r := range records {
+		attemptsJSON, marshalErr := json.Marshal(r.Attempts)
+		if marshalErr != nil {
+			return eris.Wrap(marshalErr, "postgres: marshal provenance attempts")
+		}
+
+		var prevValue, prevRunID *string
+		if r.PreviousValue != "" {
+			prevValue = &r.PreviousValue
+		}
+		if r.PreviousRunID != "" {
+			prevRunID = &r.PreviousRunID
+		}
+
+		_, err = tx.Exec(ctx,
+			`INSERT INTO field_provenance
+			 (run_id, company_url, field_key, winner_source, winner_value,
+			  raw_confidence, effective_confidence, data_as_of, threshold, threshold_met,
+			  attempts, premium_cost_usd, previous_value, previous_run_id, value_changed)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+			r.RunID, r.CompanyURL, r.FieldKey, r.WinnerSource, r.WinnerValue,
+			r.RawConfidence, r.EffectiveConfidence, r.DataAsOf, r.Threshold, r.ThresholdMet,
+			attemptsJSON, r.PremiumCostUSD, prevValue, prevRunID, r.ValueChanged,
+		)
+		if err != nil {
+			return eris.Wrapf(err, "postgres: insert provenance for field %s", r.FieldKey)
+		}
+	}
+
+	return eris.Wrap(tx.Commit(ctx), "postgres: commit provenance tx")
+}
+
+// GetProvenance implements Store.
+func (s *PostgresStore) GetProvenance(ctx context.Context, runID string) ([]model.FieldProvenance, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, run_id, company_url, field_key, winner_source, winner_value,
+		        raw_confidence, effective_confidence, data_as_of, threshold, threshold_met,
+		        attempts, premium_cost_usd, previous_value, previous_run_id, value_changed, created_at
+		 FROM field_provenance WHERE run_id = $1
+		 ORDER BY field_key`, runID)
+	if err != nil {
+		return nil, eris.Wrap(err, "postgres: get provenance")
+	}
+	defer rows.Close()
+
+	return scanPgProvenanceRows(rows)
+}
+
+// GetLatestProvenance implements Store.
+func (s *PostgresStore) GetLatestProvenance(ctx context.Context, companyURL string) ([]model.FieldProvenance, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, run_id, company_url, field_key, winner_source, winner_value,
+		        raw_confidence, effective_confidence, data_as_of, threshold, threshold_met,
+		        attempts, premium_cost_usd, previous_value, previous_run_id, value_changed, created_at
+		 FROM field_provenance
+		 WHERE run_id = (
+		     SELECT run_id FROM field_provenance WHERE company_url = $1
+		     ORDER BY created_at DESC LIMIT 1
+		 )
+		 ORDER BY field_key`, companyURL)
+	if err != nil {
+		return nil, eris.Wrap(err, "postgres: get latest provenance")
+	}
+	defer rows.Close()
+
+	return scanPgProvenanceRows(rows)
+}
+
+// scanPgProvenanceRows scans pgx rows into FieldProvenance records.
+func scanPgProvenanceRows(rows pgx.Rows) ([]model.FieldProvenance, error) {
+	var results []model.FieldProvenance
+	for rows.Next() {
+		var fp model.FieldProvenance
+		var attemptsJSON []byte
+		var dataAsOf *time.Time
+		var prevValue, prevRunID *string
+
+		if err := rows.Scan(
+			&fp.ID, &fp.RunID, &fp.CompanyURL, &fp.FieldKey, &fp.WinnerSource, &fp.WinnerValue,
+			&fp.RawConfidence, &fp.EffectiveConfidence, &dataAsOf, &fp.Threshold, &fp.ThresholdMet,
+			&attemptsJSON, &fp.PremiumCostUSD, &prevValue, &prevRunID, &fp.ValueChanged, &fp.CreatedAt,
+		); err != nil {
+			return nil, eris.Wrap(err, "postgres: scan provenance row")
+		}
+
+		fp.DataAsOf = dataAsOf
+		if prevValue != nil {
+			fp.PreviousValue = *prevValue
+		}
+		if prevRunID != nil {
+			fp.PreviousRunID = *prevRunID
+		}
+		if len(attemptsJSON) > 0 {
+			if err := json.Unmarshal(attemptsJSON, &fp.Attempts); err != nil {
+				return nil, eris.Wrap(err, "postgres: unmarshal provenance attempts")
+			}
+		}
+
+		results = append(results, fp)
+	}
+	return results, eris.Wrap(rows.Err(), "postgres: provenance rows iterate")
 }

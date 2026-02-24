@@ -1296,6 +1296,84 @@ func (_c *MockStore_RemoveDLQ_Call) RunAndReturn(run func(context.Context, strin
 	return _c
 }
 
+// SaveProvenance provides a mock function with given fields: ctx, records
+func (_m *MockStore) SaveProvenance(ctx context.Context, records []model.FieldProvenance) error {
+	ret := _m.Called(ctx, records)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveProvenance")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []model.FieldProvenance) error); ok {
+		r0 = rf(ctx, records)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// GetProvenance provides a mock function with given fields: ctx, runID
+func (_m *MockStore) GetProvenance(ctx context.Context, runID string) ([]model.FieldProvenance, error) {
+	ret := _m.Called(ctx, runID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetProvenance")
+	}
+
+	var r0 []model.FieldProvenance
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]model.FieldProvenance, error)); ok {
+		return rf(ctx, runID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) []model.FieldProvenance); ok {
+		r0 = rf(ctx, runID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]model.FieldProvenance)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, runID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetLatestProvenance provides a mock function with given fields: ctx, companyURL
+func (_m *MockStore) GetLatestProvenance(ctx context.Context, companyURL string) ([]model.FieldProvenance, error) {
+	ret := _m.Called(ctx, companyURL)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLatestProvenance")
+	}
+
+	var r0 []model.FieldProvenance
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]model.FieldProvenance, error)); ok {
+		return rf(ctx, companyURL)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) []model.FieldProvenance); ok {
+		r0 = rf(ctx, companyURL)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]model.FieldProvenance)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, companyURL)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // NewMockStore creates a new instance of MockStore. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockStore(t interface {

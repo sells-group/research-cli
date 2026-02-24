@@ -361,6 +361,123 @@ func storeTestSuite(t *testing.T, newStore func(t *testing.T) Store) {
 		assert.Contains(t, err.Error(), "not found")
 	})
 
+	t.Run("SaveAndGetProvenance", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		run, err := s.CreateRun(ctx, model.Company{URL: "https://acme.com", Name: "Acme"})
+		require.NoError(t, err)
+
+		now := time.Now().UTC()
+		records := []model.FieldProvenance{
+			{
+				RunID:               run.ID,
+				CompanyURL:          "https://acme.com",
+				FieldKey:            "revenue",
+				WinnerSource:        "website",
+				WinnerValue:         "5000000",
+				RawConfidence:       0.85,
+				EffectiveConfidence: 0.90,
+				DataAsOf:            &now,
+				Threshold:           0.70,
+				ThresholdMet:        true,
+				Attempts: []model.ProvenanceAttempt{
+					{Source: "website", Value: "5000000", Confidence: 0.85, Tier: 1},
+				},
+				PremiumCostUSD: 0.05,
+			},
+			{
+				RunID:               run.ID,
+				CompanyURL:          "https://acme.com",
+				FieldKey:            "employees",
+				WinnerSource:        "linkedin",
+				WinnerValue:         "150",
+				RawConfidence:       0.75,
+				EffectiveConfidence: 0.75,
+				Attempts: []model.ProvenanceAttempt{
+					{Source: "website", Value: "100", Confidence: 0.35, Tier: 1},
+					{Source: "linkedin", Value: "150", Confidence: 0.75, Tier: 2},
+				},
+			},
+		}
+
+		err = s.SaveProvenance(ctx, records)
+		require.NoError(t, err)
+
+		got, err := s.GetProvenance(ctx, run.ID)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+
+		// Results are ordered by field_key.
+		assert.Equal(t, "employees", got[0].FieldKey)
+		assert.Equal(t, "linkedin", got[0].WinnerSource)
+		assert.Len(t, got[0].Attempts, 2)
+
+		assert.Equal(t, "revenue", got[1].FieldKey)
+		assert.Equal(t, "website", got[1].WinnerSource)
+		assert.InDelta(t, 0.85, got[1].RawConfidence, 0.001)
+		assert.InDelta(t, 0.90, got[1].EffectiveConfidence, 0.001)
+		assert.True(t, got[1].ThresholdMet)
+		assert.Len(t, got[1].Attempts, 1)
+	})
+
+	t.Run("GetLatestProvenance", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		run1, err := s.CreateRun(ctx, model.Company{URL: "https://acme.com", Name: "Acme"})
+		require.NoError(t, err)
+		run2, err := s.CreateRun(ctx, model.Company{URL: "https://acme.com", Name: "Acme"})
+		require.NoError(t, err)
+
+		// Save provenance for run1.
+		err = s.SaveProvenance(ctx, []model.FieldProvenance{
+			{RunID: run1.ID, CompanyURL: "https://acme.com", FieldKey: "revenue", WinnerValue: "old"},
+		})
+		require.NoError(t, err)
+
+		// Save provenance for run2 (later).
+		err = s.SaveProvenance(ctx, []model.FieldProvenance{
+			{RunID: run2.ID, CompanyURL: "https://acme.com", FieldKey: "revenue", WinnerValue: "new"},
+		})
+		require.NoError(t, err)
+
+		got, err := s.GetLatestProvenance(ctx, "https://acme.com")
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, run2.ID, got[0].RunID)
+		assert.Equal(t, "new", got[0].WinnerValue)
+	})
+
+	t.Run("SaveProvenance_Empty", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		err := s.SaveProvenance(ctx, nil)
+		require.NoError(t, err)
+
+		err = s.SaveProvenance(ctx, []model.FieldProvenance{})
+		require.NoError(t, err)
+	})
+
+	t.Run("GetProvenance_NoResults", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		got, err := s.GetProvenance(ctx, "nonexistent-run")
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+
+	t.Run("GetLatestProvenance_NoResults", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		got, err := s.GetLatestProvenance(ctx, "https://unknown.com")
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+
 	t.Run("ListRuns_FilterByErrorCategory", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()

@@ -93,6 +93,8 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 	st.On("LoadCheckpoint", mock.Anything, "https://acme.com").Return(nil, nil)
 	st.On("SaveCheckpoint", mock.Anything, "https://acme.com", mock.AnythingOfType("string"), mock.Anything).Return(nil).Maybe()
 	st.On("DeleteCheckpoint", mock.Anything, "https://acme.com").Return(nil)
+	st.On("GetLatestProvenance", mock.Anything, "https://acme.com").Return(nil, nil)
+	st.On("SaveProvenance", mock.Anything, mock.AnythingOfType("[]model.FieldProvenance")).Return(nil)
 
 	// Scrape chain — for scrape phase (external sources) and LinkedIn.
 	s := scrapemocks.NewMockScraper(t)
@@ -331,6 +333,8 @@ func TestPipeline_ExistingAnswerLookup_SkipsQuestions(t *testing.T) {
 	st.On("LoadCheckpoint", mock.Anything, "https://acme.com").Return(nil, nil)
 	st.On("SaveCheckpoint", mock.Anything, "https://acme.com", mock.AnythingOfType("string"), mock.Anything).Return(nil).Maybe()
 	st.On("DeleteCheckpoint", mock.Anything, "https://acme.com").Return(nil)
+	st.On("GetLatestProvenance", mock.Anything, "https://acme.com").Return(nil, nil)
+	st.On("SaveProvenance", mock.Anything, mock.AnythingOfType("[]model.FieldProvenance")).Return(nil)
 
 	s := scrapemocks.NewMockScraper(t)
 	s.On("Name").Return("mock").Maybe()
@@ -457,6 +461,8 @@ func TestPipeline_Checkpoint_ResumesFromT1(t *testing.T) {
 	}, nil)
 	st.On("SaveCheckpoint", mock.Anything, "https://acme.com", mock.AnythingOfType("string"), mock.Anything).Return(nil).Maybe()
 	st.On("DeleteCheckpoint", mock.Anything, "https://acme.com").Return(nil)
+	st.On("GetLatestProvenance", mock.Anything, "https://acme.com").Return(nil, nil)
+	st.On("SaveProvenance", mock.Anything, mock.AnythingOfType("[]model.FieldProvenance")).Return(nil)
 
 	s := scrapemocks.NewMockScraper(t)
 	s.On("Name").Return("mock").Maybe()
@@ -637,6 +643,8 @@ func TestPipeline_WithWaterfall(t *testing.T) {
 	st.On("LoadCheckpoint", mock.Anything, "https://acme.com").Return(nil, nil)
 	st.On("SaveCheckpoint", mock.Anything, "https://acme.com", mock.AnythingOfType("string"), mock.Anything).Return(nil).Maybe()
 	st.On("DeleteCheckpoint", mock.Anything, "https://acme.com").Return(nil)
+	st.On("GetLatestProvenance", mock.Anything, "https://acme.com").Return(nil, nil)
+	st.On("SaveProvenance", mock.Anything, mock.AnythingOfType("[]model.FieldProvenance")).Return(nil)
 
 	s := scrapemocks.NewMockScraper(t)
 	s.On("Name").Return("mock").Maybe()
