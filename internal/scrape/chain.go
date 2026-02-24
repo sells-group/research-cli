@@ -1,3 +1,4 @@
+// Package scrape provides chained web scraping for government and business registries.
 package scrape
 
 import (
@@ -15,9 +16,9 @@ import (
 
 // Chain tries scrapers in priority order, returning the first success.
 type Chain struct {
-	PathMatcher    *PathMatcher
-	scrapers       []Scraper
-	fcClient       firecrawl.Client // optional: enables batch scrape fallback
+	PathMatcher *PathMatcher
+	scrapers    []Scraper
+	fcClient    firecrawl.Client // optional: enables batch scrape fallback
 }
 
 // NewChain creates a Chain with the given path matcher and scrapers.

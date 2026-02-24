@@ -519,9 +519,9 @@ func TestNormalizePhone(t *testing.T) {
 
 func TestParseNumeric(t *testing.T) {
 	tests := []struct {
-		input   string
-		want    float64
-		wantOK  bool
+		input  string
+		want   float64
+		wantOK bool
 	}{
 		{"$20,000,000", 20_000_000, true},
 		{"$20M", 20_000_000, true},
@@ -552,11 +552,11 @@ func TestNumericProximity(t *testing.T) {
 		wantMin float64
 		wantMax float64
 	}{
-		{"82", "80", 0.95, 1.0},        // very close
-		{"82", "18", 0.20, 0.25},       // very different
+		{"82", "80", 0.95, 1.0},             // very close
+		{"82", "18", 0.20, 0.25},            // very different
 		{"$20M", "$20,000,000", 0.99, 1.01}, // same value, different format
-		{"100", "100", 1.0, 1.01},      // identical
-		{"0", "0", 1.0, 1.01},          // both zero
+		{"100", "100", 1.0, 1.01},           // identical
+		{"0", "0", 1.0, 1.01},               // both zero
 	}
 	for _, tc := range tests {
 		got := numericProximity(tc.a, tc.b)
@@ -572,7 +572,7 @@ func TestStringOverlap(t *testing.T) {
 		wantMin float64
 	}{
 		{"the quick brown fox", "the quick brown fox", 1.0},
-		{"hello world", "hello earth", 0.3},   // 1 shared out of 3 unique
+		{"hello world", "hello earth", 0.3}, // 1 shared out of 3 unique
 		{"completely different", "nothing alike", 0.0},
 		{"", "", 1.0},
 		{"something", "", 0.0},
@@ -890,12 +890,12 @@ func TestCompareField_EmployeeCount_SpecificThreshold(t *testing.T) {
 		ours      string
 		wantMatch bool
 	}{
-		{"within 0.60 — V3 82 vs 125", "82", "125", true},   // proximity ~0.66
-		{"within 0.60 — close values", "82", "68", true},     // proximity ~0.83
-		{"below 0.60 — Hire A Pro 70 vs 5", "70", "5", false},    // proximity ~0.07
-		{"below 0.60 — Lonestar 78 vs 200", "78", "200", false},  // proximity ~0.39
-		{"exactly 0.60", "100", "60", true},                  // proximity = 0.60
-		{"just below 0.60", "100", "40", false},               // proximity = 0.40 (100→60% off)
+		{"within 0.60 — V3 82 vs 125", "82", "125", true},       // proximity ~0.66
+		{"within 0.60 — close values", "82", "68", true},        // proximity ~0.83
+		{"below 0.60 — Hire A Pro 70 vs 5", "70", "5", false},   // proximity ~0.07
+		{"below 0.60 — Lonestar 78 vs 200", "78", "200", false}, // proximity ~0.39
+		{"exactly 0.60", "100", "60", true},                     // proximity = 0.60
+		{"just below 0.60", "100", "40", false},                 // proximity = 0.40 (100→60% off)
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

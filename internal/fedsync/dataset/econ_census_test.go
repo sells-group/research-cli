@@ -59,8 +59,8 @@ func TestEconCensus_ParseResponse(t *testing.T) {
 	// Check first row (523110)
 	assert.Equal(t, int16(2022), rows[0][0])
 	assert.Equal(t, "0400000US06", rows[0][1]) // geo_id
-	assert.Equal(t, "523110", rows[0][2])       // naics
-	assert.Equal(t, 1500, rows[0][3])           // estab
+	assert.Equal(t, "523110", rows[0][2])      // naics
+	assert.Equal(t, 1500, rows[0][3])          // estab
 
 	// Check second row (312100)
 	assert.Equal(t, "312100", rows[1][2])

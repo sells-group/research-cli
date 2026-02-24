@@ -123,13 +123,13 @@ func TestParseFeeTiers(t *testing.T) {
 	t.Run("valid array of maps", func(t *testing.T) {
 		value := []any{
 			map[string]any{
-				"min_aum":        float64(0),
-				"max_aum":        float64(250_000_000),
+				"min_aum":         float64(0),
+				"max_aum":         float64(250_000_000),
 				"annual_rate_pct": float64(1.00),
 			},
 			map[string]any{
-				"min_aum":        float64(250_000_000),
-				"max_aum":        float64(0),
+				"min_aum":         float64(250_000_000),
+				"max_aum":         float64(0),
 				"annual_rate_pct": float64(0.75),
 			},
 		}
@@ -177,13 +177,13 @@ func TestParseFeeTiers(t *testing.T) {
 func TestComputeScores(t *testing.T) {
 	t.Run("filing with comp and biz flags", func(t *testing.T) {
 		filing := map[string]any{
-			"comp_pct_aum":     true,
-			"comp_hourly":      true,
-			"comp_fixed":       true,
-			"comp_commissions": false,
-			"comp_performance": false,
+			"comp_pct_aum":      true,
+			"comp_hourly":       true,
+			"comp_fixed":        true,
+			"comp_commissions":  false,
+			"comp_performance":  false,
 			"comp_subscription": false,
-			"comp_other":       false,
+			"comp_other":        false,
 			// biz flags
 			"biz_broker_dealer": true,
 			"biz_insurance":     true,
@@ -208,11 +208,11 @@ func TestComputeScores(t *testing.T) {
 
 	t.Run("filing with DRP flags", func(t *testing.T) {
 		filing := map[string]any{
-			"drp_criminal_firm":      true,  // 3
-			"drp_regulatory_firm":    true,  // 2
-			"drp_complaint_firm":     true,  // 1
-			"drp_termination_firm":   true,  // 1
-			"drp_judgment":           true,  // 2
+			"drp_criminal_firm":    true, // 3
+			"drp_regulatory_firm":  true, // 2
+			"drp_complaint_firm":   true, // 1
+			"drp_termination_firm": true, // 1
+			"drp_judgment":         true, // 2
 		}
 		answers := map[string]Answer{}
 		scores := ComputeScores(filing, answers)
@@ -224,11 +224,11 @@ func TestComputeScores(t *testing.T) {
 
 	t.Run("DRP severity capped at 10", func(t *testing.T) {
 		filing := map[string]any{
-			"drp_criminal_firm":       true, // 3
-			"drp_criminal_affiliate":  true, // 3
-			"drp_regulatory_firm":     true, // 2
+			"drp_criminal_firm":        true, // 3
+			"drp_criminal_affiliate":   true, // 3
+			"drp_regulatory_firm":      true, // 2
 			"drp_regulatory_affiliate": true, // 2
-			"drp_civil_firm":          true, // 2
+			"drp_civil_firm":           true, // 2
 		}
 		answers := map[string]Answer{}
 		scores := ComputeScores(filing, answers)
@@ -280,8 +280,8 @@ func TestAcquisitionReadiness_Clamping(t *testing.T) {
 				QuestionKey: "fee_schedule_complete",
 				Value: []any{
 					map[string]any{
-						"min_aum":        float64(0),
-						"max_aum":        float64(0),
+						"min_aum":         float64(0),
+						"max_aum":         float64(0),
 						"annual_rate_pct": float64(1.0),
 					},
 				},
@@ -303,27 +303,27 @@ func TestAcquisitionReadiness_Clamping(t *testing.T) {
 	t.Run("low score clamped to 0", func(t *testing.T) {
 		filing := map[string]any{
 			// All DRP flags to push DRP severity high.
-			"drp_criminal_firm":       true, // 3
-			"drp_criminal_affiliate":  true, // 3
-			"drp_regulatory_firm":     true, // 2
+			"drp_criminal_firm":        true, // 3
+			"drp_criminal_affiliate":   true, // 3
+			"drp_regulatory_firm":      true, // 2
 			"drp_regulatory_affiliate": true, // 2
 			// High business complexity.
-			"biz_broker_dealer":    true,
-			"biz_registered_rep":   true,
-			"biz_cpo_cta":         true,
+			"biz_broker_dealer":      true,
+			"biz_registered_rep":     true,
+			"biz_cpo_cta":            true,
 			"biz_futures_commission": true,
-			"biz_real_estate":      true,
-			"biz_insurance":        true,
-			"biz_bank":             true,
-			"biz_trust_company":    true,
-			"biz_municipal_advisor": true,
-			"biz_swap_dealer":      true,
-			"biz_major_swap":       true,
-			"biz_accountant":       true,
-			"biz_lawyer":           true,
-			"biz_other_financial":  true,
-			"aff_broker_dealer":    true,
-			"aff_other_adviser":    true,
+			"biz_real_estate":        true,
+			"biz_insurance":          true,
+			"biz_bank":               true,
+			"biz_trust_company":      true,
+			"biz_municipal_advisor":  true,
+			"biz_swap_dealer":        true,
+			"biz_major_swap":         true,
+			"biz_accountant":         true,
+			"biz_lawyer":             true,
+			"biz_other_financial":    true,
+			"aff_broker_dealer":      true,
+			"aff_other_adviser":      true,
 		}
 		answers := map[string]Answer{}
 

@@ -18,7 +18,7 @@ var fedsyncStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show fedsync sync log",
 	Long:  "Displays the sync history for all federal datasets.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 
 		pool, err := fedsyncPool(ctx)
@@ -78,9 +78,9 @@ func formatStatusEntries(out io.Writer, entries []fedsync.SyncEntry) {
 	_ = w.Flush()
 }
 
-func truncate(s string, max int) string {
-	if len(s) <= max {
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
 		return s
 	}
-	return s[:max-3] + "..."
+	return s[:maxLen-3] + "..."
 }

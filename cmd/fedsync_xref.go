@@ -16,7 +16,7 @@ var fedsyncXrefCmd = &cobra.Command{
 	Use:   "xref",
 	Short: "Build entity cross-reference table",
 	Long:  "Runs the entity_xref dataset to build CRD↔CIK cross-reference linkages across SEC/EDGAR data.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 		log := zap.L().With(zap.String("command", "fedsync.xref"))
 

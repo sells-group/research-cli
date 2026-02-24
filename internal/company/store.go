@@ -3,7 +3,7 @@ package company
 import "context"
 
 // CompanyStore defines persistence operations for the company data model.
-type CompanyStore interface {
+type CompanyStore interface { //nolint:revive // stutters but widely used across codebase
 	// Company CRUD
 	CreateCompany(ctx context.Context, c *CompanyRecord) error
 	UpdateCompany(ctx context.Context, c *CompanyRecord) error

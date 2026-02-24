@@ -95,11 +95,19 @@ var advFilingConflict = []string{"crd_number", "filing_date"}
 // Historical --full → adv_firms + adv_owners + adv_private_funds.
 type ADVPart1 struct{}
 
-func (d *ADVPart1) Name() string     { return "adv_part1" }
-func (d *ADVPart1) Table() string    { return "fed_data.adv_firms" }
-func (d *ADVPart1) Phase() Phase     { return Phase1B }
+// Name implements Dataset.
+func (d *ADVPart1) Name() string { return "adv_part1" }
+
+// Table implements Dataset.
+func (d *ADVPart1) Table() string { return "fed_data.adv_firms" }
+
+// Phase implements Dataset.
+func (d *ADVPart1) Phase() Phase { return Phase1B }
+
+// Cadence implements Dataset.
 func (d *ADVPart1) Cadence() Cadence { return Monthly }
 
+// ShouldRun implements Dataset.
 func (d *ADVPart1) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }

@@ -20,11 +20,19 @@ type CPSLAUS struct {
 	cfg *config.Config
 }
 
-func (d *CPSLAUS) Name() string     { return "cps_laus" }
-func (d *CPSLAUS) Table() string    { return "fed_data.laus_data" }
-func (d *CPSLAUS) Phase() Phase     { return Phase3 }
+// Name implements Dataset.
+func (d *CPSLAUS) Name() string { return "cps_laus" }
+
+// Table implements Dataset.
+func (d *CPSLAUS) Table() string { return "fed_data.laus_data" }
+
+// Phase implements Dataset.
+func (d *CPSLAUS) Phase() Phase { return Phase3 }
+
+// Cadence implements Dataset.
 func (d *CPSLAUS) Cadence() Cadence { return Monthly }
 
+// ShouldRun implements Dataset.
 func (d *CPSLAUS) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }
@@ -43,7 +51,8 @@ var lausSeries = []string{
 	"LASST360000000000006", // New York labor force
 }
 
-func (d *CPSLAUS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+// Sync fetches and loads BLS CPS/LAUS unemployment data.
+func (d *CPSLAUS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _ string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing CPS/LAUS data")
 

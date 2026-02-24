@@ -1,3 +1,4 @@
+// Package salesforce provides JWT-authenticated REST API access to Salesforce.
 package salesforce
 
 import (

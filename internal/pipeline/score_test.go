@@ -264,7 +264,7 @@ func TestComputeQualityScore_DefaultWeights(t *testing.T) {
 	assert.InDelta(t, 0.85, bd.Confidence, 0.01) // (0.9+0.8)/2
 	assert.Equal(t, 1.0, bd.Completeness)
 	assert.InDelta(t, 0.5, bd.Diversity, 0.01) // 1 source each
-	assert.Equal(t, 1.0, bd.Freshness)          // nil timestamps
+	assert.Equal(t, 1.0, bd.Freshness)         // nil timestamps
 	assert.True(t, bd.Final > 0.6)
 }
 

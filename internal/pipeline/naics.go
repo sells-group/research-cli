@@ -226,7 +226,7 @@ func collectSoSIndustryInfo(pages []model.CrawledPage) *SoSIndustryInfo {
 
 // crossReferenceWithSoS compares the extracted NAICS code with SoS data
 // and adjusts confidence accordingly.
-func crossReferenceWithSoS(answer *model.ExtractionAnswer, sos *SoSIndustryInfo, validation transform.NAICSValidationResult, log *zap.Logger) {
+func crossReferenceWithSoS(answer *model.ExtractionAnswer, sos *SoSIndustryInfo, _ transform.NAICSValidationResult, log *zap.Logger) {
 	code := fmt.Sprintf("%v", answer.Value)
 	sector := transform.NAICSToSector(code)
 

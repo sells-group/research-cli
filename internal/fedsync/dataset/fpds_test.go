@@ -81,15 +81,15 @@ func TestFPDS_ParseResponse(t *testing.T) {
 	assert.Len(t, rows, 1)
 
 	row := rows[0]
-	assert.Equal(t, "CONTRACT-001", row[0])  // contract_id
-	assert.Equal(t, "PIID-001", row[1])       // piid
-	assert.Equal(t, "2000", row[2])            // agency_id
+	assert.Equal(t, "CONTRACT-001", row[0])       // contract_id
+	assert.Equal(t, "PIID-001", row[1])           // piid
+	assert.Equal(t, "2000", row[2])               // agency_id
 	assert.Equal(t, "Acme Financial LLC", row[4]) // vendor_name
-	assert.Equal(t, "ABC123456789", row[6])    // vendor_uei
-	assert.Equal(t, "NY", row[8])              // vendor_state
-	assert.Equal(t, "523110", row[10])         // naics
-	assert.Equal(t, "R408", row[11])           // psc
-	assert.Equal(t, 150000.50, row[13])        // dollars_obligated
+	assert.Equal(t, "ABC123456789", row[6])       // vendor_uei
+	assert.Equal(t, "NY", row[8])                 // vendor_state
+	assert.Equal(t, "523110", row[10])            // naics
+	assert.Equal(t, "R408", row[11])              // psc
+	assert.Equal(t, 150000.50, row[13])           // dollars_obligated
 
 	// Empty response
 	emptyData := []byte(`{"totalRecords": 0, "opportunitiesData": []}`)

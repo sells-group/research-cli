@@ -1,3 +1,4 @@
+// Package ocr extracts text from PDFs using pdftotext with Mistral API fallback.
 package ocr
 
 import (
@@ -45,7 +46,7 @@ type mistralOCRRequest struct {
 }
 
 type mistralOCRDocument struct {
-	Type       string `json:"type"`
+	Type        string `json:"type"`
 	DocumentURL string `json:"document_url"`
 }
 
@@ -71,7 +72,7 @@ func (m *MistralOCR) ExtractText(ctx context.Context, pdfPath string) (string, e
 	reqBody := mistralOCRRequest{
 		Model: m.model,
 		Document: mistralOCRDocument{
-			Type:       "document_url",
+			Type:        "document_url",
 			DocumentURL: dataURL,
 		},
 	}

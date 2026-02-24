@@ -66,17 +66,16 @@ func executeDirectConcurrent(ctx context.Context, items []batchItem, tier int, c
 	log.Debug("executing direct concurrent calls")
 
 	var (
-		mu            sync.Mutex
-		answers       []Answer
-		totalInput    int64
-		totalOutput   int64
+		mu          sync.Mutex
+		answers     []Answer
+		totalInput  int64
+		totalOutput int64
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(maxDirectConcurrency)
 
 	for _, item := range items {
-		item := item
 		g.Go(func() error {
 			var resp *anthropic.MessageResponse
 			var err error
@@ -87,7 +86,7 @@ func executeDirectConcurrent(ctx context.Context, items []batchItem, tier int, c
 					break
 				}
 				if gctx.Err() != nil {
-					return nil // context canceled, don't retry
+					return gctx.Err()
 				}
 				backoff := time.Duration(1<<uint(attempt)) * 500 * time.Millisecond
 				time.Sleep(backoff)

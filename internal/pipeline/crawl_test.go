@@ -19,7 +19,7 @@ import (
 	firecrawlmocks "github.com/sells-group/research-cli/pkg/firecrawl/mocks"
 )
 
-func testChain(t *testing.T, scrapers ...scrape.Scraper) *scrape.Chain {
+func testChain(_ *testing.T, scrapers ...scrape.Scraper) *scrape.Chain {
 	matcher := scrape.NewPathMatcher([]string{"/blog/*", "/news/*", "/press/*", "/careers/*"})
 	return scrape.NewChain(matcher, scrapers...)
 }

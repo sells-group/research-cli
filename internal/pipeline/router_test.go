@@ -111,7 +111,7 @@ func TestEscalateQuestions(t *testing.T) {
 
 	answers := []model.ExtractionAnswer{
 		{QuestionID: "q1", FieldKey: "field1", Confidence: 0.2, Tier: 1},                // Low confidence.
-		{QuestionID: "q2", FieldKey: "field2", Confidence: 0.8, Tier: 1, Value: "Tech"},  // High confidence.
+		{QuestionID: "q2", FieldKey: "field2", Confidence: 0.8, Tier: 1, Value: "Tech"}, // High confidence.
 	}
 
 	escalated := EscalateQuestions(answers, questions, index, 0.4)

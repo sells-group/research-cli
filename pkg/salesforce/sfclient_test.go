@@ -60,7 +60,7 @@ func TestSFClient_Query(t *testing.T) {
 }
 
 func TestSFClient_Query_Error(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{"message": "invalid SOQL", "errorCode": "MALFORMED_QUERY"},
@@ -141,7 +141,7 @@ func TestSFClient_UpdateOne(t *testing.T) {
 }
 
 func TestSFClient_UpdateOne_Error(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{"message": "invalid field", "errorCode": "INVALID_FIELD"},
@@ -186,7 +186,7 @@ func TestSFClient_UpdateCollection(t *testing.T) {
 }
 
 func TestSFClient_UpdateCollection_Error(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{"message": "batch error"},
@@ -235,7 +235,7 @@ func TestSFClient_DescribeSObject(t *testing.T) {
 }
 
 func TestSFClient_DescribeSObject_Error(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{"message": "sobject not found", "errorCode": "NOT_FOUND"},

@@ -1,0 +1,51 @@
+version: "2"
+
+linters:
+  # Start from golangci-lint defaults (errcheck, govet, ineffassign, staticcheck, unused)
+  # and add specific linters that are high-signal for this codebase.
+  default: none
+  enable:
+    # --- Default linters ---
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+    # --- Additional high-value linters ---
+    - revive          # golint successor — exported type docs, error naming, etc.
+    - misspell        # catches typos in comments, strings, and variable names
+    - copyloopvar     # detects loop variable capture bugs
+    - durationcheck   # catches incorrect time.Duration arithmetic
+    - nilerr          # detects returning nil when err is non-nil
+    - unconvert       # removes unnecessary type conversions
+    - whitespace      # trailing whitespace and unnecessary blank lines
+
+    # Note: gosec runs as a separate CI job (security), not via golangci-lint.
+
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os).File.Close
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment  # struct field alignment optimization — noise
+        - shadow          # too many false positives with idiomatic Go error handling
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+
+output:
+  sort-order:
+    - file
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

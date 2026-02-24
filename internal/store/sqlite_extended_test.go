@@ -388,9 +388,9 @@ func TestCompletePhase_WithMetadata(t *testing.T) {
 		Status:   model.PhaseStatusComplete,
 		Duration: 2500,
 		Metadata: map[string]any{
-			"pages_found":  float64(15),
-			"source":       "local",
-			"blocked":      false,
+			"pages_found": float64(15),
+			"source":      "local",
+			"blocked":     false,
 		},
 	}
 

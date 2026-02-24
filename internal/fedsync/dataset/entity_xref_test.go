@@ -48,5 +48,6 @@ func TestEntityXref_ShouldRun_AlwaysTrue(t *testing.T) {
 }
 
 func TestEntityXref_ImplementsDataset(t *testing.T) {
+	t.Parallel()
 	var _ Dataset = &EntityXref{}
 }

@@ -44,38 +44,40 @@ func (m *mockStore) CountDLQ(_ context.Context) (int, error) {
 }
 
 // Unused store methods — satisfy the interface.
-func (m *mockStore) CreateRun(context.Context, model.Company) (*model.Run, error)      { return nil, nil }
-func (m *mockStore) UpdateRunStatus(context.Context, string, model.RunStatus) error     { return nil }
-func (m *mockStore) UpdateRunResult(context.Context, string, *model.RunResult) error    { return nil }
-func (m *mockStore) GetRun(context.Context, string) (*model.Run, error)                 { return nil, nil }
+func (m *mockStore) CreateRun(context.Context, model.Company) (*model.Run, error)    { return nil, nil }
+func (m *mockStore) UpdateRunStatus(context.Context, string, model.RunStatus) error  { return nil }
+func (m *mockStore) UpdateRunResult(context.Context, string, *model.RunResult) error { return nil }
+func (m *mockStore) GetRun(context.Context, string) (*model.Run, error)              { return nil, nil }
 func (m *mockStore) CreatePhase(context.Context, string, string) (*model.RunPhase, error) {
 	return nil, nil
 }
-func (m *mockStore) CompletePhase(context.Context, string, *model.PhaseResult) error    { return nil }
-func (m *mockStore) GetCachedCrawl(context.Context, string) (*model.CrawlCache, error) { return nil, nil }
+func (m *mockStore) CompletePhase(context.Context, string, *model.PhaseResult) error { return nil }
+func (m *mockStore) GetCachedCrawl(context.Context, string) (*model.CrawlCache, error) {
+	return nil, nil
+}
 func (m *mockStore) SetCachedCrawl(context.Context, string, []model.CrawledPage, time.Duration) error {
 	return nil
 }
-func (m *mockStore) DeleteExpiredCrawls(context.Context) (int, error)                     { return 0, nil }
-func (m *mockStore) GetCachedLinkedIn(context.Context, string) ([]byte, error)            { return nil, nil }
+func (m *mockStore) DeleteExpiredCrawls(context.Context) (int, error)          { return 0, nil }
+func (m *mockStore) GetCachedLinkedIn(context.Context, string) ([]byte, error) { return nil, nil }
 func (m *mockStore) SetCachedLinkedIn(context.Context, string, []byte, time.Duration) error {
 	return nil
 }
-func (m *mockStore) GetCachedScrape(context.Context, string) ([]byte, error)   { return nil, nil }
+func (m *mockStore) GetCachedScrape(context.Context, string) ([]byte, error) { return nil, nil }
 func (m *mockStore) SetCachedScrape(context.Context, string, []byte, time.Duration) error {
 	return nil
 }
 func (m *mockStore) GetHighConfidenceAnswers(context.Context, string, float64) ([]model.ExtractionAnswer, error) {
 	return nil, nil
 }
-func (m *mockStore) SaveCheckpoint(context.Context, string, string, []byte) error  { return nil }
+func (m *mockStore) SaveCheckpoint(context.Context, string, string, []byte) error { return nil }
 func (m *mockStore) LoadCheckpoint(context.Context, string) (*model.Checkpoint, error) {
 	return nil, nil
 }
-func (m *mockStore) DeleteCheckpoint(context.Context, string) error                     { return nil }
-func (m *mockStore) DeleteExpiredLinkedIn(context.Context) (int, error)                 { return 0, nil }
-func (m *mockStore) DeleteExpiredScrapes(context.Context) (int, error)                  { return 0, nil }
-func (m *mockStore) EnqueueDLQ(context.Context, resilience.DLQEntry) error              { return nil }
+func (m *mockStore) DeleteCheckpoint(context.Context, string) error        { return nil }
+func (m *mockStore) DeleteExpiredLinkedIn(context.Context) (int, error)    { return 0, nil }
+func (m *mockStore) DeleteExpiredScrapes(context.Context) (int, error)     { return 0, nil }
+func (m *mockStore) EnqueueDLQ(context.Context, resilience.DLQEntry) error { return nil }
 func (m *mockStore) DequeueDLQ(context.Context, resilience.DLQFilter) ([]resilience.DLQEntry, error) {
 	return nil, nil
 }

@@ -35,6 +35,7 @@ func TestADVEnrichment_ShouldRun(t *testing.T) {
 }
 
 func TestADVEnrichment_ImplementsDataset(t *testing.T) {
+	t.Parallel()
 	var _ Dataset = &ADVEnrichment{}
 }
 

@@ -29,11 +29,19 @@ type Holdings13F struct {
 	cfg *config.Config
 }
 
-func (d *Holdings13F) Name() string     { return "holdings_13f" }
-func (d *Holdings13F) Table() string    { return "fed_data.f13_holdings" }
-func (d *Holdings13F) Phase() Phase     { return Phase1B }
+// Name implements Dataset.
+func (d *Holdings13F) Name() string { return "holdings_13f" }
+
+// Table implements Dataset.
+func (d *Holdings13F) Table() string { return "fed_data.f13_holdings" }
+
+// Phase implements Dataset.
+func (d *Holdings13F) Phase() Phase { return Phase1B }
+
+// Cadence implements Dataset.
 func (d *Holdings13F) Cadence() Cadence { return Quarterly }
 
+// ShouldRun implements Dataset.
 func (d *Holdings13F) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return QuarterlyAfterDelay(now, lastSync, 45)
 }
@@ -84,6 +92,7 @@ func (t *eftsTotal) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &t.Value)
 }
 
+// Sync fetches and loads SEC 13F holdings data.
 func (d *Holdings13F) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "holdings_13f"))
 
@@ -215,7 +224,7 @@ func (d *Holdings13F) parseHoldingsXML(
 	r io.Reader,
 	cik string,
 	period *time.Time,
-	log *zap.Logger,
+	_ *zap.Logger,
 ) ([][]any, error) {
 	holdingCh, errCh := fetcher.StreamXML[f13Holding](ctx, r, "infoTable")
 

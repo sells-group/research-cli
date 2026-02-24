@@ -13,11 +13,11 @@ import (
 
 // mockClient implements Client for testing poll functions.
 type mockClient struct {
-	crawlStatusFunc      func(ctx context.Context, id string) (*CrawlStatusResponse, error)
+	crawlStatusFunc       func(ctx context.Context, id string) (*CrawlStatusResponse, error)
 	batchScrapeStatusFunc func(ctx context.Context, id string) (*BatchScrapeStatusResponse, error)
 }
 
-func (m *mockClient) Crawl(context.Context, CrawlRequest) (*CrawlResponse, error) {
+func (m *mockClient) Crawl(_ context.Context, _ CrawlRequest) (*CrawlResponse, error) {
 	return nil, nil
 }
 
@@ -25,11 +25,11 @@ func (m *mockClient) GetCrawlStatus(ctx context.Context, id string) (*CrawlStatu
 	return m.crawlStatusFunc(ctx, id)
 }
 
-func (m *mockClient) Scrape(context.Context, ScrapeRequest) (*ScrapeResponse, error) {
+func (m *mockClient) Scrape(_ context.Context, _ ScrapeRequest) (*ScrapeResponse, error) {
 	return nil, nil
 }
 
-func (m *mockClient) BatchScrape(context.Context, BatchScrapeRequest) (*BatchScrapeResponse, error) {
+func (m *mockClient) BatchScrape(_ context.Context, _ BatchScrapeRequest) (*BatchScrapeResponse, error) {
 	return nil, nil
 }
 
@@ -39,7 +39,7 @@ func (m *mockClient) GetBatchScrapeStatus(ctx context.Context, id string) (*Batc
 
 func TestPollCrawl_CompletesImmediately(t *testing.T) {
 	mock := &mockClient{
-		crawlStatusFunc: func(ctx context.Context, id string) (*CrawlStatusResponse, error) {
+		crawlStatusFunc: func(_ context.Context, _ string) (*CrawlStatusResponse, error) {
 			return &CrawlStatusResponse{
 				Status: "completed",
 				Total:  1,
@@ -61,7 +61,7 @@ func TestPollCrawl_CompletesImmediately(t *testing.T) {
 func TestPollCrawl_CompletesAfterRetries(t *testing.T) {
 	var calls atomic.Int32
 	mock := &mockClient{
-		crawlStatusFunc: func(ctx context.Context, id string) (*CrawlStatusResponse, error) {
+		crawlStatusFunc: func(_ context.Context, _ string) (*CrawlStatusResponse, error) {
 			n := calls.Add(1)
 			if n < 3 {
 				return &CrawlStatusResponse{Status: "scraping"}, nil
@@ -90,7 +90,7 @@ func TestPollCrawl_CompletesAfterRetries(t *testing.T) {
 
 func TestPollCrawl_Timeout(t *testing.T) {
 	mock := &mockClient{
-		crawlStatusFunc: func(ctx context.Context, id string) (*CrawlStatusResponse, error) {
+		crawlStatusFunc: func(_ context.Context, _ string) (*CrawlStatusResponse, error) {
 			return &CrawlStatusResponse{Status: "scraping"}, nil
 		},
 	}
@@ -109,7 +109,7 @@ func TestPollCrawl_Timeout(t *testing.T) {
 
 func TestPollCrawl_Failed(t *testing.T) {
 	mock := &mockClient{
-		crawlStatusFunc: func(ctx context.Context, id string) (*CrawlStatusResponse, error) {
+		crawlStatusFunc: func(_ context.Context, _ string) (*CrawlStatusResponse, error) {
 			return &CrawlStatusResponse{Status: "failed"}, nil
 		},
 	}
@@ -123,7 +123,7 @@ func TestPollCrawl_Failed(t *testing.T) {
 
 func TestPollCrawl_ErrorPropagation(t *testing.T) {
 	mock := &mockClient{
-		crawlStatusFunc: func(ctx context.Context, id string) (*CrawlStatusResponse, error) {
+		crawlStatusFunc: func(_ context.Context, _ string) (*CrawlStatusResponse, error) {
 			return nil, &APIError{StatusCode: 500, Body: "server error"}
 		},
 	}
@@ -139,7 +139,7 @@ func TestPollCrawl_ErrorPropagation(t *testing.T) {
 
 func TestPollBatchScrape_CompletesImmediately(t *testing.T) {
 	mock := &mockClient{
-		batchScrapeStatusFunc: func(ctx context.Context, id string) (*BatchScrapeStatusResponse, error) {
+		batchScrapeStatusFunc: func(_ context.Context, _ string) (*BatchScrapeStatusResponse, error) {
 			return &BatchScrapeStatusResponse{
 				Status: "completed",
 				Total:  2,
@@ -162,7 +162,7 @@ func TestPollBatchScrape_CompletesImmediately(t *testing.T) {
 func TestPollBatchScrape_CompletesAfterRetries(t *testing.T) {
 	var calls atomic.Int32
 	mock := &mockClient{
-		batchScrapeStatusFunc: func(ctx context.Context, id string) (*BatchScrapeStatusResponse, error) {
+		batchScrapeStatusFunc: func(_ context.Context, _ string) (*BatchScrapeStatusResponse, error) {
 			n := calls.Add(1)
 			if n < 2 {
 				return &BatchScrapeStatusResponse{Status: "scraping"}, nil
@@ -187,7 +187,7 @@ func TestPollBatchScrape_CompletesAfterRetries(t *testing.T) {
 
 func TestPollBatchScrape_Timeout(t *testing.T) {
 	mock := &mockClient{
-		batchScrapeStatusFunc: func(ctx context.Context, id string) (*BatchScrapeStatusResponse, error) {
+		batchScrapeStatusFunc: func(_ context.Context, _ string) (*BatchScrapeStatusResponse, error) {
 			return &BatchScrapeStatusResponse{Status: "scraping"}, nil
 		},
 	}
@@ -206,7 +206,7 @@ func TestPollBatchScrape_Timeout(t *testing.T) {
 
 func TestPollBatchScrape_Failed(t *testing.T) {
 	mock := &mockClient{
-		batchScrapeStatusFunc: func(ctx context.Context, id string) (*BatchScrapeStatusResponse, error) {
+		batchScrapeStatusFunc: func(_ context.Context, _ string) (*BatchScrapeStatusResponse, error) {
 			return &BatchScrapeStatusResponse{Status: "failed"}, nil
 		},
 	}
@@ -220,7 +220,7 @@ func TestPollBatchScrape_Failed(t *testing.T) {
 
 func TestPollBatchScrape_ErrorPropagation(t *testing.T) {
 	mock := &mockClient{
-		batchScrapeStatusFunc: func(ctx context.Context, id string) (*BatchScrapeStatusResponse, error) {
+		batchScrapeStatusFunc: func(_ context.Context, _ string) (*BatchScrapeStatusResponse, error) {
 			return nil, &APIError{StatusCode: 429, Body: "rate limited"}
 		},
 	}
@@ -238,7 +238,7 @@ func TestPollCrawl_DefaultTimeout(t *testing.T) {
 	// Verify that PollCrawl applies a default timeout when ctx has none.
 	// We override the default to a short duration to avoid a long test.
 	mock := &mockClient{
-		crawlStatusFunc: func(ctx context.Context, id string) (*CrawlStatusResponse, error) {
+		crawlStatusFunc: func(_ context.Context, _ string) (*CrawlStatusResponse, error) {
 			return &CrawlStatusResponse{Status: "scraping"}, nil
 		},
 	}
@@ -259,7 +259,7 @@ func TestPollCrawl_ExponentialBackoffTiming(t *testing.T) {
 	var calls atomic.Int32
 
 	mc := &mockClient{
-		crawlStatusFunc: func(ctx context.Context, id string) (*CrawlStatusResponse, error) {
+		crawlStatusFunc: func(_ context.Context, _ string) (*CrawlStatusResponse, error) {
 			mu.Lock()
 			timestamps = append(timestamps, time.Now())
 			mu.Unlock()

@@ -26,15 +26,24 @@ const (
 // SUSB implements the Census Statistics of US Businesses dataset.
 type SUSB struct{}
 
-func (d *SUSB) Name() string     { return "susb" }
-func (d *SUSB) Table() string    { return "fed_data.susb_data" }
-func (d *SUSB) Phase() Phase     { return Phase1 }
+// Name implements Dataset.
+func (d *SUSB) Name() string { return "susb" }
+
+// Table implements Dataset.
+func (d *SUSB) Table() string { return "fed_data.susb_data" }
+
+// Phase implements Dataset.
+func (d *SUSB) Phase() Phase { return Phase1 }
+
+// Cadence implements Dataset.
 func (d *SUSB) Cadence() Cadence { return Annual }
 
+// ShouldRun implements Dataset.
 func (d *SUSB) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return AnnualAfter(now, lastSync, time.March)
 }
 
+// Sync fetches and loads Census SUSB business data.
 func (d *SUSB) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "susb"))
 	var totalRows int64

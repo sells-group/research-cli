@@ -68,6 +68,7 @@ func TestEDGARSubmissions_ShouldRun_CrossYear(t *testing.T) {
 }
 
 func TestEDGARSubmissions_ImplementsDataset(t *testing.T) {
+	t.Parallel()
 	var _ Dataset = &EDGARSubmissions{}
 }
 
@@ -133,15 +134,15 @@ func makeFilings(n int) map[string]any {
 	}
 
 	return map[string]any{
-		"accessionNumber":      accessions,
-		"filingDate":           dates,
-		"form":                 forms,
-		"primaryDocument":      docs,
+		"accessionNumber":       accessions,
+		"filingDate":            dates,
+		"form":                  forms,
+		"primaryDocument":       docs,
 		"primaryDocDescription": descs,
-		"items":                items,
-		"size":                 sizes,
-		"isXBRL":               xbrl,
-		"isInlineXBRL":         inline,
+		"items":                 items,
+		"size":                  sizes,
+		"isXBRL":                xbrl,
+		"isInlineXBRL":          inline,
 	}
 }
 
@@ -218,7 +219,7 @@ func TestEDGARSubmissions_Sync_IgnoresFilingsPrefix(t *testing.T) {
 
 	// "filings-*.json" files should be skipped per the filter logic.
 	files := map[string]string{
-		"CIK0000001234.json":     makeSubmissionJSON(t, "1234", "Alpha Corp", "operating", "6200", 1),
+		"CIK0000001234.json":      makeSubmissionJSON(t, "1234", "Alpha Corp", "operating", "6200", 1),
 		"filings-recent-001.json": `{"accessionNumber": ["0001-24-000001"]}`,
 	}
 

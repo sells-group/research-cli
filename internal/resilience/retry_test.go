@@ -10,7 +10,7 @@ import (
 
 func TestDo_SuccessOnFirstAttempt(t *testing.T) {
 	var calls int
-	err := Do(context.Background(), DefaultRetryConfig(), func(ctx context.Context) error {
+	err := Do(context.Background(), DefaultRetryConfig(), func(_ context.Context) error {
 		calls++
 		return nil
 	})
@@ -31,7 +31,7 @@ func TestDo_SuccessAfterRetry(t *testing.T) {
 		Multiplier:     2.0,
 	}
 
-	err := Do(context.Background(), cfg, func(ctx context.Context) error {
+	err := Do(context.Background(), cfg, func(_ context.Context) error {
 		calls++
 		if calls < 3 {
 			return NewTransientError(errors.New("temporary"), 503)
@@ -55,7 +55,7 @@ func TestDo_ExhaustsRetries(t *testing.T) {
 		Multiplier:     2.0,
 	}
 
-	err := Do(context.Background(), cfg, func(ctx context.Context) error {
+	err := Do(context.Background(), cfg, func(_ context.Context) error {
 		calls++
 		return NewTransientError(errors.New("always fails"), 500)
 	})
@@ -74,7 +74,7 @@ func TestDo_NonTransientError_NoRetry(t *testing.T) {
 		InitialBackoff: 1 * time.Millisecond,
 	}
 
-	err := Do(context.Background(), cfg, func(ctx context.Context) error {
+	err := Do(context.Background(), cfg, func(_ context.Context) error {
 		calls++
 		return errors.New("permanent error: bad request")
 	})
@@ -96,7 +96,7 @@ func TestDo_ContextCancelled_StopsRetry(t *testing.T) {
 		Multiplier:     2.0,
 	}
 
-	err := Do(ctx, cfg, func(ctx context.Context) error {
+	err := Do(ctx, cfg, func(_ context.Context) error {
 		calls++
 		if calls == 2 {
 			cancel()
@@ -122,7 +122,7 @@ func TestDo_CustomShouldRetry(t *testing.T) {
 		},
 	}
 
-	err := Do(context.Background(), cfg, func(ctx context.Context) error {
+	err := Do(context.Background(), cfg, func(_ context.Context) error {
 		calls++
 		if calls == 1 {
 			return errors.New("retry me")
@@ -142,12 +142,12 @@ func TestDo_OnRetryCallback(t *testing.T) {
 	cfg := RetryConfig{
 		MaxAttempts:    3,
 		InitialBackoff: 1 * time.Millisecond,
-		OnRetry: func(attempt int, err error) {
+		OnRetry: func(attempt int, _ error) {
 			retryAttempts = append(retryAttempts, attempt)
 		},
 	}
 
-	_ = Do(context.Background(), cfg, func(ctx context.Context) error {
+	_ = Do(context.Background(), cfg, func(_ context.Context) error {
 		return NewTransientError(errors.New("fail"), 500)
 	})
 
@@ -164,7 +164,7 @@ func TestDoVal_ReturnsValueOnSuccess(t *testing.T) {
 	cfg.InitialBackoff = 1 * time.Millisecond
 
 	var calls int
-	val, err := DoVal(context.Background(), cfg, func(ctx context.Context) (string, error) {
+	val, err := DoVal(context.Background(), cfg, func(_ context.Context) (string, error) {
 		calls++
 		if calls < 2 {
 			return "", NewTransientError(errors.New("fail"), 500)
@@ -185,7 +185,7 @@ func TestDoVal_ReturnsZeroOnFailure(t *testing.T) {
 		InitialBackoff: 1 * time.Millisecond,
 	}
 
-	val, err := DoVal(context.Background(), cfg, func(ctx context.Context) (int, error) {
+	val, err := DoVal(context.Background(), cfg, func(_ context.Context) (int, error) {
 		return 42, NewTransientError(errors.New("fail"), 500)
 	})
 	if err == nil {
@@ -201,7 +201,7 @@ func TestDo_DefaultConfig(t *testing.T) {
 	var calls atomic.Int32
 	cfg := RetryConfig{} // all zero values
 
-	err := Do(context.Background(), cfg, func(ctx context.Context) error {
+	err := Do(context.Background(), cfg, func(_ context.Context) error {
 		calls.Add(1)
 		return nil
 	})
@@ -278,6 +278,7 @@ func TestComputeBackoff_WithJitter(t *testing.T) {
 }
 
 func TestRetryLogger(t *testing.T) {
+	t.Parallel()
 	// Just verify it doesn't panic.
 	logger := RetryLogger("anthropic", "create_message")
 	logger(1, errors.New("test error"))

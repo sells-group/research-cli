@@ -30,15 +30,24 @@ type ADVPart2 struct {
 	cfg *config.Config
 }
 
-func (d *ADVPart2) Name() string     { return "adv_part2" }
-func (d *ADVPart2) Table() string    { return "fed_data.adv_brochures" }
-func (d *ADVPart2) Phase() Phase     { return Phase2 }
+// Name implements Dataset.
+func (d *ADVPart2) Name() string { return "adv_part2" }
+
+// Table implements Dataset.
+func (d *ADVPart2) Table() string { return "fed_data.adv_brochures" }
+
+// Phase implements Dataset.
+func (d *ADVPart2) Phase() Phase { return Phase2 }
+
+// Cadence implements Dataset.
 func (d *ADVPart2) Cadence() Cadence { return Monthly }
 
+// ShouldRun implements Dataset.
 func (d *ADVPart2) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }
 
+// Sync fetches and loads SEC ADV Part 2 brochure data.
 func (d *ADVPart2) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 
@@ -244,7 +253,10 @@ func findPDFInExtracted(dir, pdfName string) string {
 	target := strings.ToLower(filepath.Base(pdfName))
 	var found string
 	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
 			return nil
 		}
 		if strings.ToLower(filepath.Base(path)) == target {
@@ -256,4 +268,3 @@ func findPDFInExtracted(dir, pdfName string) string {
 
 	return found
 }
-

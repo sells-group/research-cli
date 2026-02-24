@@ -359,12 +359,12 @@ func TestBuildGrataProperties_NameStripQuotes(t *testing.T) {
 
 func TestBuildGrataProperties_PassThroughColumns(t *testing.T) {
 	row := map[string]string{
-		"Name":         "Acme",
-		"Domain":       "acme.com",
-		"Grata Link":   "https://grata.com/acme",
-		"Revenue":      "$10M",
+		"Name":           "Acme",
+		"Domain":         "acme.com",
+		"Grata Link":     "https://grata.com/acme",
+		"Revenue":        "$10M",
 		"Employee Count": "150",
-		"NAICS":        "541511",
+		"NAICS":          "541511",
 	}
 
 	props := buildGrataProperties(row)

@@ -31,10 +31,10 @@ func (m *mockDataset) Name() string     { return m.name }
 func (m *mockDataset) Table() string    { return m.table }
 func (m *mockDataset) Phase() Phase     { return m.phase }
 func (m *mockDataset) Cadence() Cadence { return m.cadence }
-func (m *mockDataset) ShouldRun(now time.Time, lastSync *time.Time) bool {
+func (m *mockDataset) ShouldRun(_ time.Time, _ *time.Time) bool {
 	return m.shouldRun
 }
-func (m *mockDataset) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (m *mockDataset) Sync(_ context.Context, _ db.Pool, _ fetcher.Fetcher, _ string) (*SyncResult, error) {
 	m.synced = true
 	if m.syncErr != nil {
 		return nil, m.syncErr
@@ -305,7 +305,7 @@ type blockingMockDataset struct {
 	mockDataset
 }
 
-func (m *blockingMockDataset) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (m *blockingMockDataset) Sync(ctx context.Context, _ db.Pool, _ fetcher.Fetcher, _ string) (*SyncResult, error) {
 	m.synced = true
 	<-ctx.Done()
 	return nil, ctx.Err()

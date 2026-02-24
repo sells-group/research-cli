@@ -19,16 +19,25 @@ type XBRLFacts struct {
 	cfg *config.Config
 }
 
-func (d *XBRLFacts) Name() string     { return "xbrl_facts" }
-func (d *XBRLFacts) Table() string    { return "fed_data.xbrl_facts" }
-func (d *XBRLFacts) Phase() Phase     { return Phase3 }
+// Name implements Dataset.
+func (d *XBRLFacts) Name() string { return "xbrl_facts" }
+
+// Table implements Dataset.
+func (d *XBRLFacts) Table() string { return "fed_data.xbrl_facts" }
+
+// Phase implements Dataset.
+func (d *XBRLFacts) Phase() Phase { return Phase3 }
+
+// Cadence implements Dataset.
 func (d *XBRLFacts) Cadence() Cadence { return Daily }
 
+// ShouldRun implements Dataset.
 func (d *XBRLFacts) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return DailySchedule(now, lastSync)
 }
 
-func (d *XBRLFacts) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+// Sync fetches and loads EDGAR XBRL company facts data.
+func (d *XBRLFacts) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _ string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing XBRL company facts")
 

@@ -107,9 +107,9 @@ We charge asset-based fees.`
 
 func TestSectionsForItems(t *testing.T) {
 	sections := map[string]string{
-		"item_4":  "Advisory business content",
-		"item_5":  "Fee content",
-		"item_8":  "Investment strategy content",
+		"item_4":    "Advisory business content",
+		"item_5":    "Fee content",
+		"item_8":    "Investment strategy content",
 		SectionFull: "Full brochure text",
 	}
 

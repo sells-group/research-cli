@@ -1,3 +1,4 @@
+// Package registry loads question and field registries from Notion databases.
 package registry
 
 import (

@@ -108,10 +108,10 @@ func TestEffectiveConfidence_DecayCurve(t *testing.T) {
 
 	// Test multiple points on the curve.
 	tests := []struct {
-		name      string
+		name       string
 		daysBefore int
-		raw       float64
-		expected  float64
+		raw        float64
+		expected   float64
 	}{
 		{"30d", 30, 0.8, 0.8 * math.Pow(2, -30.0/180)},
 		{"90d", 90, 0.8, 0.8 * math.Pow(2, -90.0/180)},

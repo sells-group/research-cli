@@ -12,7 +12,7 @@ var fedsyncMigrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Apply fedsync schema migrations",
 	Long:  "Applies all pending SQL migrations to the fed_data schema in lexicographic order.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 
 		if err := cfg.Validate("fedsync"); err != nil {

@@ -710,10 +710,10 @@ Source pages:
 
 			summaries[idx] = extractText(resp)
 			usages[idx] = model.TokenUsage{
-				InputTokens:        int(resp.Usage.InputTokens),
-				OutputTokens:       int(resp.Usage.OutputTokens),
+				InputTokens:         int(resp.Usage.InputTokens),
+				OutputTokens:        int(resp.Usage.OutputTokens),
 				CacheCreationTokens: int(resp.Usage.CacheCreationInputTokens),
-				CacheReadTokens:    int(resp.Usage.CacheReadInputTokens),
+				CacheReadTokens:     int(resp.Usage.CacheReadInputTokens),
 			}
 			return nil
 		})
@@ -749,16 +749,16 @@ Preserve all factual data points. Remove duplicates. Keep the output under 25000
 
 %s`, strings.Join(validSummaries, "\n\n---\n\n"))
 
-	mergeResp, err := aiClient.CreateMessage(ctx, anthropic.MessageRequest{
+	mergeResp, mergeErr := aiClient.CreateMessage(ctx, anthropic.MessageRequest{
 		Model:     aiCfg.HaikuModel,
 		MaxTokens: 8192,
 		Messages: []anthropic.Message{
 			{Role: "user", Content: mergePrompt},
 		},
 	})
-	if err != nil {
+	if mergeErr != nil {
 		// Fall back to concatenation if merge fails.
-		return strings.Join(validSummaries, "\n\n"), usage, nil
+		return strings.Join(validSummaries, "\n\n"), usage, nil //nolint:nilerr // intentional fallback
 	}
 
 	usage.InputTokens += int(mergeResp.Usage.InputTokens)

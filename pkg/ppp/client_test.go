@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -117,22 +116,12 @@ func TestQuerier_Close(t *testing.T) {
 
 func TestLoanMatch_Fields(t *testing.T) {
 	m := LoanMatch{
-		LoanNumber:        99999,
-		BorrowerName:      "TEST COMPANY",
-		BorrowerAddress:   "123 Main St",
-		BorrowerCity:      "Austin",
-		BorrowerState:     "TX",
-		BorrowerZip:       "78701",
-		CurrentApproval:   250000.50,
-		ForgivenessAmount: 250000.50,
-		JobsReported:      15,
-		DateApproved:      time.Date(2020, 6, 15, 0, 0, 0, 0, time.UTC),
-		LoanStatus:        "Paid in Full",
-		BusinessType:      "Corporation",
-		NAICSCode:         "541511",
-		BusinessAge:       "Existing or more than 2 years old",
-		MatchTier:         1,
-		MatchScore:        1.0,
+		LoanNumber:      99999,
+		BorrowerName:    "TEST COMPANY",
+		CurrentApproval: 250000.50,
+		JobsReported:    15,
+		MatchTier:       1,
+		MatchScore:      1.0,
 	}
 
 	assert.Equal(t, int64(99999), m.LoanNumber)

@@ -1,3 +1,4 @@
+// Package resolve performs entity resolution across federal datasets using fuzzy matching.
 package resolve
 
 // Pass1DirectSQL returns the SQL for pass 1: direct CRD-CIK matching.

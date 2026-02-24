@@ -69,7 +69,7 @@ func TestDecodeJSONArray_ContextCancellation(t *testing.T) {
 
 	ch, errCh := DecodeJSONArray[testRecord](ctx, strings.NewReader(sb.String()))
 
-	for range ch {
+	for range ch { //nolint:revive // drain
 	}
 
 	var gotErr error
@@ -87,7 +87,7 @@ func TestDecodeJSONArray_InvalidFormat(t *testing.T) {
 	input := `{"id":1,"name":"not an array"}`
 	ch, errCh := DecodeJSONArray[testRecord](context.Background(), strings.NewReader(input))
 
-	for range ch {
+	for range ch { //nolint:revive // drain
 	}
 
 	var gotErr error

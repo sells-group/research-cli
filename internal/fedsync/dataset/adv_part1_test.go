@@ -58,10 +58,12 @@ func TestADVPart1_ShouldRun_PreviousYear(t *testing.T) {
 }
 
 func TestADVPart1_ImplementsDataset(t *testing.T) {
+	t.Parallel()
 	var _ Dataset = &ADVPart1{}
 }
 
 func TestADVPart1_ImplementsFullSyncer(t *testing.T) {
+	t.Parallel()
 	var _ FullSyncer = &ADVPart1{}
 }
 
@@ -230,4 +232,3 @@ func TestBuildClientTypesJSON_AllZero(t *testing.T) {
 	result := buildClientTypesJSON(record, colIdx)
 	assert.Nil(t, result)
 }
-

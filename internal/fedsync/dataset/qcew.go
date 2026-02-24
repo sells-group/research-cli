@@ -30,15 +30,24 @@ const (
 // QCEW implements the BLS Quarterly Census of Employment and Wages dataset.
 type QCEW struct{}
 
-func (d *QCEW) Name() string     { return "qcew" }
-func (d *QCEW) Table() string    { return "fed_data.qcew_data" }
-func (d *QCEW) Phase() Phase     { return Phase1 }
+// Name implements Dataset.
+func (d *QCEW) Name() string { return "qcew" }
+
+// Table implements Dataset.
+func (d *QCEW) Table() string { return "fed_data.qcew_data" }
+
+// Phase implements Dataset.
+func (d *QCEW) Phase() Phase { return Phase1 }
+
+// Cadence implements Dataset.
 func (d *QCEW) Cadence() Cadence { return Quarterly }
 
+// ShouldRun implements Dataset.
 func (d *QCEW) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return QuarterlyWithLag(now, lastSync, qcewLagMonths)
 }
 
+// Sync fetches and loads BLS QCEW employment and wage data.
 func (d *QCEW) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "qcew"))
 	var totalRows atomic.Int64
@@ -49,7 +58,6 @@ func (d *QCEW) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDi
 	g.SetLimit(3)
 
 	for year := qcewStartYear; year <= currentYear; year++ {
-		year := year
 		g.Go(func() error {
 			url := fmt.Sprintf("https://data.bls.gov/cew/data/files/%d/csv/%d_qtrly_by_industry.zip", year, year)
 			log.Info("downloading QCEW data", zap.Int("year", year), zap.String("url", url))

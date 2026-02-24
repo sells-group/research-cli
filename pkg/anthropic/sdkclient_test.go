@@ -66,7 +66,7 @@ func TestSDKClient_CreateMessage(t *testing.T) {
 }
 
 func TestSDKClient_CreateMessage_WithSystemAndTemp(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
 			"id":   "msg_sys",
@@ -104,7 +104,7 @@ func TestSDKClient_CreateMessage_WithSystemAndTemp(t *testing.T) {
 }
 
 func TestSDKClient_CreateMessage_Error(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
 			"type": "error",
@@ -168,7 +168,7 @@ func TestSDKClient_CreateBatch(t *testing.T) {
 }
 
 func TestSDKClient_CreateBatch_WithSystemAndTemp(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id":                "batch_sys",
@@ -202,7 +202,7 @@ func TestSDKClient_CreateBatch_WithSystemAndTemp(t *testing.T) {
 }
 
 func TestSDKClient_CreateBatch_Error(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"type": "error",
@@ -259,7 +259,7 @@ func TestSDKClient_GetBatch(t *testing.T) {
 }
 
 func TestSDKClient_GetBatch_Error(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"type": "error",
@@ -312,7 +312,7 @@ func TestSDKClient_GetBatchResults(t *testing.T) {
 }
 
 func TestSDKClient_GetBatchResults_Error(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"type": "error",

@@ -66,7 +66,7 @@ func (e *Engine) Run(ctx context.Context, opts RunOpts) error {
 	g.SetLimit(5)
 
 	for _, ds := range datasets {
-		ds := ds // capture loop variable
+		// capture loop variable
 		g.Go(func() error {
 			select {
 			case <-gctx.Done():

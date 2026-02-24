@@ -7,20 +7,20 @@ import (
 
 // Batch API pricing per 1M tokens (50% discount from standard).
 const (
-	HaikuInputPer1M          = 0.40  // $0.80 standard / 2
-	HaikuOutputPer1M         = 2.00  // $4.00 standard / 2
-	HaikuCacheWritePer1M     = 0.50  // $1.00 standard / 2
-	HaikuCacheReadPer1M      = 0.04  // $0.08 standard / 2
+	HaikuInputPer1M      = 0.40 // $0.80 standard / 2
+	HaikuOutputPer1M     = 2.00 // $4.00 standard / 2
+	HaikuCacheWritePer1M = 0.50 // $1.00 standard / 2
+	HaikuCacheReadPer1M  = 0.04 // $0.08 standard / 2
 
-	SonnetInputPer1M         = 1.50  // $3.00 standard / 2
-	SonnetOutputPer1M        = 7.50  // $15.00 standard / 2
-	SonnetCacheWritePer1M    = 1.875 // $3.75 standard / 2
-	SonnetCacheReadPer1M     = 0.15  // $0.30 standard / 2
+	SonnetInputPer1M      = 1.50  // $3.00 standard / 2
+	SonnetOutputPer1M     = 7.50  // $15.00 standard / 2
+	SonnetCacheWritePer1M = 1.875 // $3.75 standard / 2
+	SonnetCacheReadPer1M  = 0.15  // $0.30 standard / 2
 
-	OpusInputPer1M           = 7.50  // $15.00 standard / 2
-	OpusOutputPer1M          = 37.50 // $75.00 standard / 2
-	OpusCacheWritePer1M      = 9.375 // $18.75 standard / 2
-	OpusCacheReadPer1M       = 0.75  // $1.50 standard / 2
+	OpusInputPer1M      = 7.50  // $15.00 standard / 2
+	OpusOutputPer1M     = 37.50 // $75.00 standard / 2
+	OpusCacheWritePer1M = 9.375 // $18.75 standard / 2
+	OpusCacheReadPer1M  = 0.75  // $1.50 standard / 2
 )
 
 // CostTracker tracks per-advisor and total extraction costs.
@@ -32,12 +32,12 @@ type CostTracker struct {
 
 // AdvisorCost tracks costs for a single advisor.
 type AdvisorCost struct {
-	CRDNumber    int
-	InputTokens  int64
-	OutputTokens int64
-	CacheWrite   int64
-	CacheRead    int64
-	CostUSD      float64
+	CRDNumber      int
+	InputTokens    int64
+	OutputTokens   int64
+	CacheWrite     int64
+	CacheRead      int64
+	CostUSD        float64
 	BudgetExceeded bool
 }
 
@@ -101,8 +101,8 @@ func (ct *CostTracker) AdvisorTotal(crd int) *AdvisorCost {
 	if !ok {
 		return &AdvisorCost{CRDNumber: crd}
 	}
-	copy := *ac
-	return &copy
+	cp := *ac
+	return &cp
 }
 
 // TotalCost returns the total cost across all advisors.
@@ -173,9 +173,9 @@ func EstimateBatchCost(advisorCount int, maxTier int) string {
 	if maxTier >= 1 {
 		t1Questions := 160
 		// With prompt caching, ~80% cache hit after primer → cache_read tokens
-		t1InputFresh := int64(t1Questions * 500)                     // uncached portion
-		t1CacheRead := int64(t1Questions * 1500)                     // cached system prompt
-		t1Output := int64(t1Questions * 100)                         // smaller outputs with 256 max
+		t1InputFresh := int64(t1Questions * 500) // uncached portion
+		t1CacheRead := int64(t1Questions * 1500) // cached system prompt
+		t1Output := int64(t1Questions * 100)     // smaller outputs with 256 max
 		t1Cost := CalculateCost(1, t1InputFresh, t1Output, 0, t1CacheRead)
 		totalCost += t1Cost * float64(advisorCount)
 		breakdown = append(breakdown, fmt.Sprintf("  T1 Haiku: ~%d questions, ~$%.3f/advisor", t1Questions, t1Cost))

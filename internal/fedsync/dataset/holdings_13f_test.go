@@ -63,6 +63,7 @@ func TestHoldings13F_ShouldRun_AlreadySynced(t *testing.T) {
 }
 
 func TestHoldings13F_ImplementsDataset(t *testing.T) {
+	t.Parallel()
 	var _ Dataset = &Holdings13F{}
 }
 

@@ -29,11 +29,19 @@ type EconCensus struct {
 	cfg *config.Config
 }
 
-func (d *EconCensus) Name() string     { return "econ_census" }
-func (d *EconCensus) Table() string    { return "fed_data.economic_census" }
-func (d *EconCensus) Phase() Phase     { return Phase1 }
+// Name implements Dataset.
+func (d *EconCensus) Name() string { return "econ_census" }
+
+// Table implements Dataset.
+func (d *EconCensus) Table() string { return "fed_data.economic_census" }
+
+// Phase implements Dataset.
+func (d *EconCensus) Phase() Phase { return Phase1 }
+
+// Cadence implements Dataset.
 func (d *EconCensus) Cadence() Cadence { return Annual }
 
+// ShouldRun implements Dataset.
 func (d *EconCensus) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	// Only runs every 5 years when data is available (2017, 2022, 2027...)
 	// Check if current year is a census release year (typically 2 years after census)
@@ -62,7 +70,8 @@ func (d *EconCensus) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return false
 }
 
-func (d *EconCensus) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+// Sync fetches and loads Economic Census data.
+func (d *EconCensus) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _ string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "econ_census"))
 
 	apiKey := ""

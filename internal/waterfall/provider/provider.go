@@ -1,3 +1,4 @@
+// Package provider defines the interface and implementations for waterfall data providers.
 package provider
 
 import (

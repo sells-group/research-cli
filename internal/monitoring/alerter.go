@@ -1,3 +1,4 @@
+// Package monitoring provides alerting and notification capabilities for pipeline operations.
 package monitoring
 
 import (
@@ -17,6 +18,7 @@ import (
 // AlertType identifies the kind of alert.
 type AlertType string
 
+// AlertPipelineFailureRate and following constants identify alert categories.
 const (
 	AlertPipelineFailureRate AlertType = "pipeline_failure_rate"
 	AlertFedsyncFailure      AlertType = "fedsync_failure"
@@ -65,9 +67,9 @@ func (a *Alerter) Evaluate(snap *MetricsSnapshot) []Alert {
 			),
 			Details: map[string]any{
 				"failure_rate": snap.PipelineFailRate,
-				"threshold":   a.cfg.FailureRateThreshold,
-				"failed":      snap.PipelineFailed,
-				"finished":    finished,
+				"threshold":    a.cfg.FailureRateThreshold,
+				"failed":       snap.PipelineFailed,
+				"finished":     finished,
 			},
 			Timestamp: now,
 		})

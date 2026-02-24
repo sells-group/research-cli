@@ -104,7 +104,7 @@ func TestMistralOCR_ExtractText(t *testing.T) {
 }
 
 func TestMistralOCR_APIError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":"invalid api key"}`)) //nolint:errcheck
 	}))
@@ -154,7 +154,7 @@ func TestPdfToText_ExtractText_Success(t *testing.T) {
 }
 
 func TestMistralOCR_MalformedResponse(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{invalid json`)) //nolint:errcheck
 	}))
@@ -177,7 +177,7 @@ func TestMistralOCR_MalformedResponse(t *testing.T) {
 }
 
 func TestMistralOCR_EmptyPages(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		resp := mistralOCRResponse{Pages: []mistralOCRPage{}}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp) //nolint:errcheck

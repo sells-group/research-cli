@@ -20,7 +20,7 @@ func TestStreamCSV_ReadError(t *testing.T) {
 
 	rowCh, errCh := StreamCSV(context.Background(), r, CSVOptions{})
 
-	for range rowCh {
+	for range rowCh { //nolint:revive // drain
 	}
 
 	var gotErr error
@@ -74,7 +74,7 @@ func TestStreamCSV_HeaderSendContextCancelled(t *testing.T) {
 	cancel()
 
 	// Drain row channel
-	for range rowCh {
+	for range rowCh { //nolint:revive // drain
 	}
 
 	var gotErr error
@@ -118,7 +118,7 @@ func TestStreamCSV_RowSendContextCancelled(t *testing.T) {
 	cancel()
 
 	// Drain remaining
-	for range rowCh {
+	for range rowCh { //nolint:revive // drain
 	}
 	var gotErr error
 	for err := range errCh {

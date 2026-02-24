@@ -46,7 +46,7 @@ func TestQualityGate_SFUpdateFails(t *testing.T) {
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{
 			QualityScoreThreshold: 0.5,
-			QualityWeights: config.QualityWeights{Confidence: 1.0},
+			QualityWeights:        config.QualityWeights{Confidence: 1.0},
 		},
 	}
 
@@ -247,7 +247,7 @@ func TestQualityGate_WithReportInSFFields(t *testing.T) {
 }
 
 func TestSendToToolJet_ErrorStatus(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer ts.Close()
@@ -336,7 +336,7 @@ func TestQualityGate_SFSuccessNotionFailRetries(t *testing.T) {
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{
 			QualityScoreThreshold: 0.5,
-			QualityWeights: config.QualityWeights{Confidence: 1.0},
+			QualityWeights:        config.QualityWeights{Confidence: 1.0},
 		},
 	}
 
@@ -385,7 +385,7 @@ func TestQualityGate_SFSuccessNotionFailRetryExhausted(t *testing.T) {
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{
 			QualityScoreThreshold: 0.5,
-			QualityWeights: config.QualityWeights{Confidence: 1.0},
+			QualityWeights:        config.QualityWeights{Confidence: 1.0},
 		},
 	}
 
@@ -432,7 +432,7 @@ func TestQualityGate_NotionSuccessSFFailLogsInconsistency(t *testing.T) {
 	cfg := &config.Config{
 		Pipeline: config.PipelineConfig{
 			QualityScoreThreshold: 0.5,
-			QualityWeights: config.QualityWeights{Confidence: 1.0},
+			QualityWeights:        config.QualityWeights{Confidence: 1.0},
 		},
 	}
 
@@ -459,7 +459,7 @@ func TestSendToToolJet_Timeout(t *testing.T) {
 	// Server that blocks longer than the client timeout. Use a done channel so
 	// the handler exits promptly when the test finishes, avoiding slow Close().
 	done := make(chan struct{})
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		<-done
 		w.WriteHeader(http.StatusOK)
 	}))

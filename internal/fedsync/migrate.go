@@ -1,3 +1,4 @@
+// Package fedsync provides incremental federal data synchronization into Postgres.
 package fedsync
 
 import (

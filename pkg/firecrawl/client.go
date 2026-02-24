@@ -1,3 +1,4 @@
+// Package firecrawl provides a client for the Firecrawl web crawling and scraping API.
 package firecrawl
 
 import (

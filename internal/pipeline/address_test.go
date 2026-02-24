@@ -149,20 +149,20 @@ func TestContainsWord(t *testing.T) {
 		{"hello world", "hello", true},
 		{"hello world", "world", true},
 		{"hello world", "lo wo", false},  // not word-bounded
-		{"building permit", "il", false},  // "il" inside "building"
-		{"filing status", "il", false},    // "il" inside "filing"
+		{"building permit", "il", false}, // "il" inside "building"
+		{"filing status", "il", false},   // "il" inside "filing"
 		{"springfield, il 62701", "il", true},
 		{"tx is great", "tx", true},
 		{"extra text", "tx", false}, // "tx" inside "extra" and "text"
 		{"", "hello", false},
 		{"hello", "", false},
-		{"il", "il", true},                  // exact match
-		{"il il il", "il", true},            // multiple occurrences
-		{"foil il bar", "il", true},         // second occurrence is word-bounded
-		{"foil bail", "il", false},          // not word-bounded in either occurrence
-		{"springfield, il.", "il", true},    // period boundary
-		{"(il)", "il", true},               // parens boundary
-		{"abc-il-xyz", "il", true},         // hyphen boundary
+		{"il", "il", true},               // exact match
+		{"il il il", "il", true},         // multiple occurrences
+		{"foil il bar", "il", true},      // second occurrence is word-bounded
+		{"foil bail", "il", false},       // not word-bounded in either occurrence
+		{"springfield, il.", "il", true}, // period boundary
+		{"(il)", "il", true},             // parens boundary
+		{"abc-il-xyz", "il", true},       // hyphen boundary
 	}
 
 	for _, tc := range tests {

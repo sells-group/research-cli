@@ -19,7 +19,7 @@ import (
 func TestDoWithRetry_NetworkError(t *testing.T) {
 	// Server that immediately closes connections to simulate network errors.
 	var attempts atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := attempts.Add(1)
 		if n < 3 {
 			// Trigger a real request error by hijacking and closing the connection
@@ -52,7 +52,7 @@ func TestDoWithRetry_NetworkError(t *testing.T) {
 
 func TestDoWithRetry_AllNetworkErrors(t *testing.T) {
 	// Server that always closes the connection
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hj, ok := w.(http.Hijacker)
 		if ok {
 			conn, _, _ := hj.Hijack()
@@ -111,7 +111,7 @@ func TestDownload_InvalidURL(t *testing.T) {
 }
 
 func TestDownloadToFile_CreateFileError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("data")) //nolint:errcheck
 	}))
 	defer srv.Close()
@@ -124,7 +124,7 @@ func TestDownloadToFile_CreateFileError(t *testing.T) {
 }
 
 func TestDownloadToFile_ReadOnlyDir(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("content")) //nolint:errcheck
 	}))
 	defer srv.Close()
@@ -149,7 +149,7 @@ func TestHeadETag_InvalidURL(t *testing.T) {
 }
 
 func TestHeadETag_ContextCancelled(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("ETag", `"abc"`)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -165,7 +165,7 @@ func TestHeadETag_ContextCancelled(t *testing.T) {
 
 func TestHeadETag_ServerError(t *testing.T) {
 	// Use a server that closes the connection to trigger a network error
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hj, ok := w.(http.Hijacker)
 		if ok {
 			conn, _, _ := hj.Hijack()
@@ -181,7 +181,7 @@ func TestHeadETag_ServerError(t *testing.T) {
 }
 
 func TestHeadETag_RateLimiterCancelled(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -213,7 +213,7 @@ func TestDownloadIfChanged_InvalidURL(t *testing.T) {
 }
 
 func TestDownloadIfChanged_RateLimiterCancelled(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("data")) //nolint:errcheck
 	}))
 	defer srv.Close()
@@ -238,7 +238,7 @@ func TestDownloadIfChanged_RateLimiterCancelled(t *testing.T) {
 }
 
 func TestDownloadIfChanged_NetworkError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hj, ok := w.(http.Hijacker)
 		if ok {
 			conn, _, _ := hj.Hijack()
@@ -259,7 +259,7 @@ func TestDownloadIfChanged_NetworkError(t *testing.T) {
 }
 
 func TestDoWithRetry_RateLimiterCancelled(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("ok")) //nolint:errcheck
 	}))
 	defer srv.Close()
@@ -315,7 +315,7 @@ func TestDownload_4xxStatus(t *testing.T) {
 	for _, code := range statuses {
 		t.Run(http.StatusText(code), func(t *testing.T) {
 			var attempts atomic.Int32
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				attempts.Add(1)
 				w.WriteHeader(code)
 			}))

@@ -420,9 +420,9 @@ type FieldComparison struct {
 	GrataValue string  `json:"grata_value"`
 	OurValue   string  `json:"our_value"`
 	Match      bool    `json:"match"`
-	Proximity  float64 `json:"proximity"`   // 0.0-1.0 fuzzy score
-	MatchType  string  `json:"match_type"`  // "exact", "format", "close", "wrong", "gap"
-	Confidence float64 `json:"confidence"`  // our extraction confidence
+	Proximity  float64 `json:"proximity"`  // 0.0-1.0 fuzzy score
+	MatchType  string  `json:"match_type"` // "exact", "format", "close", "wrong", "gap"
+	Confidence float64 `json:"confidence"` // our extraction confidence
 }
 
 // CompanyComparison holds the comparison results for one company.
@@ -821,9 +821,9 @@ func CompareResults(grataCompanies []GrataCompany, results []*model.EnrichmentRe
 		}
 
 		fields := []struct {
-			name    string
-			grata   string
-			our     string
+			name     string
+			grata    string
+			our      string
 			fieldKey string // key into r.FieldValues for confidence lookup
 		}{
 			{"description", gc.Description, fieldStr(r.FieldValues, "description"), "description"},

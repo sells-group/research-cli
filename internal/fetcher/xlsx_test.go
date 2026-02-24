@@ -190,9 +190,9 @@ func TestStreamXLSX_ContextCancellation(t *testing.T) {
 			break
 		}
 	}
-	for range rowCh {
+	for range rowCh { //nolint:revive // drain
 	}
-	for range errCh {
+	for range errCh { //nolint:revive // drain
 	}
 	cancel() // ensure cleanup
 }

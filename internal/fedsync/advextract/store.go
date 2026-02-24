@@ -69,10 +69,10 @@ type OwnerRow struct {
 
 // FundRow represents a private fund from adv_private_funds.
 type FundRow struct {
-	CRDNumber      int
-	FundID         string
-	FundName       string
-	FundType       string
+	CRDNumber       int
+	FundID          string
+	FundName        string
+	FundType        string
 	GrossAssetValue *int64
 	NetAssetValue   *int64
 }

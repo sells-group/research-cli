@@ -22,11 +22,19 @@ const (
 // SECEnforcement implements the Dataset interface for SEC enforcement actions.
 type SECEnforcement struct{}
 
-func (d *SECEnforcement) Name() string     { return "sec_enforcement" }
-func (d *SECEnforcement) Table() string    { return "fed_data.sec_enforcement_actions" }
-func (d *SECEnforcement) Phase() Phase     { return Phase2 }
+// Name implements Dataset.
+func (d *SECEnforcement) Name() string { return "sec_enforcement" }
+
+// Table implements Dataset.
+func (d *SECEnforcement) Table() string { return "fed_data.sec_enforcement_actions" }
+
+// Phase implements Dataset.
+func (d *SECEnforcement) Phase() Phase { return Phase2 }
+
+// Cadence implements Dataset.
 func (d *SECEnforcement) Cadence() Cadence { return Monthly }
 
+// ShouldRun implements Dataset.
 func (d *SECEnforcement) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }
@@ -51,7 +59,7 @@ type enforcementSearchResult struct {
 }
 
 // Sync fetches recent SEC enforcement actions and upserts into the database.
-func (d *SECEnforcement) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+func (d *SECEnforcement) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _ string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "sec_enforcement"))
 
 	// Fetch enforcement actions from the last 90 days.

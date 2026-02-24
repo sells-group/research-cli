@@ -29,15 +29,24 @@ const (
 // CBP implements the Census County Business Patterns dataset.
 type CBP struct{}
 
-func (d *CBP) Name() string     { return "cbp" }
-func (d *CBP) Table() string    { return "fed_data.cbp_data" }
-func (d *CBP) Phase() Phase     { return Phase1 }
+// Name implements Dataset.
+func (d *CBP) Name() string { return "cbp" }
+
+// Table implements Dataset.
+func (d *CBP) Table() string { return "fed_data.cbp_data" }
+
+// Phase implements Dataset.
+func (d *CBP) Phase() Phase { return Phase1 }
+
+// Cadence implements Dataset.
 func (d *CBP) Cadence() Cadence { return Annual }
 
+// ShouldRun implements Dataset.
 func (d *CBP) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return AnnualAfter(now, lastSync, time.March)
 }
 
+// Sync fetches and loads Census County Business Patterns data.
 func (d *CBP) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "cbp"))
 	var totalRows atomic.Int64
@@ -48,7 +57,6 @@ func (d *CBP) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir
 	g.SetLimit(3)
 
 	for year := cbpStartYear; year <= currentYear; year++ {
-		year := year
 		// Download county-level file.
 		g.Go(func() error {
 			yy := fmt.Sprintf("%02d", year%100)

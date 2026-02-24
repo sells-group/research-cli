@@ -1,3 +1,4 @@
+// Package pipeline orchestrates the multi-phase company enrichment workflow.
 package pipeline
 
 import (
@@ -11,9 +12,9 @@ import (
 type AddressMatch struct {
 	Source     string  `json:"source"`
 	Address    string  `json:"address"`
-	CityMatch  bool   `json:"city_match"`
-	StateMatch bool   `json:"state_match"`
-	ZipMatch   bool   `json:"zip_match"`
+	CityMatch  bool    `json:"city_match"`
+	StateMatch bool    `json:"state_match"`
+	ZipMatch   bool    `json:"zip_match"`
 	Score      float64 `json:"score"`
 }
 

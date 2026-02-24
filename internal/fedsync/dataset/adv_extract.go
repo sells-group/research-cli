@@ -21,16 +21,25 @@ type ADVExtract struct {
 	cfg *config.Config
 }
 
-func (d *ADVExtract) Name() string     { return "adv_extract" }
-func (d *ADVExtract) Table() string    { return "fed_data.adv_advisor_answers" }
-func (d *ADVExtract) Phase() Phase     { return Phase3 }
+// Name implements Dataset.
+func (d *ADVExtract) Name() string { return "adv_extract" }
+
+// Table implements Dataset.
+func (d *ADVExtract) Table() string { return "fed_data.adv_advisor_answers" }
+
+// Phase implements Dataset.
+func (d *ADVExtract) Phase() Phase { return Phase3 }
+
+// Cadence implements Dataset.
 func (d *ADVExtract) Cadence() Cadence { return Monthly }
 
+// ShouldRun implements Dataset.
 func (d *ADVExtract) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return MonthlySchedule(now, lastSync)
 }
 
-func (d *ADVExtract) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+// Sync fetches and loads ADV tiered extraction data.
+func (d *ADVExtract) Sync(ctx context.Context, pool db.Pool, _ fetcher.Fetcher, _ string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 
 	if d.cfg == nil || d.cfg.Anthropic.Key == "" {

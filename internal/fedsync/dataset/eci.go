@@ -20,11 +20,19 @@ type ECI struct {
 	cfg *config.Config
 }
 
-func (d *ECI) Name() string     { return "eci" }
-func (d *ECI) Table() string    { return "fed_data.eci_data" }
-func (d *ECI) Phase() Phase     { return Phase2 }
+// Name implements Dataset.
+func (d *ECI) Name() string { return "eci" }
+
+// Table implements Dataset.
+func (d *ECI) Table() string { return "fed_data.eci_data" }
+
+// Phase implements Dataset.
+func (d *ECI) Phase() Phase { return Phase2 }
+
+// Cadence implements Dataset.
 func (d *ECI) Cadence() Cadence { return Quarterly }
 
+// ShouldRun implements Dataset.
 func (d *ECI) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return QuarterlyWithLag(now, lastSync, 2)
 }
@@ -53,7 +61,8 @@ var eciSeries = []string{
 	"CIU2010000540000A", // Professional and business services
 }
 
-func (d *ECI) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
+// Sync fetches and loads BLS Employment Cost Index data.
+func (d *ECI) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _ string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", d.Name()))
 	log.Info("syncing ECI data")
 

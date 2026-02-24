@@ -39,19 +39,19 @@ func TestClaude(t *testing.T) {
 		want       float64
 	}{
 		{
-			name: "haiku non-batch simple",
+			name:  "haiku non-batch simple",
 			model: "haiku", isBatch: false,
 			input: 1000000, output: 100000,
 			want: 0.80 + 0.40, // 0.80 input + 0.40 output
 		},
 		{
-			name: "haiku batch 50% discount",
+			name:  "haiku batch 50% discount",
 			model: "haiku", isBatch: true,
 			input: 1000000, output: 100000,
 			want: (0.80 * 0.5) + (0.40 * 0.5), // 0.40 + 0.20
 		},
 		{
-			name: "haiku with cache",
+			name:  "haiku with cache",
 			model: "haiku", isBatch: false,
 			input: 500000, output: 50000,
 			cacheWrite: 200000, cacheRead: 300000,
@@ -62,19 +62,19 @@ func TestClaude(t *testing.T) {
 			want: 0.40 + 0.20 + 0.20 + 0.024,
 		},
 		{
-			name: "sonnet non-batch",
+			name:  "sonnet non-batch",
 			model: "sonnet", isBatch: false,
 			input: 1000000, output: 100000,
 			want: 3.00 + 1.50, // 3.00 input + 1.50 output
 		},
 		{
-			name: "unknown model returns 0",
+			name:  "unknown model returns 0",
 			model: "unknown", isBatch: false,
 			input: 1000000, output: 1000000,
 			want: 0,
 		},
 		{
-			name: "zero tokens returns 0",
+			name:  "zero tokens returns 0",
 			model: "haiku", isBatch: false,
 			want: 0,
 		},

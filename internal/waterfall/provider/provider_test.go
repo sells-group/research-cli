@@ -15,8 +15,8 @@ type mockProvider struct {
 	supportedFields []string
 }
 
-func (m *mockProvider) Name() string              { return m.name }
-func (m *mockProvider) SupportedFields() []string  { return m.supportedFields }
+func (m *mockProvider) Name() string                    { return m.name }
+func (m *mockProvider) SupportedFields() []string       { return m.supportedFields }
 func (m *mockProvider) CostPerQuery(_ []string) float64 { return 0.10 }
 func (m *mockProvider) CanProvide(fieldKey string) bool {
 	for _, f := range m.supportedFields {
@@ -88,7 +88,7 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 	// Concurrent writes.
 	for i := 0; i < 50; i++ {
 		wg.Add(1)
-		go func(idx int) {
+		go func(_ int) {
 			defer wg.Done()
 			r.Register(&mockProvider{name: "provider"})
 		}(i)

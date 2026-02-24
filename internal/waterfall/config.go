@@ -1,3 +1,4 @@
+// Package waterfall provides configurable data enrichment provider chains.
 package waterfall
 
 import (

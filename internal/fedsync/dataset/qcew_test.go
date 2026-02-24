@@ -66,8 +66,8 @@ func TestQCEW_Sync_NoRelevantFiles(t *testing.T) {
 
 	// ZIP contains only non-CSV files that don't match any NAICS prefix.
 	files := map[string]string{
-		"readme.txt":        "QCEW data readme",
-		"metadata.json":     "{}",
+		"readme.txt":    "QCEW data readme",
+		"metadata.json": "{}",
 	}
 
 	zipPath := createTestZipMulti(t, dir, "qcew_no_relevant.zip", files)

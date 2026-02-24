@@ -22,8 +22,8 @@ type mockProvider struct {
 	queryCalled     bool
 }
 
-func (m *mockProvider) Name() string                   { return m.name }
-func (m *mockProvider) SupportedFields() []string      { return m.supportedFields }
+func (m *mockProvider) Name() string                    { return m.name }
+func (m *mockProvider) SupportedFields() []string       { return m.supportedFields }
 func (m *mockProvider) CostPerQuery(_ []string) float64 { return m.costPerQuery }
 func (m *mockProvider) CanProvide(fieldKey string) bool {
 	for _, f := range m.supportedFields {

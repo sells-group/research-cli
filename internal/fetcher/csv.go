@@ -1,3 +1,4 @@
+// Package fetcher downloads and parses data from HTTP, FTP, CSV, XML, JSON, XLSX, and ZIP sources.
 package fetcher
 
 import (
@@ -11,10 +12,10 @@ import (
 
 // CSVOptions configures the streaming CSV parser.
 type CSVOptions struct {
-	Delimiter  rune           // default ','
-	HasHeader  bool           // if true, first row is skipped but sent to HeaderCh
+	Delimiter  rune            // default ','
+	HasHeader  bool            // if true, first row is skipped but sent to HeaderCh
 	HeaderCh   chan<- []string // optional: receives the header row
-	Comment    rune           // comment character (0 = none)
+	Comment    rune            // comment character (0 = none)
 	LazyQuotes bool
 	TrimSpace  bool
 }

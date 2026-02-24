@@ -32,6 +32,7 @@ var (
 // StubAnthropicClient implements anthropic.Client with canned responses.
 type StubAnthropicClient struct{}
 
+// CreateMessage implements anthropic.Client.
 func (s *StubAnthropicClient) CreateMessage(_ context.Context, req anthropic.MessageRequest) (*anthropic.MessageResponse, error) {
 	// Detect classification vs extraction by checking prompt content.
 	content := ""
@@ -61,6 +62,7 @@ func (s *StubAnthropicClient) CreateMessage(_ context.Context, req anthropic.Mes
 	}, nil
 }
 
+// CreateBatch implements anthropic.Client.
 func (s *StubAnthropicClient) CreateBatch(_ context.Context, req anthropic.BatchRequest) (*anthropic.BatchResponse, error) {
 	return &anthropic.BatchResponse{
 		ID:               "stub-batch-001",
@@ -71,6 +73,7 @@ func (s *StubAnthropicClient) CreateBatch(_ context.Context, req anthropic.Batch
 	}, nil
 }
 
+// GetBatch implements anthropic.Client.
 func (s *StubAnthropicClient) GetBatch(_ context.Context, _ string) (*anthropic.BatchResponse, error) {
 	return &anthropic.BatchResponse{
 		ID:               "stub-batch-001",
@@ -81,6 +84,7 @@ func (s *StubAnthropicClient) GetBatch(_ context.Context, _ string) (*anthropic.
 	}, nil
 }
 
+// GetBatchResults implements anthropic.Client.
 func (s *StubAnthropicClient) GetBatchResults(_ context.Context, _ string) (anthropic.BatchResultIterator, error) {
 	return &stubBatchIterator{done: true}, nil
 }
@@ -90,9 +94,16 @@ type stubBatchIterator struct {
 	done bool
 }
 
-func (it *stubBatchIterator) Next() bool  { return false }
-func (it *stubBatchIterator) Err() error  { return nil }
+// Next implements anthropic.BatchResultIterator.
+func (it *stubBatchIterator) Next() bool { return false }
+
+// Err implements anthropic.BatchResultIterator.
+func (it *stubBatchIterator) Err() error { return nil }
+
+// Close implements anthropic.BatchResultIterator.
 func (it *stubBatchIterator) Close() error { return nil }
+
+// Item implements anthropic.BatchResultIterator.
 func (it *stubBatchIterator) Item() anthropic.BatchResultItem {
 	return anthropic.BatchResultItem{}
 }
@@ -102,13 +113,15 @@ func (it *stubBatchIterator) Item() anthropic.BatchResultItem {
 // StubFirecrawlClient implements firecrawl.Client with canned responses.
 type StubFirecrawlClient struct{}
 
-func (s *StubFirecrawlClient) Crawl(_ context.Context, req firecrawl.CrawlRequest) (*firecrawl.CrawlResponse, error) {
+// Crawl implements firecrawl.Client.
+func (s *StubFirecrawlClient) Crawl(_ context.Context, _ firecrawl.CrawlRequest) (*firecrawl.CrawlResponse, error) {
 	return &firecrawl.CrawlResponse{
 		Success: true,
 		ID:      "stub-crawl-001",
 	}, nil
 }
 
+// GetCrawlStatus implements firecrawl.Client.
 func (s *StubFirecrawlClient) GetCrawlStatus(_ context.Context, _ string) (*firecrawl.CrawlStatusResponse, error) {
 	return &firecrawl.CrawlStatusResponse{
 		Status: "completed",
@@ -121,6 +134,7 @@ func (s *StubFirecrawlClient) GetCrawlStatus(_ context.Context, _ string) (*fire
 	}, nil
 }
 
+// Scrape implements firecrawl.Client.
 func (s *StubFirecrawlClient) Scrape(_ context.Context, req firecrawl.ScrapeRequest) (*firecrawl.ScrapeResponse, error) {
 	return &firecrawl.ScrapeResponse{
 		Success: true,
@@ -133,6 +147,7 @@ func (s *StubFirecrawlClient) Scrape(_ context.Context, req firecrawl.ScrapeRequ
 	}, nil
 }
 
+// BatchScrape implements firecrawl.Client.
 func (s *StubFirecrawlClient) BatchScrape(_ context.Context, _ firecrawl.BatchScrapeRequest) (*firecrawl.BatchScrapeResponse, error) {
 	return &firecrawl.BatchScrapeResponse{
 		Success: true,
@@ -140,6 +155,7 @@ func (s *StubFirecrawlClient) BatchScrape(_ context.Context, _ firecrawl.BatchSc
 	}, nil
 }
 
+// GetBatchScrapeStatus implements firecrawl.Client.
 func (s *StubFirecrawlClient) GetBatchScrapeStatus(_ context.Context, _ string) (*firecrawl.BatchScrapeStatusResponse, error) {
 	return &firecrawl.BatchScrapeStatusResponse{
 		Status: "completed",
@@ -155,6 +171,7 @@ func (s *StubFirecrawlClient) GetBatchScrapeStatus(_ context.Context, _ string) 
 // StubJinaClient implements jina.Client with canned responses.
 type StubJinaClient struct{}
 
+// Read implements jina.Client.
 func (s *StubJinaClient) Read(_ context.Context, targetURL string) (*jina.ReadResponse, error) {
 	return &jina.ReadResponse{
 		Code: 200,
@@ -167,7 +184,8 @@ func (s *StubJinaClient) Read(_ context.Context, targetURL string) (*jina.ReadRe
 	}, nil
 }
 
-func (s *StubJinaClient) Search(_ context.Context, query string, _ ...jina.SearchOption) (*jina.SearchResponse, error) {
+// Search implements jina.Client.
+func (s *StubJinaClient) Search(_ context.Context, _ string, _ ...jina.SearchOption) (*jina.SearchResponse, error) {
 	return &jina.SearchResponse{
 		Code: 200,
 		Data: []jina.SearchResult{
@@ -198,6 +216,7 @@ func (s *StubJinaClient) Search(_ context.Context, query string, _ ...jina.Searc
 // StubPerplexityClient implements perplexity.Client with canned responses.
 type StubPerplexityClient struct{}
 
+// ChatCompletion implements perplexity.Client.
 func (s *StubPerplexityClient) ChatCompletion(_ context.Context, _ perplexity.ChatCompletionRequest) (*perplexity.ChatCompletionResponse, error) {
 	return &perplexity.ChatCompletionResponse{
 		ID: "stub-pplx-001",
@@ -222,18 +241,22 @@ func (s *StubPerplexityClient) ChatCompletion(_ context.Context, _ perplexity.Ch
 // StubSalesforceClient implements salesforce.Client as a no-op.
 type StubSalesforceClient struct{}
 
+// Query implements salesforce.Client.
 func (s *StubSalesforceClient) Query(_ context.Context, _ string, _ any) error {
 	return nil
 }
 
+// InsertOne implements salesforce.Client.
 func (s *StubSalesforceClient) InsertOne(_ context.Context, _ string, _ map[string]any) (string, error) {
 	return "stub-sf-001", nil
 }
 
+// UpdateOne implements salesforce.Client.
 func (s *StubSalesforceClient) UpdateOne(_ context.Context, _ string, _ string, _ map[string]any) error {
 	return nil
 }
 
+// UpdateCollection implements salesforce.Client.
 func (s *StubSalesforceClient) UpdateCollection(_ context.Context, _ string, records []salesforce.CollectionRecord) ([]salesforce.CollectionResult, error) {
 	results := make([]salesforce.CollectionResult, len(records))
 	for i, r := range records {
@@ -242,6 +265,7 @@ func (s *StubSalesforceClient) UpdateCollection(_ context.Context, _ string, rec
 	return results, nil
 }
 
+// DescribeSObject implements salesforce.Client.
 func (s *StubSalesforceClient) DescribeSObject(_ context.Context, name string) (*salesforce.SObjectDescription, error) {
 	return &salesforce.SObjectDescription{Name: name, Label: name}, nil
 }
@@ -251,14 +275,17 @@ func (s *StubSalesforceClient) DescribeSObject(_ context.Context, name string) (
 // StubNotionClient implements notion.Client as a no-op.
 type StubNotionClient struct{}
 
+// QueryDatabase implements notion.Client.
 func (s *StubNotionClient) QueryDatabase(_ context.Context, _ string, _ *notionapi.DatabaseQueryRequest) (*notionapi.DatabaseQueryResponse, error) {
 	return &notionapi.DatabaseQueryResponse{}, nil
 }
 
+// CreatePage implements notion.Client.
 func (s *StubNotionClient) CreatePage(_ context.Context, _ *notionapi.PageCreateRequest) (*notionapi.Page, error) {
 	return &notionapi.Page{}, nil
 }
 
+// UpdatePage implements notion.Client.
 func (s *StubNotionClient) UpdatePage(_ context.Context, _ string, _ *notionapi.PageUpdateRequest) (*notionapi.Page, error) {
 	return &notionapi.Page{}, nil
 }
@@ -268,10 +295,12 @@ func (s *StubNotionClient) UpdatePage(_ context.Context, _ string, _ *notionapi.
 // StubPPPClient implements ppp.Querier as a no-op.
 type StubPPPClient struct{}
 
+// FindLoans implements ppp.Querier.
 func (s *StubPPPClient) FindLoans(_ context.Context, _, _, _ string) ([]ppp.LoanMatch, error) {
 	return nil, nil
 }
 
+// Close implements ppp.Querier.
 func (s *StubPPPClient) Close() {}
 
 // --- Canned Content ---

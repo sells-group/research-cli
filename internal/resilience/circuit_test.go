@@ -12,7 +12,7 @@ func TestCircuitBreaker_ClosedState_PassesThrough(t *testing.T) {
 	cb := NewCircuitBreaker(DefaultCircuitBreakerConfig())
 
 	var calls int
-	err := cb.Execute(context.Background(), func(ctx context.Context) error {
+	err := cb.Execute(context.Background(), func(_ context.Context) error {
 		calls++
 		return nil
 	})
@@ -36,7 +36,7 @@ func TestCircuitBreaker_OpensAfterThreshold(t *testing.T) {
 
 	// Fail 3 times to trip the breaker.
 	for i := 0; i < 3; i++ {
-		_ = cb.Execute(context.Background(), func(ctx context.Context) error {
+		_ = cb.Execute(context.Background(), func(_ context.Context) error {
 			return errors.New("fail")
 		})
 	}
@@ -46,7 +46,7 @@ func TestCircuitBreaker_OpensAfterThreshold(t *testing.T) {
 	}
 
 	// Next call should be rejected immediately.
-	err := cb.Execute(context.Background(), func(ctx context.Context) error {
+	err := cb.Execute(context.Background(), func(_ context.Context) error {
 		t.Error("should not be called when circuit is open")
 		return nil
 	})
@@ -64,7 +64,7 @@ func TestCircuitBreaker_SuccessResetsClosed(t *testing.T) {
 
 	// Fail twice (below threshold).
 	for i := 0; i < 2; i++ {
-		_ = cb.Execute(context.Background(), func(ctx context.Context) error {
+		_ = cb.Execute(context.Background(), func(_ context.Context) error {
 			return errors.New("fail")
 		})
 	}
@@ -78,7 +78,7 @@ func TestCircuitBreaker_SuccessResetsClosed(t *testing.T) {
 	}
 
 	// Success resets counter.
-	_ = cb.Execute(context.Background(), func(ctx context.Context) error {
+	_ = cb.Execute(context.Background(), func(_ context.Context) error {
 		return nil
 	})
 
@@ -99,7 +99,7 @@ func TestCircuitBreaker_HalfOpenAfterTimeout(t *testing.T) {
 
 	// Trip the breaker.
 	for i := 0; i < 2; i++ {
-		_ = cb.Execute(context.Background(), func(ctx context.Context) error {
+		_ = cb.Execute(context.Background(), func(_ context.Context) error {
 			return errors.New("fail")
 		})
 	}
@@ -115,7 +115,7 @@ func TestCircuitBreaker_HalfOpenAfterTimeout(t *testing.T) {
 	}
 
 	// Successful probe closes the circuit.
-	err := cb.Execute(context.Background(), func(ctx context.Context) error {
+	err := cb.Execute(context.Background(), func(_ context.Context) error {
 		return nil
 	})
 	if err != nil {
@@ -137,7 +137,7 @@ func TestCircuitBreaker_HalfOpenFailure_Reopens(t *testing.T) {
 
 	// Trip the breaker.
 	for i := 0; i < 2; i++ {
-		_ = cb.Execute(context.Background(), func(ctx context.Context) error {
+		_ = cb.Execute(context.Background(), func(_ context.Context) error {
 			return errors.New("fail")
 		})
 	}
@@ -146,7 +146,7 @@ func TestCircuitBreaker_HalfOpenFailure_Reopens(t *testing.T) {
 	cb.nowFunc = func() time.Time { return now.Add(200 * time.Millisecond) }
 
 	// Fail in half-open state → reopen.
-	_ = cb.Execute(context.Background(), func(ctx context.Context) error {
+	_ = cb.Execute(context.Background(), func(_ context.Context) error {
 		return errors.New("still failing")
 	})
 
@@ -176,7 +176,7 @@ func TestCircuitBreaker_OnStateChange(t *testing.T) {
 
 	// Trip the breaker.
 	for i := 0; i < 2; i++ {
-		_ = cb.Execute(context.Background(), func(ctx context.Context) error {
+		_ = cb.Execute(context.Background(), func(_ context.Context) error {
 			return errors.New("fail")
 		})
 	}
@@ -202,7 +202,7 @@ func TestCircuitBreaker_ShouldTrip(t *testing.T) {
 
 	// These shouldn't count toward the threshold.
 	for i := 0; i < 5; i++ {
-		_ = cb.Execute(context.Background(), func(ctx context.Context) error {
+		_ = cb.Execute(context.Background(), func(_ context.Context) error {
 			return errors.New("non-tripworthy")
 		})
 	}
@@ -212,7 +212,7 @@ func TestCircuitBreaker_ShouldTrip(t *testing.T) {
 
 	// These should trip.
 	for i := 0; i < 2; i++ {
-		_ = cb.Execute(context.Background(), func(ctx context.Context) error {
+		_ = cb.Execute(context.Background(), func(_ context.Context) error {
 			return errors.New("tripworthy")
 		})
 	}
@@ -230,7 +230,7 @@ func TestCircuitBreaker_Reset(t *testing.T) {
 
 	// Trip it.
 	for i := 0; i < 2; i++ {
-		_ = cb.Execute(context.Background(), func(ctx context.Context) error {
+		_ = cb.Execute(context.Background(), func(_ context.Context) error {
 			return errors.New("fail")
 		})
 	}
@@ -245,7 +245,7 @@ func TestCircuitBreaker_Reset(t *testing.T) {
 	}
 
 	// Should work normally now.
-	err := cb.Execute(context.Background(), func(ctx context.Context) error {
+	err := cb.Execute(context.Background(), func(_ context.Context) error {
 		return nil
 	})
 	if err != nil {
@@ -254,6 +254,7 @@ func TestCircuitBreaker_Reset(t *testing.T) {
 }
 
 func TestCircuitBreaker_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	cfg := CircuitBreakerConfig{
 		FailureThreshold: 100,
 		ResetTimeout:     1 * time.Minute,
@@ -265,7 +266,7 @@ func TestCircuitBreaker_ConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = cb.Execute(context.Background(), func(ctx context.Context) error {
+			_ = cb.Execute(context.Background(), func(_ context.Context) error {
 				if i%2 == 0 {
 					return errors.New("fail")
 				}
@@ -280,7 +281,7 @@ func TestCircuitBreaker_ConcurrentAccess(t *testing.T) {
 func TestExecuteVal_CircuitBreaker(t *testing.T) {
 	cb := NewCircuitBreaker(DefaultCircuitBreakerConfig())
 
-	val, err := ExecuteVal(cb, context.Background(), func(ctx context.Context) (int, error) {
+	val, err := ExecuteVal(context.Background(), cb, func(_ context.Context) (int, error) {
 		return 42, nil
 	})
 	if err != nil {
@@ -299,11 +300,11 @@ func TestExecuteVal_CircuitOpen(t *testing.T) {
 	cb := NewCircuitBreaker(cfg)
 
 	// Trip the breaker.
-	_ = cb.Execute(context.Background(), func(ctx context.Context) error {
+	_ = cb.Execute(context.Background(), func(_ context.Context) error {
 		return errors.New("fail")
 	})
 
-	val, err := ExecuteVal(cb, context.Background(), func(ctx context.Context) (int, error) {
+	val, err := ExecuteVal(context.Background(), cb, func(_ context.Context) (int, error) {
 		return 42, nil
 	})
 	if !errors.Is(err, ErrCircuitOpen) {
@@ -337,7 +338,7 @@ func TestServiceBreakers_States(t *testing.T) {
 
 	// Create a breaker and trip it.
 	cb := sb.Get("anthropic")
-	_ = cb.Execute(context.Background(), func(ctx context.Context) error {
+	_ = cb.Execute(context.Background(), func(_ context.Context) error {
 		return errors.New("fail")
 	})
 

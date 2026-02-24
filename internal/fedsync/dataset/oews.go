@@ -28,15 +28,24 @@ const (
 // OEWS implements the BLS Occupational Employment and Wage Statistics dataset.
 type OEWS struct{}
 
-func (d *OEWS) Name() string     { return "oews" }
-func (d *OEWS) Table() string    { return "fed_data.oews_data" }
-func (d *OEWS) Phase() Phase     { return Phase1 }
+// Name implements Dataset.
+func (d *OEWS) Name() string { return "oews" }
+
+// Table implements Dataset.
+func (d *OEWS) Table() string { return "fed_data.oews_data" }
+
+// Phase implements Dataset.
+func (d *OEWS) Phase() Phase { return Phase1 }
+
+// Cadence implements Dataset.
 func (d *OEWS) Cadence() Cadence { return Annual }
 
+// ShouldRun implements Dataset.
 func (d *OEWS) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return AnnualAfter(now, lastSync, time.April)
 }
 
+// Sync fetches and loads BLS OEWS occupation and wage data.
 func (d *OEWS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "oews"))
 	var totalRows int64

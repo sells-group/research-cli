@@ -9,9 +9,9 @@ import (
 
 // XLSXOptions configures the XLSX parser.
 type XLSXOptions struct {
-	SheetIndex int            // default 0
-	SheetName  string         // if set, overrides SheetIndex
-	SkipRows   int            // number of header rows to skip
+	SheetIndex int             // default 0
+	SheetName  string          // if set, overrides SheetIndex
+	SkipRows   int             // number of header rows to skip
 	HeaderCh   chan<- []string // optional: receives the first row
 }
 

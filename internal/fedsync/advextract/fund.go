@@ -41,7 +41,6 @@ func ExtractFunds(ctx context.Context, docs *AdvisorDocs, client anthropic.Clien
 	g.SetLimit(maxFundConcurrency)
 
 	for _, fund := range docs.Funds {
-		fund := fund
 		g.Go(func() error {
 			answers, err := extractSingleFund(gctx, docs, fund, fundQuestions, client, maxTier, costTracker)
 			if err != nil {

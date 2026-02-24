@@ -29,11 +29,19 @@ type FormD struct {
 	cfg *config.Config
 }
 
-func (d *FormD) Name() string     { return "form_d" }
-func (d *FormD) Table() string    { return "fed_data.form_d" }
-func (d *FormD) Phase() Phase     { return Phase1B }
+// Name implements Dataset.
+func (d *FormD) Name() string { return "form_d" }
+
+// Table implements Dataset.
+func (d *FormD) Table() string { return "fed_data.form_d" }
+
+// Phase implements Dataset.
+func (d *FormD) Phase() Phase { return Phase1B }
+
+// Cadence implements Dataset.
 func (d *FormD) Cadence() Cadence { return Daily }
 
+// ShouldRun implements Dataset.
 func (d *FormD) ShouldRun(now time.Time, lastSync *time.Time) bool {
 	return DailySchedule(now, lastSync)
 }
@@ -77,6 +85,7 @@ type formDOffering struct {
 	TotalSold     int64  `xml:"offeringSalesAmounts>totalAmountSold"`
 }
 
+// Sync fetches and loads SEC Form D offering data.
 func (d *FormD) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
 	log := zap.L().With(zap.String("dataset", "form_d"))
 

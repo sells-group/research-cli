@@ -1,3 +1,4 @@
+// Package advextract extracts structured data from SEC ADV filings using tiered LLM analysis.
 package advextract
 
 import (
@@ -27,11 +28,11 @@ type Extractor struct {
 
 // ExtractorOpts configures the extractor.
 type ExtractorOpts struct {
-	MaxTier    int
-	MaxCost    float64 // per-advisor budget (0=unlimited)
-	DryRun     bool
-	FundsOnly  bool
-	Force      bool
+	MaxTier   int
+	MaxCost   float64 // per-advisor budget (0=unlimited)
+	DryRun    bool
+	FundsOnly bool
+	Force     bool
 }
 
 // NewExtractor creates a new ADV extractor.
@@ -375,7 +376,6 @@ func (e *Extractor) RunBatch(ctx context.Context, crds []int) error {
 
 	var completed, failed int64
 	for _, crd := range crds {
-		crd := crd
 		g.Go(func() error {
 			if err := e.RunAdvisor(gctx, crd); err != nil {
 				zap.L().Error("advisor extraction failed",
@@ -454,7 +454,7 @@ func buildSectionIndex(docs *AdvisorDocs, brochures []BrochureRow, crs []CRSRow)
 
 // mergeAnswers merges new answers into existing, preferring higher-tier answers
 // for the same question key.
-func mergeAnswers(existing, new []Answer) []Answer {
+func mergeAnswers(existing, newAnswers []Answer) []Answer {
 	byKey := make(map[string]int) // key → index in result
 	result := make([]Answer, len(existing))
 	copy(result, existing)
@@ -463,7 +463,7 @@ func mergeAnswers(existing, new []Answer) []Answer {
 		byKey[a.QuestionKey] = i
 	}
 
-	for _, a := range new {
+	for _, a := range newAnswers {
 		if idx, ok := byKey[a.QuestionKey]; ok {
 			// Higher tier or higher confidence supersedes.
 			if a.Tier > result[idx].Tier || (a.Tier == result[idx].Tier && a.Confidence > result[idx].Confidence) {

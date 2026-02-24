@@ -106,7 +106,7 @@ func TestStreamXML_ContextCancellation(t *testing.T) {
 
 	ch, errCh := StreamXML[testItem](ctx, strings.NewReader(sb.String()), "item")
 
-	for range ch {
+	for range ch { //nolint:revive // drain
 	}
 
 	var gotErr error

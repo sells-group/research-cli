@@ -91,7 +91,7 @@ func TestStreamCSV_ContextCancellation(t *testing.T) {
 	}
 
 	// Drain remaining
-	for range rowCh {
+	for range rowCh { //nolint:revive // drain
 	}
 
 	// Check that we got a cancellation error or channel closed cleanly
@@ -162,7 +162,7 @@ func TestStreamCSV_ContextAlreadyCancelled(t *testing.T) {
 	input := "a,b,c\n1,2,3\n"
 	rowCh, errCh := StreamCSV(ctx, strings.NewReader(input), CSVOptions{})
 
-	for range rowCh {
+	for range rowCh { //nolint:revive // drain
 	}
 	// May get 0 rows due to cancellation
 	var gotErr error
