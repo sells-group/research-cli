@@ -54,8 +54,9 @@ type Pipeline struct {
 	// Deferred SF write mode: when set, Phase 9 builds write intents
 	// via PrepareGate instead of executing SF writes via QualityGate.
 	// The callback is invoked with each intent for external collection.
-	deferSFWrites bool
-	onWriteIntent func(*SFWriteIntent)
+	deferSFWrites  bool
+	onWriteIntent  func(*SFWriteIntent)
+	forceReExtract bool
 }
 
 // New creates a new Pipeline with all dependencies.
@@ -129,6 +130,11 @@ func New(
 func (p *Pipeline) SetDeferredWrites(fn func(*SFWriteIntent)) {
 	p.deferSFWrites = true
 	p.onWriteIntent = fn
+}
+
+// SetForceReExtract disables answer reuse so all fields are re-extracted.
+func (p *Pipeline) SetForceReExtract(force bool) {
+	p.forceReExtract = force
 }
 
 // FlushDeferredWrites executes collected SF write intents in bulk using the
@@ -505,28 +511,37 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 
 	// --- Optimization: Existing-answer lookup ---
 	// Skip questions that already have high-confidence answers from prior runs.
-	skipThreshold := p.cfg.Pipeline.SkipConfidenceThreshold
-	if skipThreshold <= 0 {
-		skipThreshold = 0.8
-	}
-	existingAnswers, existErr := p.store.GetHighConfidenceAnswers(ctx, company.URL, skipThreshold)
-	if existErr != nil {
-		log.Warn("pipeline: failed to load existing answers", zap.Error(existErr))
-	}
+	// Disabled when forceReExtract is set (--force flag).
+	var existingAnswers []model.ExtractionAnswer
 	var skippedByExisting int
-	if len(existingAnswers) > 0 {
-		existingKeys := make(map[string]bool, len(existingAnswers))
-		for _, a := range existingAnswers {
-			existingKeys[a.FieldKey] = true
+	if !p.forceReExtract {
+		skipThreshold := p.cfg.Pipeline.SkipConfidenceThreshold
+		if skipThreshold <= 0 {
+			skipThreshold = 0.8
 		}
-		batches.Tier1 = filterRoutedQuestions(batches.Tier1, existingKeys, &skippedByExisting)
-		batches.Tier2 = filterRoutedQuestions(batches.Tier2, existingKeys, &skippedByExisting)
-		batches.Tier3 = filterRoutedQuestions(batches.Tier3, existingKeys, &skippedByExisting)
-		if skippedByExisting > 0 {
-			log.Info("pipeline: skipped questions with existing high-confidence answers",
-				zap.Int("skipped", skippedByExisting),
-				zap.Int("existing_answers", len(existingAnswers)),
-			)
+		var reuseTTL time.Duration
+		if p.cfg.Pipeline.AnswerReuseTTLDays > 0 {
+			reuseTTL = time.Duration(p.cfg.Pipeline.AnswerReuseTTLDays) * 24 * time.Hour
+		}
+		var existErr error
+		existingAnswers, existErr = p.store.GetHighConfidenceAnswers(ctx, company.URL, skipThreshold, reuseTTL)
+		if existErr != nil {
+			log.Warn("pipeline: failed to load existing answers", zap.Error(existErr))
+		}
+		if len(existingAnswers) > 0 {
+			existingKeys := make(map[string]bool, len(existingAnswers))
+			for _, a := range existingAnswers {
+				existingKeys[a.FieldKey] = true
+			}
+			batches.Tier1 = filterRoutedQuestions(batches.Tier1, existingKeys, &skippedByExisting)
+			batches.Tier2 = filterRoutedQuestions(batches.Tier2, existingKeys, &skippedByExisting)
+			batches.Tier3 = filterRoutedQuestions(batches.Tier3, existingKeys, &skippedByExisting)
+			if skippedByExisting > 0 {
+				log.Info("pipeline: skipped questions with existing high-confidence answers",
+					zap.Int("skipped", skippedByExisting),
+					zap.Int("existing_answers", len(existingAnswers)),
+				)
+			}
 		}
 	}
 
@@ -644,7 +659,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			return nil
 		}
 
-		esc := EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold)
+		esc := EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold, p.cfg.Pipeline.EscalationFailRateThreshold)
 		if len(esc) == 0 {
 			return nil
 		}
@@ -662,7 +677,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	_ = g2.Wait()
 
 	// Escalation count for reporting (re-derive from answers).
-	escalated := EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold)
+	escalated := EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold, p.cfg.Pipeline.EscalationFailRateThreshold)
 
 	// ===== Phase 5: Combine T2 results =====
 	var t2Answers []model.ExtractionAnswer

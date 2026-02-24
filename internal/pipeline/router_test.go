@@ -114,7 +114,7 @@ func TestEscalateQuestions(t *testing.T) {
 		{QuestionID: "q2", FieldKey: "field2", Confidence: 0.8, Tier: 1, Value: "Tech"}, // High confidence.
 	}
 
-	escalated := EscalateQuestions(answers, questions, index, 0.4)
+	escalated := EscalateQuestions(answers, questions, index, 0.4, 0.35)
 
 	assert.Len(t, escalated, 1)
 	assert.Equal(t, "q1", escalated[0].Question.ID)
@@ -135,7 +135,7 @@ func TestEscalateQuestions_NoneEscalated(t *testing.T) {
 		{QuestionID: "q1", FieldKey: "f1", Confidence: 0.9, Tier: 1, Value: "Tech"},
 	}
 
-	escalated := EscalateQuestions(answers, questions, index, 0.4)
+	escalated := EscalateQuestions(answers, questions, index, 0.4, 0.35)
 	assert.Len(t, escalated, 0)
 }
 

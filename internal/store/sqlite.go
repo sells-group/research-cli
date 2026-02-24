@@ -483,13 +483,17 @@ func (s *SQLiteStore) SetCachedScrape(ctx context.Context, urlHash string, conte
 }
 
 // GetHighConfidenceAnswers implements Store.
-func (s *SQLiteStore) GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64) ([]model.ExtractionAnswer, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT result FROM runs
-		 WHERE json_extract(company, '$.url') = ? AND status = 'complete' AND result IS NOT NULL
-		 ORDER BY created_at DESC LIMIT 1`,
-		companyURL,
-	)
+func (s *SQLiteStore) GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64, maxAge time.Duration) ([]model.ExtractionAnswer, error) {
+	query := `SELECT result FROM runs
+		 WHERE json_extract(company, '$.url') = ? AND status = 'complete' AND result IS NOT NULL`
+	args := []any{companyURL}
+	if maxAge > 0 {
+		args = append(args, time.Now().UTC().Add(-maxAge).Format(time.RFC3339))
+		query += ` AND created_at >= ?`
+	}
+	query += ` ORDER BY created_at DESC LIMIT 1`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, eris.Wrap(err, "sqlite: get high confidence answers")
 	}
@@ -834,4 +838,62 @@ func scanProvenanceRows(rows *sql.Rows) ([]model.FieldProvenance, error) {
 		results = append(results, fp)
 	}
 	return results, eris.Wrap(rows.Err(), "sqlite: provenance rows iterate")
+}
+
+// ListStaleCompanies implements Store.
+func (s *SQLiteStore) ListStaleCompanies(ctx context.Context, filter StaleCompanyFilter) ([]StaleCompany, error) {
+	query := `SELECT id, company, result, created_at FROM runs
+		WHERE status = 'complete' AND result IS NOT NULL
+		  AND created_at < ?
+		GROUP BY json_extract(company, '$.url')
+		HAVING created_at = MAX(created_at)
+		ORDER BY created_at ASC`
+	args := []any{filter.LastEnrichedBefore.Format(time.RFC3339)}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, eris.Wrap(err, "sqlite: list stale companies")
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var results []StaleCompany
+	for rows.Next() {
+		var (
+			runID      string
+			companyStr string
+			resultStr  string
+			createdAt  string
+		)
+		if err := rows.Scan(&runID, &companyStr, &resultStr, &createdAt); err != nil {
+			return nil, eris.Wrap(err, "sqlite: scan stale company")
+		}
+
+		var company model.Company
+		if err := json.Unmarshal([]byte(companyStr), &company); err != nil {
+			continue
+		}
+
+		var runResult model.RunResult
+		var score float64
+		if err := json.Unmarshal([]byte(resultStr), &runResult); err == nil {
+			score = runResult.Score
+		}
+
+		if filter.MinScore > 0 && score < filter.MinScore {
+			continue
+		}
+
+		t, _ := time.Parse(time.RFC3339, createdAt)
+		results = append(results, StaleCompany{
+			Company:   company,
+			LastRunID: runID,
+			LastRunAt: t,
+			LastScore: score,
+		})
+
+		if filter.Limit > 0 && len(results) >= filter.Limit {
+			break
+		}
+	}
+	return results, eris.Wrap(rows.Err(), "sqlite: stale companies rows iterate")
 }

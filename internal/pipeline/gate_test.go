@@ -1405,3 +1405,116 @@ func TestSetDeferredWrites_CollectsIntents(t *testing.T) {
 	assert.Equal(t, "create", collected[0].AccountOp)
 	assert.Equal(t, "update", collected[1].AccountOp)
 }
+
+// --- Issue 1: validateRequiredFields tests ---
+
+func TestValidateRequiredFields_AllPresent(t *testing.T) {
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", Required: true},
+		{Key: "revenue", SFField: "AnnualRevenue", Required: true},
+		{Key: "website", SFField: "Website"},
+	})
+
+	fieldValues := map[string]model.FieldValue{
+		"industry": {Value: "Tech", Confidence: 0.9},
+		"revenue":  {Value: "$10M", Confidence: 0.8},
+	}
+
+	missing := validateRequiredFields(fieldValues, fields)
+	assert.Empty(t, missing)
+}
+
+func TestValidateRequiredFields_OneMissing(t *testing.T) {
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", Required: true},
+		{Key: "revenue", SFField: "AnnualRevenue", Required: true},
+	})
+
+	fieldValues := map[string]model.FieldValue{
+		"industry": {Value: "Tech", Confidence: 0.9},
+		// revenue is missing
+	}
+
+	missing := validateRequiredFields(fieldValues, fields)
+	assert.Equal(t, []string{"revenue"}, missing)
+}
+
+func TestValidateRequiredFields_NilValueTreatedAsMissing(t *testing.T) {
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", Required: true},
+	})
+
+	fieldValues := map[string]model.FieldValue{
+		"industry": {Value: nil, Confidence: 0.0},
+	}
+
+	missing := validateRequiredFields(fieldValues, fields)
+	assert.Equal(t, []string{"industry"}, missing)
+}
+
+func TestValidateRequiredFields_NilRegistry(t *testing.T) {
+	missing := validateRequiredFields(map[string]model.FieldValue{}, nil)
+	assert.Nil(t, missing)
+}
+
+// --- Issue 3: extractContactsForSF truncation test ---
+
+func TestExtractContactsForSF_TruncatesAt3(t *testing.T) {
+	fieldValues := map[string]model.FieldValue{
+		"contacts": {
+			Value: []any{
+				map[string]any{"first_name": "A", "last_name": "One", "title": "CEO"},
+				map[string]any{"first_name": "B", "last_name": "Two", "title": "CTO"},
+				map[string]any{"first_name": "C", "last_name": "Three", "title": "CFO"},
+				map[string]any{"first_name": "D", "last_name": "Four", "title": "COO"},
+				map[string]any{"first_name": "E", "last_name": "Five", "title": "VP"},
+			},
+		},
+	}
+
+	contacts := extractContactsForSF(fieldValues, nil)
+	require.Len(t, contacts, 3)
+	assert.Equal(t, "One", contacts[0]["LastName"])
+	assert.Equal(t, "Three", contacts[2]["LastName"])
+}
+
+// --- Issue 6: min completeness floor test ---
+
+func TestQualityGate_CompletenessFloorBlocksPass(t *testing.T) {
+	ctx := context.Background()
+
+	// 2 fields, only 1 populated → completeness = 0.5
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", Required: true},
+		{Key: "revenue", SFField: "AnnualRevenue", Required: true},
+	})
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "Acme", URL: "https://acme.com"},
+		FieldValues: map[string]model.FieldValue{
+			"industry": {Value: "Tech", Confidence: 0.95, SFField: "Industry"},
+		},
+		Answers: []model.ExtractionAnswer{
+			{FieldKey: "industry", Value: "Tech", Confidence: 0.95, QuestionID: "q1", Tier: 1},
+		},
+	}
+
+	questions := []model.Question{
+		{ID: "q1", FieldKey: "industry"},
+		{ID: "q2", FieldKey: "revenue"},
+	}
+
+	cfg := &config.Config{
+		Pipeline: config.PipelineConfig{
+			QualityScoreThreshold:    0.3, // Low threshold — score would pass.
+			MinCompletenessThreshold: 0.7, // But completeness floor blocks.
+			QualityWeights: config.QualityWeights{
+				Confidence: 1.0,
+			},
+		},
+	}
+
+	gate, err := QualityGate(ctx, result, fields, questions, nil, nil, cfg)
+	require.NoError(t, err)
+	assert.False(t, gate.Passed, "gate should fail due to completeness floor")
+}

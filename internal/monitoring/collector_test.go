@@ -68,7 +68,7 @@ func (m *mockStore) GetCachedScrape(context.Context, string) ([]byte, error) { r
 func (m *mockStore) SetCachedScrape(context.Context, string, []byte, time.Duration) error {
 	return nil
 }
-func (m *mockStore) GetHighConfidenceAnswers(context.Context, string, float64) ([]model.ExtractionAnswer, error) {
+func (m *mockStore) GetHighConfidenceAnswers(context.Context, string, float64, time.Duration) ([]model.ExtractionAnswer, error) {
 	return nil, nil
 }
 func (m *mockStore) SaveCheckpoint(context.Context, string, string, []byte) error { return nil }
@@ -89,6 +89,9 @@ func (m *mockStore) GetProvenance(context.Context, string) ([]model.FieldProvena
 	return nil, nil
 }
 func (m *mockStore) GetLatestProvenance(context.Context, string) ([]model.FieldProvenance, error) {
+	return nil, nil
+}
+func (m *mockStore) ListStaleCompanies(context.Context, store.StaleCompanyFilter) ([]store.StaleCompany, error) {
 	return nil, nil
 }
 func (m *mockStore) Ping(context.Context) error    { return nil }

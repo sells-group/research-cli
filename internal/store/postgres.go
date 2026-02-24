@@ -601,14 +601,18 @@ func (s *PostgresStore) SetCachedScrape(ctx context.Context, urlHash string, con
 }
 
 // GetHighConfidenceAnswers implements Store.
-func (s *PostgresStore) GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64) ([]model.ExtractionAnswer, error) {
+func (s *PostgresStore) GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64, maxAge time.Duration) ([]model.ExtractionAnswer, error) {
+	query := `SELECT result FROM runs
+		 WHERE company->>'url' = $1 AND status = 'complete' AND result IS NOT NULL`
+	args := []any{companyURL}
+	if maxAge > 0 {
+		args = append(args, time.Now().UTC().Add(-maxAge))
+		query += ` AND created_at >= $2`
+	}
+	query += ` ORDER BY created_at DESC LIMIT 1`
+
 	var resultJSON []byte
-	err := s.pool.QueryRow(ctx,
-		`SELECT result FROM runs
-		 WHERE company->>'url' = $1 AND status = 'complete' AND result IS NOT NULL
-		 ORDER BY created_at DESC LIMIT 1`,
-		companyURL,
-	).Scan(&resultJSON)
+	err := s.pool.QueryRow(ctx, query, args...).Scan(&resultJSON)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -885,4 +889,61 @@ func scanPgProvenanceRows(rows pgx.Rows) ([]model.FieldProvenance, error) {
 		results = append(results, fp)
 	}
 	return results, eris.Wrap(rows.Err(), "postgres: provenance rows iterate")
+}
+
+// ListStaleCompanies implements Store.
+func (s *PostgresStore) ListStaleCompanies(ctx context.Context, filter StaleCompanyFilter) ([]StaleCompany, error) {
+	query := `SELECT DISTINCT ON (company->>'url')
+		id, company, result, created_at
+		FROM runs
+		WHERE status = 'complete' AND result IS NOT NULL
+		  AND created_at < $1
+		ORDER BY company->>'url', created_at DESC`
+	args := []any{filter.LastEnrichedBefore}
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, eris.Wrap(err, "postgres: list stale companies")
+	}
+	defer rows.Close()
+
+	var results []StaleCompany
+	for rows.Next() {
+		var (
+			runID       string
+			companyJSON []byte
+			resultJSON  []byte
+			createdAt   time.Time
+		)
+		if err := rows.Scan(&runID, &companyJSON, &resultJSON, &createdAt); err != nil {
+			return nil, eris.Wrap(err, "postgres: scan stale company")
+		}
+
+		var company model.Company
+		if err := json.Unmarshal(companyJSON, &company); err != nil {
+			continue
+		}
+
+		var runResult model.RunResult
+		var score float64
+		if err := json.Unmarshal(resultJSON, &runResult); err == nil {
+			score = runResult.Score
+		}
+
+		if filter.MinScore > 0 && score < filter.MinScore {
+			continue
+		}
+
+		results = append(results, StaleCompany{
+			Company:   company,
+			LastRunID: runID,
+			LastRunAt: createdAt,
+			LastScore: score,
+		})
+
+		if filter.Limit > 0 && len(results) >= filter.Limit {
+			break
+		}
+	}
+	return results, eris.Wrap(rows.Err(), "postgres: stale companies rows iterate")
 }
