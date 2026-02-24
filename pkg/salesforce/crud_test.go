@@ -142,3 +142,50 @@ func TestUpdateAccount(t *testing.T) {
 		assert.Contains(t, err.Error(), "update account")
 	})
 }
+
+func TestUpdateContact(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		var capturedID string
+		var capturedFields map[string]any
+		mock := &mockClient{
+			updateOneFn: func(_ context.Context, sObject string, id string, fields map[string]any) error {
+				assert.Equal(t, "Contact", sObject)
+				capturedID = id
+				capturedFields = fields
+				return nil
+			},
+		}
+
+		fields := map[string]any{"Title": "CEO", "Phone": "555-1234"}
+		err := UpdateContact(context.Background(), mock, "003xx", fields)
+		require.NoError(t, err)
+		assert.Equal(t, "003xx", capturedID)
+		assert.Equal(t, "CEO", capturedFields["Title"])
+	})
+
+	t.Run("empty id", func(t *testing.T) {
+		mock := &mockClient{}
+		err := UpdateContact(context.Background(), mock, "", map[string]any{"Title": "VP"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "contact id is required")
+	})
+
+	t.Run("empty fields", func(t *testing.T) {
+		mock := &mockClient{}
+		err := UpdateContact(context.Background(), mock, "003xx", map[string]any{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no fields to update")
+	})
+
+	t.Run("propagates error", func(t *testing.T) {
+		mock := &mockClient{
+			updateOneFn: func(_ context.Context, _ string, _ string, _ map[string]any) error {
+				return errors.New("unauthorized")
+			},
+		}
+
+		err := UpdateContact(context.Background(), mock, "003xx", map[string]any{"Title": "VP"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "update contact")
+	})
+}

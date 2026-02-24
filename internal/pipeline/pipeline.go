@@ -50,6 +50,12 @@ type Pipeline struct {
 	fields        *model.FieldRegistry
 	breakers      *resilience.ServiceBreakers
 	retryCfg      resilience.RetryConfig
+
+	// Deferred SF write mode: when set, Phase 9 builds write intents
+	// via PrepareGate instead of executing SF writes via QualityGate.
+	// The callback is invoked with each intent for external collection.
+	deferSFWrites bool
+	onWriteIntent func(*SFWriteIntent)
 }
 
 // New creates a new Pipeline with all dependencies.
@@ -114,6 +120,21 @@ func New(
 		breakers:      resilience.NewServiceBreakers(cbCfg),
 		retryCfg:      retryCfg,
 	}
+}
+
+// SetDeferredWrites enables deferred SF write mode for batch aggregation.
+// When set, Phase 9 calls PrepareGate (building intents) instead of QualityGate
+// (executing writes). The callback fn is invoked with each write intent.
+// Call FlushDeferredWrites after all pipeline runs complete.
+func (p *Pipeline) SetDeferredWrites(fn func(*SFWriteIntent)) {
+	p.deferSFWrites = true
+	p.onWriteIntent = fn
+}
+
+// FlushDeferredWrites executes collected SF write intents in bulk using the
+// Pipeline's own SF and Notion clients.
+func (p *Pipeline) FlushDeferredWrites(ctx context.Context, intents []*SFWriteIntent) (*FlushSummary, error) {
+	return FlushSFWrites(ctx, p.salesforce, p.notion, intents)
 }
 
 // convertAnthropicPricing maps config pricing to cost pricing types.
@@ -774,6 +795,8 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		allAnswers = CrossValidateEmployeeCount(allAnswers, linkedInData)
 		// Validate NAICS codes against reference data and cross-reference with SoS filings.
 		allAnswers = ValidateAndCrossReferenceNAICS(allAnswers, allPages)
+		// Normalize business model to canonical taxonomy.
+		allAnswers = NormalizeBusinessModelAnswer(allAnswers)
 		// Enrich with CBP-based revenue estimate if available.
 		allAnswers = EnrichWithRevenueEstimate(ctx, allAnswers, company, p.estimator)
 		// Enrich with PPP loan data (revenue + employees from database).
@@ -860,21 +883,45 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	// ===== Phase 9: Quality Gate =====
 	setStatus(model.RunStatusWritingSF)
 
-	trackPhaseWithRetry("9_gate", "salesforce", func() (*model.PhaseResult, error) {
-		gate, gateErr := QualityGate(ctx, result, p.fields, p.questions, p.salesforce, p.notion, p.cfg)
-		if gateErr != nil {
-			return nil, gateErr
-		}
-		return &model.PhaseResult{
-			Metadata: map[string]any{
-				"score":           gate.Score,
-				"score_breakdown": gate.ScoreBreakdown,
-				"passed":          gate.Passed,
-				"sf_updated":      gate.SFUpdated,
-				"manual_review":   gate.ManualReview,
-			},
-		}, nil
-	})
+	if p.deferSFWrites && p.onWriteIntent != nil {
+		// Deferred mode: build write intent without executing SF writes.
+		trackPhaseWithRetry("9_gate", "salesforce", func() (*model.PhaseResult, error) {
+			gate, intent, gateErr := PrepareGate(ctx, result, p.fields, p.questions, p.salesforce, p.notion, p.cfg)
+			if gateErr != nil {
+				return nil, gateErr
+			}
+			if intent != nil {
+				p.onWriteIntent(intent)
+			}
+			return &model.PhaseResult{
+				Metadata: map[string]any{
+					"score":           gate.Score,
+					"score_breakdown": gate.ScoreBreakdown,
+					"passed":          gate.Passed,
+					"dedup_match":     gate.DedupMatch,
+					"manual_review":   gate.ManualReview,
+					"deferred":        true,
+				},
+			}, nil
+		})
+	} else {
+		// Immediate mode: execute SF writes inline (single-company run).
+		trackPhaseWithRetry("9_gate", "salesforce", func() (*model.PhaseResult, error) {
+			gate, gateErr := QualityGate(ctx, result, p.fields, p.questions, p.salesforce, p.notion, p.cfg)
+			if gateErr != nil {
+				return nil, gateErr
+			}
+			return &model.PhaseResult{
+				Metadata: map[string]any{
+					"score":           gate.Score,
+					"score_breakdown": gate.ScoreBreakdown,
+					"passed":          gate.Passed,
+					"sf_updated":      gate.SFUpdated,
+					"manual_review":   gate.ManualReview,
+				},
+			}, nil
+		})
+	}
 
 	// Finalize: sum per-phase costs for accurate per-model pricing.
 	result.TotalTokens = totalUsage.InputTokens + totalUsage.OutputTokens

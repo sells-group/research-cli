@@ -127,3 +127,55 @@ func TestSOQLContainsAllAccountFields(t *testing.T) {
 
 	_, _ = FindAccountByWebsite(context.Background(), mock, "test.com")
 }
+
+func TestFindContactsByAccountID(t *testing.T) {
+	t.Run("returns contacts when found", func(t *testing.T) {
+		mock := &mockClient{
+			queryFn: func(_ context.Context, soql string, out any) error {
+				assert.Contains(t, soql, "AccountId = '001xx'")
+				assert.Contains(t, soql, "SELECT Id, FirstName, LastName, Email")
+
+				contacts := out.(*[]Contact)
+				*contacts = []Contact{
+					{ID: "003a", FirstName: "Jane", LastName: "Doe", Email: "jane@acme.com", AccountID: "001xx"},
+					{ID: "003b", FirstName: "John", LastName: "Smith", AccountID: "001xx"},
+				}
+				return nil
+			},
+		}
+
+		contacts, err := FindContactsByAccountID(context.Background(), mock, "001xx")
+		require.NoError(t, err)
+		require.Len(t, contacts, 2)
+		assert.Equal(t, "003a", contacts[0].ID)
+		assert.Equal(t, "jane@acme.com", contacts[0].Email)
+		assert.Equal(t, "003b", contacts[1].ID)
+	})
+
+	t.Run("returns empty slice when none found", func(t *testing.T) {
+		mock := &mockClient{
+			queryFn: func(_ context.Context, _ string, out any) error {
+				contacts := out.(*[]Contact)
+				*contacts = []Contact{}
+				return nil
+			},
+		}
+
+		contacts, err := FindContactsByAccountID(context.Background(), mock, "001empty")
+		require.NoError(t, err)
+		assert.Empty(t, contacts)
+	})
+
+	t.Run("returns error on query failure", func(t *testing.T) {
+		mock := &mockClient{
+			queryFn: func(_ context.Context, _ string, _ any) error {
+				return errors.New("timeout")
+			},
+		}
+
+		contacts, err := FindContactsByAccountID(context.Background(), mock, "001fail")
+		assert.Error(t, err)
+		assert.Nil(t, contacts)
+		assert.Contains(t, err.Error(), "find contacts for account")
+	})
+}

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/jomei/notionapi"
 	"github.com/rotisserie/eris"
@@ -104,16 +103,10 @@ func ImportCSV(ctx context.Context, c Client, dbID string, csvPath string) (int,
 		uniqueRows = append(uniqueRows, mapped)
 	}
 
-	// Notion rate limit: 3 requests per second -> 334ms between requests.
-	ticker := time.NewTicker(334 * time.Millisecond)
-	defer ticker.Stop()
-
 	created := 0
 	for _, row := range uniqueRows {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return created, eris.Wrap(ctx.Err(), "notion: import csv cancelled")
-		case <-ticker.C:
 		}
 
 		var props notionapi.Properties
