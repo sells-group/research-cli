@@ -15,7 +15,12 @@ import (
 var fedsyncXrefCmd = &cobra.Command{
 	Use:   "xref",
 	Short: "Build entity cross-reference table",
-	Long:  "Runs the entity_xref dataset to build CRD↔CIK cross-reference linkages across SEC/EDGAR data.",
+	Long: `Runs the entity_xref dataset to build cross-reference linkages across all federal datasets.
+
+Stage 1: CRD↔CIK matching between ADV firms and EDGAR entities (3-pass).
+Stage 2: Multi-dataset matching across ADV, EDGAR, BrokerCheck, Form BD, OSHA,
+         EPA, FPDS, PPP, and Form D using direct CRD, direct CIK, exact name+zip,
+         exact name+state, and fuzzy name+state strategies.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 		log := zap.L().With(zap.String("command", "fedsync.xref"))
