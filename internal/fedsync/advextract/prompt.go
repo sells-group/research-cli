@@ -31,13 +31,13 @@ func ModelForTier(tier int) string {
 func MaxTokensForTier(tier int) int64 {
 	switch tier {
 	case 1:
-		return 512
+		return 256 // reduced from 512 — Haiku answers are single-fact
 	case 2:
 		return 1024
 	case 3:
 		return 2048
 	default:
-		return 512
+		return 256
 	}
 }
 
@@ -133,8 +133,9 @@ Respond with ONLY valid JSON in this format:
 }
 
 // StructuredBypassAnswer generates an answer directly from Part 1 structured data
-// without any LLM call.
-func StructuredBypassAnswer(q Question, advisor *AdvisorRow, fund *FundRow) *Answer {
+// without any LLM call. funds is the full list of private funds for computing
+// aggregate fund metrics (total_fund_count, total_fund_gav).
+func StructuredBypassAnswer(q Question, advisor *AdvisorRow, fund *FundRow, funds []FundRow) *Answer {
 	if !q.StructuredBypass {
 		return nil
 	}
@@ -251,6 +252,120 @@ func StructuredBypassAnswer(q Question, advisor *AdvisorRow, fund *FundRow) *Ans
 	case "office_locations":
 		a.Value = extractOfficeInfo(advisor)
 		a.Reasoning = "Extracted from ADV Part 1 office data"
+
+	// --- New v2 bypass questions ---
+
+	case "aum_per_employee":
+		if advisor.AUMTotal != nil && advisor.TotalEmployees != nil && *advisor.TotalEmployees > 0 {
+			a.Value = *advisor.AUMTotal / int64(*advisor.TotalEmployees)
+			a.Reasoning = "Calculated: AUM total / total employees"
+		} else {
+			a.Value = nil
+			a.Confidence = 0
+		}
+
+	case "aum_per_adviser_rep":
+		if advisor.AUMTotal != nil && advisor.Filing != nil {
+			reps := 0
+			if v, ok := advisor.Filing["num_adviser_reps"]; ok {
+				switch rv := v.(type) {
+				case float64:
+					reps = int(rv)
+				}
+			}
+			if reps > 0 {
+				a.Value = *advisor.AUMTotal / int64(reps)
+				a.Reasoning = "Calculated: AUM total / number of adviser reps"
+			} else {
+				a.Value = nil
+				a.Confidence = 0
+			}
+		} else {
+			a.Value = nil
+			a.Confidence = 0
+		}
+
+	case "discretionary_pct":
+		if advisor.AUMTotal != nil && *advisor.AUMTotal > 0 && advisor.AUMDiscretionary != nil {
+			a.Value = round2(float64(*advisor.AUMDiscretionary) / float64(*advisor.AUMTotal) * 100)
+			a.Reasoning = "Calculated: discretionary AUM / total AUM * 100"
+		} else {
+			a.Value = nil
+			a.Confidence = 0
+		}
+
+	case "has_wrap_fee":
+		if advisor.Filing != nil {
+			a.Value = isTruthy(advisor.Filing["wrap_fee_program"])
+			a.Reasoning = "Extracted from ADV Part 1 Item 5I wrap fee program flag"
+		} else {
+			a.Value = false
+			a.Confidence = 0
+		}
+
+	case "wrap_fee_aum":
+		if advisor.Filing != nil {
+			if v, ok := advisor.Filing["wrap_fee_raum"]; ok {
+				a.Value = v
+				a.Reasoning = "Extracted from ADV Part 1 Item 5I wrap fee RAUM"
+			} else {
+				a.Value = nil
+				a.Confidence = 0
+			}
+		} else {
+			a.Value = nil
+			a.Confidence = 0
+		}
+
+	case "total_fund_count":
+		a.Value = len(funds)
+		a.Reasoning = "Count of adv_private_funds records"
+
+	case "total_fund_gav":
+		var total int64
+		for _, f := range funds {
+			if f.GrossAssetValue != nil {
+				total += *f.GrossAssetValue
+			}
+		}
+		a.Value = total
+		a.Reasoning = "Sum of gross_asset_value across all private funds"
+
+	case "has_custody":
+		if advisor.Filing != nil {
+			a.Value = isTruthy(advisor.Filing["custody_client_cash"]) || isTruthy(advisor.Filing["custody_client_securities"])
+			a.Reasoning = "Derived from ADV Part 1 Item 9 custody flags"
+		} else {
+			a.Value = false
+			a.Confidence = 0
+		}
+
+	case "has_performance_fees":
+		if advisor.Filing != nil {
+			a.Value = isTruthy(advisor.Filing["comp_performance"])
+			a.Reasoning = "Extracted from ADV Part 1 Item 5E compensation flags"
+		} else {
+			a.Value = false
+			a.Confidence = 0
+		}
+
+	case "other_business_activities":
+		a.Value = extractBizActivities(advisor)
+		a.Reasoning = "Extracted from ADV Part 1 Item 6A business activity flags"
+		if a.Value == nil {
+			a.Confidence = 0
+		}
+
+	case "financial_affiliations":
+		a.Value = extractAffiliations(advisor)
+		a.Reasoning = "Extracted from ADV Part 1 Item 7A affiliation flags"
+		if a.Value == nil {
+			a.Confidence = 0
+		}
+
+	case "regulatory_change_of_control":
+		a.Value = extractRegulatoryStatus(advisor)
+		a.Reasoning = "Extracted from ADV Part 1 Item 2 registration fields"
 
 	// Fund-level structured bypass
 	case "fund_aum":
@@ -467,6 +582,72 @@ func extractOfficeInfo(a *AdvisorRow) any {
 		}
 	}
 	return offices
+}
+
+func extractBizActivities(a *AdvisorRow) any {
+	if a.Filing == nil {
+		return nil
+	}
+	fields := []struct{ key, label string }{
+		{"biz_broker_dealer", "broker_dealer"},
+		{"biz_registered_rep", "registered_rep"},
+		{"biz_cpo_cta", "cpo_cta"},
+		{"biz_futures_commission", "futures_commission"},
+		{"biz_real_estate", "real_estate"},
+		{"biz_insurance", "insurance"},
+		{"biz_bank", "bank"},
+		{"biz_trust_company", "trust_company"},
+		{"biz_municipal_advisor", "municipal_advisor"},
+		{"biz_swap_dealer", "swap_dealer"},
+		{"biz_major_swap", "major_swap"},
+		{"biz_accountant", "accountant"},
+		{"biz_lawyer", "lawyer"},
+		{"biz_other_financial", "other_financial"},
+	}
+	var active []string
+	for _, f := range fields {
+		if v, ok := a.Filing[f.key]; ok && isTruthy(v) {
+			active = append(active, f.label)
+		}
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	return active
+}
+
+func extractAffiliations(a *AdvisorRow) any {
+	if a.Filing == nil {
+		return nil
+	}
+	fields := []struct{ key, label string }{
+		{"aff_broker_dealer", "broker_dealer"},
+		{"aff_other_adviser", "other_adviser"},
+		{"aff_municipal_advisor", "municipal_advisor"},
+		{"aff_swap_dealer", "swap_dealer"},
+		{"aff_major_swap", "major_swap"},
+		{"aff_cpo_cta", "cpo_cta"},
+		{"aff_futures_commission", "futures_commission"},
+		{"aff_bank", "bank"},
+		{"aff_trust_company", "trust_company"},
+		{"aff_accountant", "accountant"},
+		{"aff_lawyer", "lawyer"},
+		{"aff_insurance", "insurance"},
+		{"aff_pension_consultant", "pension_consultant"},
+		{"aff_real_estate", "real_estate"},
+		{"aff_lp_sponsor", "lp_sponsor"},
+		{"aff_pooled_vehicle", "pooled_vehicle"},
+	}
+	var active []string
+	for _, f := range fields {
+		if v, ok := a.Filing[f.key]; ok && isTruthy(v) {
+			active = append(active, f.label)
+		}
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	return active
 }
 
 func isTruthy(v any) bool {

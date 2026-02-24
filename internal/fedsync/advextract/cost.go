@@ -157,39 +157,39 @@ func CalculateCost(tier int, inputTokens, outputTokens, cacheWrite, cacheRead in
 }
 
 // EstimateBatchCost estimates the total cost for extracting a batch of advisors.
+// v2 question bank: ~29 bypass ($0), ~160 Haiku T1, ~8 optional Sonnet T2, ~15 Go-computed ($0).
 func EstimateBatchCost(advisorCount int, maxTier int) string {
 	var totalCost float64
 	var breakdown []string
 
-	// Structured bypass: ~17 questions, $0
-	bypass := 17
-	breakdown = append(breakdown, fmt.Sprintf("  Structured bypass: %d questions, $0.00", bypass))
+	// Structured bypass: ~29 questions, $0
+	bypass := 29
+	breakdown = append(breakdown, fmt.Sprintf("  Structured bypass (T0): %d questions, $0.00", bypass))
 
-	// T1 Haiku: ~23 questions, avg ~2K input + 200 output each
+	// Go-computed metrics: ~15, $0
+	breakdown = append(breakdown, "  Go-computed metrics: ~15 questions, $0.00")
+
+	// T1 Haiku: ~160 questions, avg ~2K input + 100 output each (reduced max_tokens=256)
 	if maxTier >= 1 {
-		t1Questions := 23
-		t1Cost := CalculateCost(1, int64(t1Questions*2000), int64(t1Questions*200), 0, 0)
+		t1Questions := 160
+		// With prompt caching, ~80% cache hit after primer → cache_read tokens
+		t1InputFresh := int64(t1Questions * 500)                     // uncached portion
+		t1CacheRead := int64(t1Questions * 1500)                     // cached system prompt
+		t1Output := int64(t1Questions * 100)                         // smaller outputs with 256 max
+		t1Cost := CalculateCost(1, t1InputFresh, t1Output, 0, t1CacheRead)
 		totalCost += t1Cost * float64(advisorCount)
-		breakdown = append(breakdown, fmt.Sprintf("  T1 Haiku: %d questions, ~$%.2f/advisor", t1Questions, t1Cost))
+		breakdown = append(breakdown, fmt.Sprintf("  T1 Haiku: ~%d questions, ~$%.3f/advisor", t1Questions, t1Cost))
 	}
 
-	// T2 Sonnet: ~38 questions, avg ~5K input + 400 output each
+	// T2 Sonnet: ~8 judgment questions, avg ~5K input + 400 output
 	if maxTier >= 2 {
-		t2Questions := 38
+		t2Questions := 8
 		t2Cost := CalculateCost(2, int64(t2Questions*5000), int64(t2Questions*400), 0, 0)
 		totalCost += t2Cost * float64(advisorCount)
-		breakdown = append(breakdown, fmt.Sprintf("  T2 Sonnet: %d questions, ~$%.2f/advisor", t2Questions, t2Cost))
+		breakdown = append(breakdown, fmt.Sprintf("  T2 Sonnet: ~%d questions, ~$%.3f/advisor", t2Questions, t2Cost))
 	}
 
-	// T3 Opus: ~17 questions, avg ~8K input + 800 output each
-	if maxTier >= 3 {
-		t3Questions := 17
-		t3Cost := CalculateCost(3, int64(t3Questions*8000), int64(t3Questions*800), 0, 0)
-		totalCost += t3Cost * float64(advisorCount)
-		breakdown = append(breakdown, fmt.Sprintf("  T3 Opus: %d questions, ~$%.2f/advisor", t3Questions, t3Cost))
-	}
-
-	return fmt.Sprintf("Estimated cost for %d advisors (max tier %d):\n%s\n  Total: ~$%.2f (~$%.2f/advisor)",
+	return fmt.Sprintf("Estimated cost for %d advisors (max tier %d):\n%s\n  Total: ~$%.2f (~$%.3f/advisor)",
 		advisorCount, maxTier,
 		joinLines(breakdown),
 		totalCost,

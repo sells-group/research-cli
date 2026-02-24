@@ -96,7 +96,7 @@ func extractSingleFund(ctx context.Context, docs *AdvisorDocs, fund FundRow, que
 	// Structured bypass first.
 	for _, q := range questions {
 		if q.StructuredBypass {
-			a := StructuredBypassAnswer(q, docs.Advisor, &fund)
+			a := StructuredBypassAnswer(q, docs.Advisor, &fund, docs.Funds)
 			if a != nil {
 				allAnswers = append(allAnswers, *a)
 			}

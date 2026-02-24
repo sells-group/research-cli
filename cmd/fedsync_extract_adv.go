@@ -20,22 +20,26 @@ var fedsyncExtractADVCmd = &cobra.Command{
 	Short: "Extract M&A intelligence from ADV filings",
 	Long: `Extract structured M&A intelligence from SEC ADV filings using tiered Claude models.
 
-Runs a 95-question extraction pipeline across ADV Part 1 (structured data),
+Runs a ~200-question extraction pipeline across ADV Part 1 (structured data),
 Part 2 (brochure), and Part 3 (CRS) documents. Results are stored in
 fed_data.adv_advisor_answers and fed_data.adv_fund_answers.
 
-~17 questions are answered directly from Part 1 structured data at zero cost.
-Remaining questions are extracted via Haiku (T1), Sonnet (T2), and Opus (T3).
+~29 questions are answered directly from Part 1 structured data (T0, $0).
+~160 factual questions are extracted via Haiku (T1, ~$0.10/advisor).
+~15 derived metrics are computed in Go from extracted facts ($0).
+~8 optional judgment questions use Sonnet (T2, +$0.04/advisor).
+
+Default tier is 1 (Haiku only, ~$0.10/advisor). Use --tier 2 for Sonnet synthesis.
 
 Examples:
-  # Single advisor
+  # Single advisor (Haiku-only, default)
   fedsync extract-adv --crd 12345
 
   # Batch with filters
   fedsync extract-adv --limit 100 --filter-aum-min 500000000 --filter-state CA
 
-  # T1 only (cheapest)
-  fedsync extract-adv --limit 1000 --tier 1
+  # With optional Sonnet synthesis questions
+  fedsync extract-adv --crd 12345 --tier 2
 
   # Cost estimation
   fedsync extract-adv --limit 100 --dry-run
@@ -49,7 +53,7 @@ func init() {
 	f := fedsyncExtractADVCmd.Flags()
 	f.Int("crd", 0, "single advisor CRD number to extract")
 	f.Int("limit", 0, "maximum number of advisors to process")
-	f.Int("tier", 3, "maximum tier to run (1=Haiku only, 2=+Sonnet, 3=+Opus)")
+	f.Int("tier", 1, "maximum tier to run (1=Haiku only, 2=+Sonnet synthesis)")
 	f.Float64("max-cost", 0, "per-advisor cost cap in USD (0=unlimited)")
 	f.String("filter-state", "", "filter advisors by state (e.g., CA, NY)")
 	f.Int64("filter-aum-min", 0, "filter advisors by minimum AUM")
@@ -97,8 +101,8 @@ func runExtractADV(cmd *cobra.Command, args []string) error {
 	force, _ := cmd.Flags().GetBool("force")
 	fundsOnly, _ := cmd.Flags().GetBool("funds-only")
 
-	if maxTier < 1 || maxTier > 3 {
-		return eris.Errorf("fedsync extract-adv: --tier must be 1, 2, or 3 (got %d)", maxTier)
+	if maxTier < 1 || maxTier > 2 {
+		return eris.Errorf("fedsync extract-adv: --tier must be 1 or 2 (got %d)", maxTier)
 	}
 
 	// Create extractor.
