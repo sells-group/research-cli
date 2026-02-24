@@ -307,7 +307,6 @@ func (e *Extractor) RunBatch(ctx context.Context, firmIDs []int64) error {
 
 	var completed, failed int64
 	for _, id := range firmIDs {
-		id := id
 		g.Go(func() error {
 			if err := e.RunFirm(gctx, id); err != nil {
 				zap.L().Error("PE firm extraction failed",
@@ -343,7 +342,7 @@ func (e *Extractor) RunBatch(ctx context.Context, firmIDs []int64) error {
 
 // mergeAnswers merges new answers into existing, preferring higher-tier answers
 // for the same question key.
-func mergeAnswers(existing, new []Answer) []Answer {
+func mergeAnswers(existing, incoming []Answer) []Answer {
 	byKey := make(map[string]int)
 	result := make([]Answer, len(existing))
 	copy(result, existing)
@@ -352,7 +351,7 @@ func mergeAnswers(existing, new []Answer) []Answer {
 		byKey[a.QuestionKey] = i
 	}
 
-	for _, a := range new {
+	for _, a := range incoming {
 		if idx, ok := byKey[a.QuestionKey]; ok {
 			if a.Tier > result[idx].Tier || (a.Tier == result[idx].Tier && a.Confidence > result[idx].Confidence) {
 				result[idx] = a

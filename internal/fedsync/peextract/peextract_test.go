@@ -10,11 +10,11 @@ func TestMergeAnswers_NoConflict(t *testing.T) {
 	existing := []Answer{
 		{QuestionKey: "pe_hq_address", Value: "123 Main St", Confidence: 0.9, Tier: 1},
 	}
-	new := []Answer{
+	incoming := []Answer{
 		{QuestionKey: "pe_firm_type", Value: "private_equity", Confidence: 0.8, Tier: 1},
 	}
 
-	merged := mergeAnswers(existing, new)
+	merged := mergeAnswers(existing, incoming)
 	if len(merged) != 2 {
 		t.Fatalf("expected 2 answers, got %d", len(merged))
 	}
@@ -24,11 +24,11 @@ func TestMergeAnswers_HigherTierWins(t *testing.T) {
 	existing := []Answer{
 		{QuestionKey: "pe_investment_strategy", Value: "old", Confidence: 0.9, Tier: 1},
 	}
-	new := []Answer{
+	incoming := []Answer{
 		{QuestionKey: "pe_investment_strategy", Value: "new synthesis", Confidence: 0.7, Tier: 2},
 	}
 
-	merged := mergeAnswers(existing, new)
+	merged := mergeAnswers(existing, incoming)
 	if len(merged) != 1 {
 		t.Fatalf("expected 1 answer, got %d", len(merged))
 	}
@@ -44,11 +44,11 @@ func TestMergeAnswers_SameTierHigherConfidenceWins(t *testing.T) {
 	existing := []Answer{
 		{QuestionKey: "pe_year_founded", Value: 2005, Confidence: 0.5, Tier: 1},
 	}
-	new := []Answer{
+	incoming := []Answer{
 		{QuestionKey: "pe_year_founded", Value: 2006, Confidence: 0.9, Tier: 1},
 	}
 
-	merged := mergeAnswers(existing, new)
+	merged := mergeAnswers(existing, incoming)
 	if len(merged) != 1 {
 		t.Fatalf("expected 1 answer, got %d", len(merged))
 	}
@@ -61,11 +61,11 @@ func TestMergeAnswers_LowerConfidenceDoesNotOverride(t *testing.T) {
 	existing := []Answer{
 		{QuestionKey: "pe_year_founded", Value: 2005, Confidence: 0.9, Tier: 1},
 	}
-	new := []Answer{
+	incoming := []Answer{
 		{QuestionKey: "pe_year_founded", Value: 2006, Confidence: 0.3, Tier: 1},
 	}
 
-	merged := mergeAnswers(existing, new)
+	merged := mergeAnswers(existing, incoming)
 	if merged[0].Confidence != 0.9 {
 		t.Errorf("expected original confidence 0.9 to be kept, got %f", merged[0].Confidence)
 	}

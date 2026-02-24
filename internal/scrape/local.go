@@ -35,7 +35,10 @@ func NewLocalScraper() *LocalScraper {
 	}
 }
 
-func (l *LocalScraper) Name() string           { return "local_http" }
+// Name returns the scraper identifier.
+func (l *LocalScraper) Name() string { return "local_http" }
+
+// Supports returns true — LocalScraper can attempt any URL.
 func (l *LocalScraper) Supports(_ string) bool { return true }
 
 // Scrape fetches a URL, detects blocks, strips HTML to plaintext.

@@ -76,7 +76,7 @@ func IdentifyPEFirms(ctx context.Context, pool db.Pool, minRIAs int) ([]PEFirmCa
 
 // validateURL checks if a URL is appropriate for a PE firm website.
 // Returns (valid, reason) where reason explains rejection.
-func validateURL(rawURL, firmName string) (bool, string) {
+func validateURL(rawURL, _ string) (bool, string) {
 	u := strings.ToLower(strings.TrimSpace(rawURL))
 
 	// Reject empty.

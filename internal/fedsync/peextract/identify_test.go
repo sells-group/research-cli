@@ -134,12 +134,7 @@ func TestCaptureSocialURL(t *testing.T) {
 }
 
 func TestPEFirmCandidate_Defaults(t *testing.T) {
-	c := PEFirmCandidate{
-		OwnerName: "Test Partners, LLC",
-		OwnerType: "limited liability company",
-		RIACount:  5,
-		OwnedCRDs: []int{100, 200, 300, 400, 500},
-	}
+	c := PEFirmCandidate{}
 
 	if c.WebsiteURL != "" {
 		t.Error("expected empty website URL by default")

@@ -11,7 +11,7 @@ import (
 )
 
 func TestLocalScraper_CleanHTML(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`<html><head><title>Acme Corp</title></head>
@@ -34,7 +34,7 @@ func TestLocalScraper_CleanHTML(t *testing.T) {
 }
 
 func TestLocalScraper_Cloudflare(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Cf-Ray", "abc123")
 		w.WriteHeader(403)
 		_, _ = w.Write([]byte(`<html><body>Access denied</body></html>`))
@@ -48,7 +48,7 @@ func TestLocalScraper_Cloudflare(t *testing.T) {
 }
 
 func TestLocalScraper_Captcha(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`<html><body>Please complete the reCAPTCHA to continue</body></html>`))
@@ -62,7 +62,7 @@ func TestLocalScraper_Captcha(t *testing.T) {
 }
 
 func TestLocalScraper_EmptyBody(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`<html></html>`))
 	}))
@@ -75,7 +75,7 @@ func TestLocalScraper_EmptyBody(t *testing.T) {
 }
 
 func TestLocalScraper_HTTP404(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(404)
 		_, _ = w.Write([]byte(`<html><body>Not found page with lots of content here to exceed threshold</body></html>`))
 	}))

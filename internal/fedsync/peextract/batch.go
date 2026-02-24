@@ -1,3 +1,4 @@
+// Package peextract implements PE firm website extraction via tiered Claude models.
 package peextract
 
 import (
@@ -68,7 +69,6 @@ func executeDirectConcurrent(ctx context.Context, items []batchItem, tier int, c
 	g.SetLimit(maxDirectConcurrency)
 
 	for _, item := range items {
-		item := item
 		g.Go(func() error {
 			var resp *anthropic.MessageResponse
 			var err error
@@ -79,7 +79,7 @@ func executeDirectConcurrent(ctx context.Context, items []batchItem, tier int, c
 					break
 				}
 				if gctx.Err() != nil {
-					return nil
+					return nil //nolint:nilerr // context cancelled; abort retries without failing the errgroup
 				}
 				backoff := time.Duration(1<<uint(attempt)) * 500 * time.Millisecond
 				time.Sleep(backoff)

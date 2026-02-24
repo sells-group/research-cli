@@ -3,6 +3,7 @@ package peextract
 // PEPageType represents a PE-firm-specific page classification.
 type PEPageType string
 
+// PE page type constants classify crawled pages by their content role.
 const (
 	PEPageTypeHomepage  PEPageType = "homepage"
 	PEPageTypeAbout     PEPageType = "about"
