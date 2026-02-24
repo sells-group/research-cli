@@ -18,6 +18,21 @@ type RunFilter struct {
 	Offset        int                 `json:"offset,omitempty"`
 }
 
+// StaleCompanyFilter specifies criteria for finding companies due for re-enrichment.
+type StaleCompanyFilter struct {
+	LastEnrichedBefore time.Time `json:"last_enriched_before"`
+	MinScore           float64   `json:"min_score,omitempty"`
+	Limit              int       `json:"limit,omitempty"`
+}
+
+// StaleCompany represents a company whose enrichment data is stale.
+type StaleCompany struct {
+	Company   model.Company `json:"company"`
+	LastRunID string        `json:"last_run_id"`
+	LastRunAt time.Time     `json:"last_run_at"`
+	LastScore float64       `json:"last_score"`
+}
+
 // Store defines the persistence interface for the enrichment pipeline.
 type Store interface {
 	// Runs
@@ -45,8 +60,9 @@ type Store interface {
 	GetCachedScrape(ctx context.Context, urlHash string) ([]byte, error)
 	SetCachedScrape(ctx context.Context, urlHash string, content []byte, ttl time.Duration) error
 
-	// High-confidence answer lookup (skip re-extraction)
-	GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64) ([]model.ExtractionAnswer, error)
+	// High-confidence answer lookup (skip re-extraction).
+	// maxAge limits answers to those created within the given duration; 0 means no limit.
+	GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64, maxAge time.Duration) ([]model.ExtractionAnswer, error)
 
 	// Checkpoint/resume
 	SaveCheckpoint(ctx context.Context, companyID string, phase string, data []byte) error
@@ -63,6 +79,9 @@ type Store interface {
 	IncrementDLQRetry(ctx context.Context, id string, nextRetryAt time.Time, lastErr string) error
 	RemoveDLQ(ctx context.Context, id string) error
 	CountDLQ(ctx context.Context) (int, error)
+
+	// Stale company lookup (re-enrichment)
+	ListStaleCompanies(ctx context.Context, filter StaleCompanyFilter) ([]StaleCompany, error)
 
 	// Provenance
 	SaveProvenance(ctx context.Context, records []model.FieldProvenance) error

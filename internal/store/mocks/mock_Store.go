@@ -843,8 +843,8 @@ func (_c *MockStore_GetCachedScrape_Call) RunAndReturn(run func(context.Context,
 }
 
 // GetHighConfidenceAnswers provides a mock function with given fields: ctx, companyURL, minConfidence
-func (_m *MockStore) GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64) ([]model.ExtractionAnswer, error) {
-	ret := _m.Called(ctx, companyURL, minConfidence)
+func (_m *MockStore) GetHighConfidenceAnswers(ctx context.Context, companyURL string, minConfidence float64, maxAge time.Duration) ([]model.ExtractionAnswer, error) {
+	ret := _m.Called(ctx, companyURL, minConfidence, maxAge)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetHighConfidenceAnswers")
@@ -852,19 +852,19 @@ func (_m *MockStore) GetHighConfidenceAnswers(ctx context.Context, companyURL st
 
 	var r0 []model.ExtractionAnswer
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, float64) ([]model.ExtractionAnswer, error)); ok {
-		return rf(ctx, companyURL, minConfidence)
+	if rf, ok := ret.Get(0).(func(context.Context, string, float64, time.Duration) ([]model.ExtractionAnswer, error)); ok {
+		return rf(ctx, companyURL, minConfidence, maxAge)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, float64) []model.ExtractionAnswer); ok {
-		r0 = rf(ctx, companyURL, minConfidence)
+	if rf, ok := ret.Get(0).(func(context.Context, string, float64, time.Duration) []model.ExtractionAnswer); ok {
+		r0 = rf(ctx, companyURL, minConfidence, maxAge)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]model.ExtractionAnswer)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, float64) error); ok {
-		r1 = rf(ctx, companyURL, minConfidence)
+	if rf, ok := ret.Get(1).(func(context.Context, string, float64, time.Duration) error); ok {
+		r1 = rf(ctx, companyURL, minConfidence, maxAge)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -881,13 +881,14 @@ type MockStore_GetHighConfidenceAnswers_Call struct {
 //   - ctx context.Context
 //   - companyURL string
 //   - minConfidence float64
-func (_e *MockStore_Expecter) GetHighConfidenceAnswers(ctx interface{}, companyURL interface{}, minConfidence interface{}) *MockStore_GetHighConfidenceAnswers_Call {
-	return &MockStore_GetHighConfidenceAnswers_Call{Call: _e.mock.On("GetHighConfidenceAnswers", ctx, companyURL, minConfidence)}
+//   - maxAge time.Duration
+func (_e *MockStore_Expecter) GetHighConfidenceAnswers(ctx interface{}, companyURL interface{}, minConfidence interface{}, maxAge interface{}) *MockStore_GetHighConfidenceAnswers_Call {
+	return &MockStore_GetHighConfidenceAnswers_Call{Call: _e.mock.On("GetHighConfidenceAnswers", ctx, companyURL, minConfidence, maxAge)}
 }
 
-func (_c *MockStore_GetHighConfidenceAnswers_Call) Run(run func(ctx context.Context, companyURL string, minConfidence float64)) *MockStore_GetHighConfidenceAnswers_Call {
+func (_c *MockStore_GetHighConfidenceAnswers_Call) Run(run func(ctx context.Context, companyURL string, minConfidence float64, maxAge time.Duration)) *MockStore_GetHighConfidenceAnswers_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(float64))
+		run(args[0].(context.Context), args[1].(string), args[2].(float64), args[3].(time.Duration))
 	})
 	return _c
 }
@@ -897,7 +898,7 @@ func (_c *MockStore_GetHighConfidenceAnswers_Call) Return(_a0 []model.Extraction
 	return _c
 }
 
-func (_c *MockStore_GetHighConfidenceAnswers_Call) RunAndReturn(run func(context.Context, string, float64) ([]model.ExtractionAnswer, error)) *MockStore_GetHighConfidenceAnswers_Call {
+func (_c *MockStore_GetHighConfidenceAnswers_Call) RunAndReturn(run func(context.Context, string, float64, time.Duration) ([]model.ExtractionAnswer, error)) *MockStore_GetHighConfidenceAnswers_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -957,6 +958,65 @@ func (_c *MockStore_GetLatestProvenance_Call) Return(_a0 []model.FieldProvenance
 }
 
 func (_c *MockStore_GetLatestProvenance_Call) RunAndReturn(run func(context.Context, string) ([]model.FieldProvenance, error)) *MockStore_GetLatestProvenance_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListStaleCompanies provides a mock function with given fields: ctx, filter
+func (_m *MockStore) ListStaleCompanies(ctx context.Context, filter store.StaleCompanyFilter) ([]store.StaleCompany, error) {
+	ret := _m.Called(ctx, filter)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListStaleCompanies")
+	}
+
+	var r0 []store.StaleCompany
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, store.StaleCompanyFilter) ([]store.StaleCompany, error)); ok {
+		return rf(ctx, filter)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, store.StaleCompanyFilter) []store.StaleCompany); ok {
+		r0 = rf(ctx, filter)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]store.StaleCompany)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, store.StaleCompanyFilter) error); ok {
+		r1 = rf(ctx, filter)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStore_ListStaleCompanies_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListStaleCompanies'
+type MockStore_ListStaleCompanies_Call struct {
+	*mock.Call
+}
+
+// ListStaleCompanies is a helper method to define mock.On call
+//   - ctx context.Context
+//   - filter store.StaleCompanyFilter
+func (_e *MockStore_Expecter) ListStaleCompanies(ctx interface{}, filter interface{}) *MockStore_ListStaleCompanies_Call {
+	return &MockStore_ListStaleCompanies_Call{Call: _e.mock.On("ListStaleCompanies", ctx, filter)}
+}
+
+func (_c *MockStore_ListStaleCompanies_Call) Run(run func(ctx context.Context, filter store.StaleCompanyFilter)) *MockStore_ListStaleCompanies_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(store.StaleCompanyFilter))
+	})
+	return _c
+}
+
+func (_c *MockStore_ListStaleCompanies_Call) Return(_a0 []store.StaleCompany, _a1 error) *MockStore_ListStaleCompanies_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStore_ListStaleCompanies_Call) RunAndReturn(run func(context.Context, store.StaleCompanyFilter) ([]store.StaleCompany, error)) *MockStore_ListStaleCompanies_Call {
 	_c.Call.Return(run)
 	return _c
 }

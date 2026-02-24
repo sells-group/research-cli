@@ -24,12 +24,13 @@ var webhookClient = &http.Client{Timeout: 10 * time.Second}
 
 // GateResult holds the outcome of the quality gate phase.
 type GateResult struct {
-	Score          float64        `json:"score"`
-	ScoreBreakdown ScoreBreakdown `json:"score_breakdown"`
-	Passed         bool           `json:"passed"`
-	SFUpdated      bool           `json:"sf_updated"`
-	DedupMatch     bool           `json:"dedup_match"`
-	ManualReview   bool           `json:"manual_review"`
+	Score           float64        `json:"score"`
+	ScoreBreakdown  ScoreBreakdown `json:"score_breakdown"`
+	Passed          bool           `json:"passed"`
+	SFUpdated       bool           `json:"sf_updated"`
+	DedupMatch      bool           `json:"dedup_match"`
+	ManualReview    bool           `json:"manual_review"`
+	MissingRequired []string       `json:"missing_required,omitempty"`
 }
 
 // QualityGate implements Phase 9: evaluate quality score, update Salesforce,
@@ -44,6 +45,25 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 		Score:          score,
 		ScoreBreakdown: breakdown,
 		Passed:         score >= threshold,
+	}
+
+	// Validate required fields before writing to SF.
+	if missing := validateRequiredFields(result.FieldValues, fields); len(missing) > 0 {
+		gate.MissingRequired = missing
+		zap.L().Warn("gate: missing required fields",
+			zap.Strings("missing", missing),
+			zap.String("company", result.Company.Name),
+		)
+	}
+
+	// Check minimum completeness floor.
+	if cfg.Pipeline.MinCompletenessThreshold > 0 && breakdown.Completeness < cfg.Pipeline.MinCompletenessThreshold {
+		gate.Passed = false
+		zap.L().Warn("gate: completeness below minimum floor",
+			zap.Float64("completeness", breakdown.Completeness),
+			zap.Float64("min_threshold", cfg.Pipeline.MinCompletenessThreshold),
+			zap.String("company", result.Company.Name),
+		)
 	}
 
 	// Run SF/ToolJet and Notion updates concurrently — they are independent.
@@ -174,6 +194,22 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 	}
 
 	return gate, nil
+}
+
+// validateRequiredFields checks that all registry-required fields have non-nil
+// values in fieldValues. Returns the list of missing required field keys.
+func validateRequiredFields(fieldValues map[string]model.FieldValue, registry *model.FieldRegistry) []string {
+	if registry == nil {
+		return nil
+	}
+	var missing []string
+	for _, f := range registry.Required() {
+		fv, ok := fieldValues[f.Key]
+		if !ok || fv.Value == nil {
+			missing = append(missing, f.Key)
+		}
+	}
+	return missing
 }
 
 func buildSFFields(fieldValues map[string]model.FieldValue) map[string]any {
@@ -346,6 +382,13 @@ func extractContactsForSF(fieldValues map[string]model.FieldValue, _ *model.Fiel
 
 	if len(items) == 0 {
 		return nil
+	}
+
+	if len(items) > 3 {
+		zap.L().Warn("gate: truncating contacts",
+			zap.Int("total", len(items)),
+			zap.Int("limit", 3),
+		)
 	}
 
 	var contacts []map[string]any
@@ -585,6 +628,25 @@ func PrepareGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 		Score:          score,
 		ScoreBreakdown: breakdown,
 		Passed:         score >= threshold,
+	}
+
+	// Validate required fields before writing to SF.
+	if missing := validateRequiredFields(result.FieldValues, fields); len(missing) > 0 {
+		gate.MissingRequired = missing
+		zap.L().Warn("gate: missing required fields",
+			zap.Strings("missing", missing),
+			zap.String("company", result.Company.Name),
+		)
+	}
+
+	// Check minimum completeness floor.
+	if cfg.Pipeline.MinCompletenessThreshold > 0 && breakdown.Completeness < cfg.Pipeline.MinCompletenessThreshold {
+		gate.Passed = false
+		zap.L().Warn("gate: completeness below minimum floor",
+			zap.Float64("completeness", breakdown.Completeness),
+			zap.Float64("min_threshold", cfg.Pipeline.MinCompletenessThreshold),
+			zap.String("company", result.Company.Name),
+		)
 	}
 
 	g, gCtx := errgroup.WithContext(ctx)

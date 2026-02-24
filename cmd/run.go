@@ -15,8 +15,9 @@ import (
 )
 
 var (
-	runURL  string
-	runSFID string
+	runURL   string
+	runSFID  string
+	runForce bool
 )
 
 // writeRunResult logs the enrichment result and writes it as indented JSON.
@@ -51,6 +52,10 @@ var runCmd = &cobra.Command{
 			SalesforceID: runSFID,
 		}
 
+		if runForce {
+			env.Pipeline.SetForceReExtract(true)
+		}
+
 		result, err := env.Pipeline.Run(ctx, company)
 		if err != nil {
 			return eris.Wrap(err, "pipeline run")
@@ -63,6 +68,7 @@ var runCmd = &cobra.Command{
 func init() {
 	runCmd.Flags().StringVar(&runURL, "url", "", "company website URL (required)")
 	runCmd.Flags().StringVar(&runSFID, "sf-id", "", "Salesforce account ID")
+	runCmd.Flags().BoolVar(&runForce, "force", false, "force full re-extraction (skip answer reuse)")
 	_ = runCmd.MarkFlagRequired("url")
 	rootCmd.AddCommand(runCmd)
 }

@@ -358,7 +358,7 @@ func TestSQLite_GetHighConfidenceAnswers_NoResults(t *testing.T) {
 	st := newTestSQLiteStore(t)
 	ctx := context.Background()
 
-	answers, err := st.GetHighConfidenceAnswers(ctx, "https://unknown.com", 0.8)
+	answers, err := st.GetHighConfidenceAnswers(ctx, "https://unknown.com", 0.8, 0)
 	require.NoError(t, err)
 	assert.Nil(t, answers)
 }
@@ -383,7 +383,7 @@ func TestSQLite_GetHighConfidenceAnswers_FiltersByConfidence(t *testing.T) {
 	require.NoError(t, err)
 
 	// Query with threshold 0.8.
-	answers, err := st.GetHighConfidenceAnswers(ctx, "https://acme.com", 0.8)
+	answers, err := st.GetHighConfidenceAnswers(ctx, "https://acme.com", 0.8, 0)
 	require.NoError(t, err)
 	require.Len(t, answers, 2) // industry (0.95) and employees (0.9)
 
@@ -422,11 +422,105 @@ func TestSQLite_GetHighConfidenceAnswers_UsesLatestRun(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	answers, err := st.GetHighConfidenceAnswers(ctx, "https://acme.com", 0.8)
+	answers, err := st.GetHighConfidenceAnswers(ctx, "https://acme.com", 0.8, 0)
 	require.NoError(t, err)
 	require.Len(t, answers, 1)
 	// Should get the latest run's answer (ORDER BY created_at DESC LIMIT 1).
 	assert.Equal(t, "New Industry", answers[0].Value)
+}
+
+func TestSQLite_GetHighConfidenceAnswers_Staleness(t *testing.T) {
+	st := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	company := model.Company{URL: "https://old.com", Name: "Old Corp"}
+	run, err := st.CreateRun(ctx, company)
+	require.NoError(t, err)
+
+	err = st.UpdateRunResult(ctx, run.ID, &model.RunResult{
+		Answers: []model.ExtractionAnswer{
+			{FieldKey: "industry", Value: "Stale", Confidence: 0.95, Tier: 1},
+		},
+	})
+	require.NoError(t, err)
+
+	// With no maxAge, should return answers.
+	answers, err := st.GetHighConfidenceAnswers(ctx, "https://old.com", 0.8, 0)
+	require.NoError(t, err)
+	require.Len(t, answers, 1)
+
+	// With a very short maxAge (1 nanosecond), the run is already "stale".
+	answers, err = st.GetHighConfidenceAnswers(ctx, "https://old.com", 0.8, time.Nanosecond)
+	require.NoError(t, err)
+	assert.Nil(t, answers, "stale answers should be excluded by maxAge")
+}
+
+// --- ListStaleCompanies ---
+
+func TestSQLite_ListStaleCompanies_Empty(t *testing.T) {
+	st := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	results, err := st.ListStaleCompanies(ctx, StaleCompanyFilter{
+		LastEnrichedBefore: time.Now().Add(time.Hour),
+		Limit:              10,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}
+
+func TestSQLite_ListStaleCompanies_FindsStale(t *testing.T) {
+	st := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	company := model.Company{URL: "https://stale.com", Name: "Stale Inc"}
+	run, err := st.CreateRun(ctx, company)
+	require.NoError(t, err)
+
+	err = st.UpdateRunResult(ctx, run.ID, &model.RunResult{
+		Score: 0.75,
+		Answers: []model.ExtractionAnswer{
+			{FieldKey: "industry", Value: "Tech", Confidence: 0.9, Tier: 1},
+		},
+	})
+	require.NoError(t, err)
+
+	// Cutoff in the future → everything is "stale".
+	results, err := st.ListStaleCompanies(ctx, StaleCompanyFilter{
+		LastEnrichedBefore: time.Now().Add(time.Hour),
+		Limit:              10,
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "https://stale.com", results[0].Company.URL)
+}
+
+func TestSQLite_ListStaleCompanies_ExcludesRecent(t *testing.T) {
+	st := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	company := model.Company{URL: "https://fresh.com", Name: "Fresh Inc"}
+	run, err := st.CreateRun(ctx, company)
+	require.NoError(t, err)
+
+	err = st.UpdateRunResult(ctx, run.ID, &model.RunResult{
+		Score: 0.85,
+		Answers: []model.ExtractionAnswer{
+			{FieldKey: "industry", Value: "Finance", Confidence: 0.95, Tier: 1},
+		},
+	})
+	require.NoError(t, err)
+
+	// Cutoff is 1 second in the past — the run we just created is newer, so it's NOT stale.
+	// The run's created_at is roughly "now", and the cutoff is 1 second before "now",
+	// so created_at < cutoff is false.
+	time.Sleep(10 * time.Millisecond) // ensure created_at is before cutoff
+	results, err := st.ListStaleCompanies(ctx, StaleCompanyFilter{
+		LastEnrichedBefore: time.Now().Add(-24 * time.Hour),
+		Limit:              10,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, results)
 }
 
 // --- Migrate ---

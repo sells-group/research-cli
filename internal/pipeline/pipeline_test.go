@@ -89,7 +89,7 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 	st.On("UpdateRunResult", mock.Anything, "run-001", mock.AnythingOfType("*model.RunResult")).Return(nil)
 	st.On("GetCachedLinkedIn", mock.Anything, "acme.com").Return(nil, nil)
 	st.On("SetCachedLinkedIn", mock.Anything, "acme.com", mock.Anything, mock.Anything).Return(nil).Maybe()
-	st.On("GetHighConfidenceAnswers", mock.Anything, "https://acme.com", mock.AnythingOfType("float64")).Return(nil, nil)
+	st.On("GetHighConfidenceAnswers", mock.Anything, "https://acme.com", mock.AnythingOfType("float64"), mock.AnythingOfType("time.Duration")).Return(nil, nil)
 	st.On("LoadCheckpoint", mock.Anything, "https://acme.com").Return(nil, nil)
 	st.On("SaveCheckpoint", mock.Anything, "https://acme.com", mock.AnythingOfType("string"), mock.Anything).Return(nil).Maybe()
 	st.On("DeleteCheckpoint", mock.Anything, "https://acme.com").Return(nil)
@@ -327,7 +327,7 @@ func TestPipeline_ExistingAnswerLookup_SkipsQuestions(t *testing.T) {
 	st.On("GetCachedLinkedIn", mock.Anything, "acme.com").Return(nil, nil)
 	st.On("SetCachedLinkedIn", mock.Anything, "acme.com", mock.Anything, mock.Anything).Return(nil).Maybe()
 	// Return existing high-confidence answer for "industry" — should skip that question.
-	st.On("GetHighConfidenceAnswers", mock.Anything, "https://acme.com", mock.AnythingOfType("float64")).Return([]model.ExtractionAnswer{
+	st.On("GetHighConfidenceAnswers", mock.Anything, "https://acme.com", mock.AnythingOfType("float64"), mock.AnythingOfType("time.Duration")).Return([]model.ExtractionAnswer{
 		{FieldKey: "industry", Value: "Technology", Confidence: 0.95, Tier: 1},
 	}, nil)
 	st.On("LoadCheckpoint", mock.Anything, "https://acme.com").Return(nil, nil)
@@ -452,7 +452,7 @@ func TestPipeline_Checkpoint_ResumesFromT1(t *testing.T) {
 	st.On("UpdateRunResult", mock.Anything, "run-003", mock.AnythingOfType("*model.RunResult")).Return(nil)
 	st.On("GetCachedLinkedIn", mock.Anything, "acme.com").Return(nil, nil)
 	st.On("SetCachedLinkedIn", mock.Anything, "acme.com", mock.Anything, mock.Anything).Return(nil).Maybe()
-	st.On("GetHighConfidenceAnswers", mock.Anything, "https://acme.com", mock.AnythingOfType("float64")).Return(nil, nil)
+	st.On("GetHighConfidenceAnswers", mock.Anything, "https://acme.com", mock.AnythingOfType("float64"), mock.AnythingOfType("time.Duration")).Return(nil, nil)
 	// Return a T1 checkpoint — pipeline should skip T1 extraction and use these answers.
 	st.On("LoadCheckpoint", mock.Anything, "https://acme.com").Return(&model.Checkpoint{
 		CompanyID: "https://acme.com",
@@ -639,7 +639,7 @@ func TestPipeline_WithWaterfall(t *testing.T) {
 	st.On("UpdateRunResult", mock.Anything, "run-wf", mock.AnythingOfType("*model.RunResult")).Return(nil)
 	st.On("GetCachedLinkedIn", mock.Anything, "acme.com").Return(nil, nil)
 	st.On("SetCachedLinkedIn", mock.Anything, "acme.com", mock.Anything, mock.Anything).Return(nil).Maybe()
-	st.On("GetHighConfidenceAnswers", mock.Anything, "https://acme.com", mock.AnythingOfType("float64")).Return(nil, nil)
+	st.On("GetHighConfidenceAnswers", mock.Anything, "https://acme.com", mock.AnythingOfType("float64"), mock.AnythingOfType("time.Duration")).Return(nil, nil)
 	st.On("LoadCheckpoint", mock.Anything, "https://acme.com").Return(nil, nil)
 	st.On("SaveCheckpoint", mock.Anything, "https://acme.com", mock.AnythingOfType("string"), mock.Anything).Return(nil).Maybe()
 	st.On("DeleteCheckpoint", mock.Anything, "https://acme.com").Return(nil)
