@@ -17,8 +17,6 @@ import (
 const (
 	// SEC EDGAR litigation releases API endpoint.
 	secEnforcementURL = "https://efts.sec.gov/LATEST/search-index?q=%%22enforcement+action%%22&dateRange=custom&startdt=%s&enddt=%s&forms=LIT_REL"
-	// SEC enforcement RSS feed.
-	secLitigationRSSURL = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=LIT&dateb=&owner=include&count=100&search_text=&action=getcompany&output=atom"
 )
 
 // SECEnforcement implements the Dataset interface for SEC enforcement actions.
@@ -72,7 +70,7 @@ func (d *SECEnforcement) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetch
 	if err != nil {
 		return nil, eris.Wrap(err, "sec_enforcement: fetch EFTS search")
 	}
-	defer rc.Close()
+	defer rc.Close() //nolint:errcheck
 
 	var result enforcementSearchResult
 	if err := json.NewDecoder(rc).Decode(&result); err != nil {
