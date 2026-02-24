@@ -25,7 +25,7 @@ func newMockPostgresStore(t *testing.T) (*PostgresStore, pgxmock.PgxPoolIface) {
 func TestPostgresStore_GetRun_NotFound(t *testing.T) {
 	s, mock := newMockPostgresStore(t)
 
-	mock.ExpectQuery(`SELECT id, company, status, result, created_at, updated_at FROM runs WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, company, status, result, error, created_at, updated_at FROM runs WHERE id = \$1`).
 		WithArgs("nonexistent-run").
 		WillReturnError(pgx.ErrNoRows)
 

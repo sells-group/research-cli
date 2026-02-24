@@ -157,6 +157,23 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		}
 	}
 
+	// Fail run helper: persists structured error with category + phase snapshot.
+	failRun := func(failErr error, phaseName string) {
+		category := model.ErrorCategoryPermanent
+		if resilience.IsTransient(failErr) {
+			category = model.ErrorCategoryTransient
+		}
+		runErr := &model.RunError{
+			Message:     failErr.Error(),
+			Category:    category,
+			FailedPhase: phaseName,
+			Phases:      append([]model.PhaseResult(nil), result.Phases...),
+		}
+		if storeErr := p.store.FailRun(ctx, run.ID, runErr); storeErr != nil {
+			log.Warn("pipeline: failed to persist run error", zap.Error(storeErr))
+		}
+	}
+
 	// Phase tracking helper with mutex for concurrent access.
 	var phasesMu sync.Mutex
 	trackPhase := func(name string, fn func() (*model.PhaseResult, error)) *model.PhaseResult {
@@ -393,8 +410,9 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	}
 
 	if succeeded == 0 && failed == len(dataPhases) {
-		setStatus(model.RunStatusFailed)
-		return result, eris.Errorf("pipeline: all Phase 1 data sources failed (%s)", strings.Join(failedNames, ", "))
+		allFailedErr := eris.Errorf("pipeline: all Phase 1 data sources failed (%s)", strings.Join(failedNames, ", "))
+		failRun(allFailedErr, "1_data_collection")
+		return result, allFailedErr
 	}
 	if failed > 0 {
 		log.Warn("pipeline: some Phase 1 sources failed, continuing with partial data",
@@ -420,8 +438,9 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	}
 
 	if len(allPages) == 0 {
-		setStatus(model.RunStatusFailed)
-		return result, eris.New("pipeline: no pages collected")
+		noPagesErr := eris.New("pipeline: no pages collected")
+		failRun(noPagesErr, "1_data_collection")
+		return result, noPagesErr
 	}
 
 	// ===== Phase 2: Classification =====

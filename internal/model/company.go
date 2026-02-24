@@ -7,6 +7,23 @@ import (
 	"github.com/sells-group/research-cli/pkg/ppp"
 )
 
+// ErrorCategory classifies a run error as transient (retryable) or permanent.
+type ErrorCategory string
+
+// ErrorCategoryTransient and ErrorCategoryPermanent enumerate error categories.
+const (
+	ErrorCategoryTransient ErrorCategory = "transient"
+	ErrorCategoryPermanent ErrorCategory = "permanent"
+)
+
+// RunError holds structured error information for a failed run.
+type RunError struct {
+	Message     string        `json:"message"`
+	Category    ErrorCategory `json:"category"`
+	FailedPhase string        `json:"failed_phase"`
+	Phases      []PhaseResult `json:"phases,omitempty"`
+}
+
 // RunStatus represents the current state of an enrichment run.
 type RunStatus string
 
@@ -54,6 +71,7 @@ type Run struct {
 	Company   Company    `json:"company"`
 	Status    RunStatus  `json:"status"`
 	Result    *RunResult `json:"result,omitempty"`
+	Error     *RunError  `json:"error,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
