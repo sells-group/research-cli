@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"os"
+	"time"
 
 	"github.com/k-capehart/go-salesforce/v3"
 	"github.com/rotisserie/eris"
@@ -48,5 +49,15 @@ func initSalesforce() (sfpkg.Client, error) {
 		return nil, eris.Wrap(err, "init salesforce")
 	}
 
-	return sfpkg.NewClient(sf), nil
+	client := sfpkg.NewClient(sf, sfpkg.WithRateLimit(cfg.Salesforce.RateLimit))
+
+	// Health check: verify credentials work before running the pipeline.
+	healthCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := client.DescribeSObject(healthCtx, "Account"); err != nil {
+		return nil, eris.Wrap(err, "salesforce health check failed — verify credentials")
+	}
+	zap.L().Debug("salesforce health check passed")
+
+	return client, nil
 }

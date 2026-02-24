@@ -7,6 +7,7 @@ import (
 	"math"
 	"os/signal"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/pipeline"
 	"github.com/sells-group/research-cli/internal/resilience"
 	"github.com/sells-group/research-cli/pkg/notion"
 )
@@ -68,9 +70,41 @@ var batchCmd = &cobra.Command{
 			dlqMaxRetries = 3
 		}
 
-		return processBatch(ctx, leads, batchLimit, cfg.Batch.MaxConcurrentCompanies, env.Notion, env.Store, dlqMaxRetries, func(ctx context.Context, company model.Company) (*model.EnrichmentResult, error) {
+		// Enable deferred SF writes: collect intents during enrichment,
+		// flush in bulk after all companies are processed.
+		var intentsMu sync.Mutex
+		var intents []*pipeline.SFWriteIntent
+
+		env.Pipeline.SetDeferredWrites(func(intent *pipeline.SFWriteIntent) {
+			intentsMu.Lock()
+			intents = append(intents, intent)
+			intentsMu.Unlock()
+		})
+
+		batchErr := processBatch(ctx, leads, batchLimit, cfg.Batch.MaxConcurrentCompanies, env.Notion, env.Store, dlqMaxRetries, func(ctx context.Context, company model.Company) (*model.EnrichmentResult, error) {
 			return env.Pipeline.Run(ctx, company)
 		})
+		if batchErr != nil {
+			return batchErr
+		}
+
+		// Flush deferred SF writes in bulk.
+		if len(intents) > 0 {
+			zap.L().Info("flushing deferred SF writes",
+				zap.Int("intents", len(intents)),
+			)
+			summary, flushErr := env.Pipeline.FlushDeferredWrites(ctx, intents)
+			if flushErr != nil {
+				return eris.Wrap(flushErr, "flush deferred SF writes")
+			}
+			if summary != nil && len(summary.Failures) > 0 {
+				zap.L().Warn("batch: SF write failures detected",
+					zap.Int("total_failures", len(summary.Failures)),
+				)
+			}
+		}
+
+		return nil
 	},
 }
 

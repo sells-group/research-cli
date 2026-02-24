@@ -7,12 +7,14 @@ import (
 
 	"github.com/k-capehart/go-salesforce/v3"
 	"github.com/rotisserie/eris"
+	"golang.org/x/time/rate"
 )
 
 // Client defines the Salesforce API operations used by the pipeline.
 type Client interface {
 	Query(ctx context.Context, soql string, out any) error
 	InsertOne(ctx context.Context, sObjectName string, record map[string]any) (string, error)
+	InsertCollection(ctx context.Context, sObjectName string, records []map[string]any) ([]CollectionResult, error)
 	UpdateOne(ctx context.Context, sObjectName string, id string, fields map[string]any) error
 	UpdateCollection(ctx context.Context, sObjectName string, records []CollectionRecord) ([]CollectionResult, error)
 	DescribeSObject(ctx context.Context, name string) (*SObjectDescription, error)
@@ -53,30 +55,60 @@ type SObjectDescription struct {
 	Fields []SObjectField `json:"fields"`
 }
 
+// ClientOption configures the Salesforce client.
+type ClientOption func(*sfClient)
+
+// WithRateLimit sets a per-second rate limit for SF API calls.
+// A burst equal to the integer portion of rps is allowed.
+func WithRateLimit(rps float64) ClientOption {
+	return func(c *sfClient) {
+		if rps > 0 {
+			c.limiter = rate.NewLimiter(rate.Limit(rps), max(int(rps), 1))
+		}
+	}
+}
+
 // sfClient wraps the go-salesforce/v3 Salesforce struct.
 //
 // NOTE: The underlying go-salesforce/v3 library does not accept context.Context,
-// so all methods discard the ctx parameter. This means Salesforce calls cannot
-// be cancelled or timed out via context. For critical paths (e.g., gate phase
-// writes), callers should consider wrapping calls with a goroutine + select on
-// the context if cancellation is required.
+// so all methods discard the ctx parameter for the SF call itself. However, the
+// ctx is used for rate limiter waiting, so callers can still cancel that wait.
 type sfClient struct {
-	sf *salesforce.Salesforce
+	sf      *salesforce.Salesforce
+	limiter *rate.Limiter
 }
 
 // NewClient creates a new Salesforce Client wrapping the given go-salesforce instance.
-func NewClient(sf *salesforce.Salesforce) Client {
-	return &sfClient{sf: sf}
+func NewClient(sf *salesforce.Salesforce, opts ...ClientOption) Client {
+	c := &sfClient{sf: sf}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
-func (c *sfClient) Query(_ context.Context, soql string, out any) error {
+// wait blocks until the rate limiter allows one event, or ctx is cancelled.
+func (c *sfClient) wait(ctx context.Context) error {
+	if c.limiter == nil {
+		return nil
+	}
+	return c.limiter.Wait(ctx)
+}
+
+func (c *sfClient) Query(ctx context.Context, soql string, out any) error {
+	if err := c.wait(ctx); err != nil {
+		return eris.Wrap(err, "sf: rate limit")
+	}
 	if err := c.sf.Query(soql, out); err != nil {
 		return eris.Wrap(err, "sf: query")
 	}
 	return nil
 }
 
-func (c *sfClient) InsertOne(_ context.Context, sObjectName string, record map[string]any) (string, error) {
+func (c *sfClient) InsertOne(ctx context.Context, sObjectName string, record map[string]any) (string, error) {
+	if err := c.wait(ctx); err != nil {
+		return "", eris.Wrap(err, "sf: rate limit")
+	}
 	result, err := c.sf.InsertOne(sObjectName, record)
 	if err != nil {
 		return "", eris.Wrap(err, fmt.Sprintf("sf: insert %s", sObjectName))
@@ -87,7 +119,34 @@ func (c *sfClient) InsertOne(_ context.Context, sObjectName string, record map[s
 	return result.Id, nil
 }
 
-func (c *sfClient) UpdateOne(_ context.Context, sObjectName string, id string, fields map[string]any) error {
+func (c *sfClient) InsertCollection(ctx context.Context, sObjectName string, records []map[string]any) ([]CollectionResult, error) {
+	if err := c.wait(ctx); err != nil {
+		return nil, eris.Wrap(err, "sf: rate limit")
+	}
+	sfResults, err := c.sf.InsertCollection(sObjectName, records, maxBatchSize)
+	if err != nil {
+		return nil, eris.Wrap(err, fmt.Sprintf("sf: insert collection %s", sObjectName))
+	}
+
+	results := make([]CollectionResult, len(sfResults.Results))
+	for i, r := range sfResults.Results {
+		var errs []string
+		for _, e := range r.Errors {
+			errs = append(errs, e.Message)
+		}
+		results[i] = CollectionResult{
+			ID:      r.Id,
+			Success: r.Success,
+			Errors:  errs,
+		}
+	}
+	return results, nil
+}
+
+func (c *sfClient) UpdateOne(ctx context.Context, sObjectName string, id string, fields map[string]any) error {
+	if err := c.wait(ctx); err != nil {
+		return eris.Wrap(err, "sf: rate limit")
+	}
 	fields["Id"] = id
 	if err := c.sf.UpdateOne(sObjectName, fields); err != nil {
 		return eris.Wrap(err, fmt.Sprintf("sf: update %s %s", sObjectName, id))
@@ -95,7 +154,10 @@ func (c *sfClient) UpdateOne(_ context.Context, sObjectName string, id string, f
 	return nil
 }
 
-func (c *sfClient) UpdateCollection(_ context.Context, sObjectName string, records []CollectionRecord) ([]CollectionResult, error) {
+func (c *sfClient) UpdateCollection(ctx context.Context, sObjectName string, records []CollectionRecord) ([]CollectionResult, error) {
+	if err := c.wait(ctx); err != nil {
+		return nil, eris.Wrap(err, "sf: rate limit")
+	}
 	// Convert CollectionRecords to maps for go-salesforce.
 	maps := make([]map[string]any, len(records))
 	for i, rec := range records {
@@ -127,7 +189,10 @@ func (c *sfClient) UpdateCollection(_ context.Context, sObjectName string, recor
 	return results, nil
 }
 
-func (c *sfClient) DescribeSObject(_ context.Context, name string) (*SObjectDescription, error) {
+func (c *sfClient) DescribeSObject(ctx context.Context, name string) (*SObjectDescription, error) {
+	if err := c.wait(ctx); err != nil {
+		return nil, eris.Wrap(err, "sf: rate limit")
+	}
 	resp, err := c.sf.DoRequest("GET", "/sobjects/"+name+"/describe", nil)
 	if err != nil {
 		return nil, eris.Wrap(err, fmt.Sprintf("sf: describe %s", name))

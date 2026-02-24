@@ -141,10 +141,11 @@ type AnthropicConfig struct {
 
 // SalesforceConfig holds Salesforce JWT auth settings.
 type SalesforceConfig struct {
-	ClientID string `yaml:"client_id" mapstructure:"client_id"`
-	Username string `yaml:"username" mapstructure:"username"`
-	KeyPath  string `yaml:"key_path" mapstructure:"key_path"`
-	LoginURL string `yaml:"login_url" mapstructure:"login_url"`
+	ClientID  string  `yaml:"client_id" mapstructure:"client_id"`
+	Username  string  `yaml:"username" mapstructure:"username"`
+	KeyPath   string  `yaml:"key_path" mapstructure:"key_path"`
+	LoginURL  string  `yaml:"login_url" mapstructure:"login_url"`
+	RateLimit float64 `yaml:"rate_limit" mapstructure:"rate_limit"`
 }
 
 // ToolJetConfig holds ToolJet webhook settings.
@@ -362,6 +363,7 @@ func Load() (*Config, error) {
 	v.SetDefault("anthropic.max_batch_size", 100)
 	v.SetDefault("anthropic.small_batch_threshold", 3)
 	v.SetDefault("salesforce.login_url", "https://login.salesforce.com")
+	v.SetDefault("salesforce.rate_limit", 25.0)
 	v.SetDefault("ppp.similarity_threshold", 0.4)
 	v.SetDefault("ppp.max_candidates", 10)
 	v.SetDefault("fedsync.temp_dir", "/tmp/fedsync")

@@ -70,6 +70,38 @@ func FindAccountByID(ctx context.Context, c Client, id string) (*Account, error)
 	return &accounts[0], nil
 }
 
+// Contact represents a Salesforce Contact record.
+type Contact struct {
+	ID        string `json:"Id" salesforce:"Id"`
+	FirstName string `json:"FirstName" salesforce:"FirstName"`
+	LastName  string `json:"LastName" salesforce:"LastName"`
+	Email     string `json:"Email" salesforce:"Email"`
+	Title     string `json:"Title" salesforce:"Title"`
+	Phone     string `json:"Phone" salesforce:"Phone"`
+	AccountID string `json:"AccountId" salesforce:"AccountId"`
+}
+
+// contactFields are the SOQL fields selected for Contact queries.
+var contactFields = []string{
+	"Id", "FirstName", "LastName", "Email", "Title", "Phone", "AccountId",
+}
+
+// FindContactsByAccountID queries Salesforce for all Contacts linked to the given Account.
+// Returns an empty slice if none are found.
+func FindContactsByAccountID(ctx context.Context, c Client, accountID string) ([]Contact, error) {
+	soql := fmt.Sprintf(
+		"SELECT %s FROM Contact WHERE AccountId = '%s'",
+		strings.Join(contactFields, ", "),
+		escapeSoql(accountID),
+	)
+
+	var contacts []Contact
+	if err := c.Query(ctx, soql, &contacts); err != nil {
+		return nil, eris.Wrap(err, fmt.Sprintf("sf: find contacts for account %s", accountID))
+	}
+	return contacts, nil
+}
+
 // escapeSoql escapes single quotes in SOQL string literals to prevent injection.
 func escapeSoql(s string) string {
 	return strings.ReplaceAll(s, "'", "\\'")

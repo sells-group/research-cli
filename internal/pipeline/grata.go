@@ -138,6 +138,10 @@ func ParseGrataCSV(csvPath string) ([]model.Company, error) {
 		if et := getCol(row, colIdx, "Executive Title"); et != "" {
 			preSeeded["exec_title"] = et
 		}
+		if bm := getCol(row, colIdx, "Business Model"); bm != "" {
+			canonical, _ := NormalizeBusinessModel(bm)
+			preSeeded["business_model"] = canonical
+		}
 
 		var preSeededMap map[string]any
 		if len(preSeeded) > 0 {
@@ -365,7 +369,7 @@ func ParseGrataCSVFull(csvPath string) ([]GrataCompany, error) {
 			ReviewCount:       getColInt(row, colIdx, "Total Review Count"),
 			Rating:            getColFloat(row, colIdx, "Aggregate Rating"),
 			NAICS6:            getCol(row, colIdx, "NAICS 6"),
-			BusinessModel:     getCol(row, colIdx, "Business Model"),
+			BusinessModel:     normalizeGrataBusinessModel(getCol(row, colIdx, "Business Model")),
 			PrimaryEmail:      getCol(row, colIdx, "Primary Email"),
 			PrimaryPhone:      getCol(row, colIdx, "Primary Phone"),
 			ExecFirstName:     getCol(row, colIdx, "Executive First Name"),
@@ -399,6 +403,19 @@ func getColInt(row []string, colIdx map[string]int, col string) int {
 		return 0
 	}
 	return n
+}
+
+// normalizeGrataBusinessModel normalizes a Grata business model label to its
+// canonical form. Returns the original value if normalization finds no match.
+func normalizeGrataBusinessModel(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	canonical, ok := NormalizeBusinessModel(raw)
+	if !ok {
+		return raw
+	}
+	return canonical
 }
 
 // getColFloat parses a column value as a float, returning 0 on failure.
@@ -691,36 +708,10 @@ func compareField(name, grata, ours string, conf float64) (match bool, proximity
 		if strings.EqualFold(g, o) {
 			return true, 1.0, "exact"
 		}
-		// Grata uses simple labels ("Services", "Manufacturer") while our
-		// extraction produces detailed classifications ("B2B Service Provider").
-		gLower := strings.ToLower(g)
-		oLower := strings.ToLower(o)
-		// Direct containment check.
-		if strings.Contains(oLower, gLower) || strings.Contains(gLower, oLower) {
-			return true, 0.8, "close"
-		}
-		// Prefix stem check: compare the first 5+ chars of each word from one
-		// value against the other. Catches "Services"↔"Service", "Manufacturer"↔"Manufacturing".
-		for _, w := range strings.Fields(gLower) {
-			if len(w) >= 5 {
-				stem := w[:5]
-				if strings.Contains(oLower, stem) {
-					return true, 0.7, "close"
-				}
-			}
-		}
-		for _, w := range strings.Fields(oLower) {
-			if len(w) >= 5 {
-				stem := w[:5]
-				if strings.Contains(gLower, stem) {
-					return true, 0.7, "close"
-				}
-			}
-		}
-		// Business model labels are inherently subjective — Grata uses
-		// coarse single-word categories. Accept high-confidence extractions.
-		if conf >= 0.85 {
-			return true, stringOverlap(g, o), "high_conf"
+		gCanon, _ := NormalizeBusinessModel(g)
+		oCanon, _ := NormalizeBusinessModel(o)
+		if strings.EqualFold(gCanon, oCanon) {
+			return true, 1.0, "canonical"
 		}
 		return false, stringOverlap(g, o), "wrong"
 
@@ -956,6 +947,8 @@ func FormatComparisonReport(comparisons []CompanyComparison) string {
 				resultStr = fmt.Sprintf("~%.2f", fc.Proximity)
 			case "high_conf":
 				resultStr = fmt.Sprintf("OK (high_conf %.2f)", fc.Confidence)
+			case "canonical":
+				resultStr = "OK (canonical)"
 			case "wrong":
 				if fc.Proximity > 0 {
 					resultStr = fmt.Sprintf("WRONG (%.2f)", fc.Proximity)

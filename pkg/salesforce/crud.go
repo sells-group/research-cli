@@ -33,6 +33,20 @@ func CreateAccount(ctx context.Context, c Client, fields map[string]any) (string
 	return id, nil
 }
 
+// UpdateContact updates a Contact record with the given fields.
+func UpdateContact(ctx context.Context, c Client, contactID string, fields map[string]any) error {
+	if contactID == "" {
+		return eris.New("sf: contact id is required")
+	}
+	if len(fields) == 0 {
+		return eris.New("sf: no fields to update")
+	}
+	if err := c.UpdateOne(ctx, "Contact", contactID, fields); err != nil {
+		return eris.Wrap(err, fmt.Sprintf("sf: update contact %s", contactID))
+	}
+	return nil
+}
+
 // CreateContact creates a new Contact record linked to the given Account and
 // returns the new Salesforce ID.
 func CreateContact(ctx context.Context, c Client, accountID string, fields map[string]any) (string, error) {

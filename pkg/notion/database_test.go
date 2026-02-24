@@ -111,6 +111,9 @@ func TestQueryAll_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately.
 
+	mc.On("QueryDatabase", mock.Anything, "db-1", mock.Anything).
+		Return(nil, context.Canceled)
+
 	pages, err := QueryAll(ctx, mc, "db-1", nil)
 	assert.Error(t, err)
 	assert.Nil(t, pages)

@@ -251,6 +251,15 @@ func (s *StubSalesforceClient) InsertOne(_ context.Context, _ string, _ map[stri
 	return "stub-sf-001", nil
 }
 
+// InsertCollection implements salesforce.Client.
+func (s *StubSalesforceClient) InsertCollection(_ context.Context, _ string, records []map[string]any) ([]salesforce.CollectionResult, error) {
+	results := make([]salesforce.CollectionResult, len(records))
+	for i := range records {
+		results[i] = salesforce.CollectionResult{ID: "stub-sf-" + fmt.Sprintf("%03d", i+1), Success: true}
+	}
+	return results, nil
+}
+
 // UpdateOne implements salesforce.Client.
 func (s *StubSalesforceClient) UpdateOne(_ context.Context, _ string, _ string, _ map[string]any) error {
 	return nil
