@@ -1,16 +1,15 @@
-// Package geocode provides address geocoding via Census Geocoder (primary) and Google (fallback).
+// Package geocode provides address geocoding via PostGIS tiger geocoder.
 package geocode
 
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"time"
+	"strings"
 
-	"golang.org/x/time/rate"
+	"github.com/sells-group/research-cli/internal/db"
 )
 
-// Client geocodes addresses using Census Geocoder (primary) and Google (fallback).
+// Client geocodes addresses using PostGIS tiger geocoder.
 type Client interface {
 	// Geocode geocodes a single address.
 	Geocode(ctx context.Context, addr AddressInput) (*Result, error)
@@ -32,46 +31,43 @@ type AddressInput struct {
 type Result struct {
 	Latitude  float64
 	Longitude float64
-	Source    string // "census" or "google"
+	Source    string // "tiger"
 	Quality   string // "rooftop", "range", "centroid", "approximate"
 	Matched   bool
+	Rating    int // PostGIS geocoder rating (0=best)
 }
 
 // Option configures the geocoder.
 type Option func(*geocoder)
 
-// WithGoogleAPIKey enables Google Geocoding API as a fallback.
-func WithGoogleAPIKey(key string) Option {
+// WithCacheEnabled enables or disables the geocode result cache.
+func WithCacheEnabled(enabled bool) Option {
 	return func(g *geocoder) {
-		g.googleKey = key
+		g.cacheEnabled = enabled
 	}
 }
 
-// WithHTTPClient sets a custom HTTP client for both Census and Google requests.
-func WithHTTPClient(hc *http.Client) Option {
+// WithMaxRating sets the maximum acceptable geocoder rating.
+// Results with ratings above this threshold are treated as unmatched.
+// Default is 100.
+func WithMaxRating(maxRating int) Option {
 	return func(g *geocoder) {
-		g.httpClient = hc
-	}
-}
-
-// WithRateLimit sets the requests-per-second rate limit for Census API calls.
-func WithRateLimit(rps float64) Option {
-	return func(g *geocoder) {
-		g.limiter = rate.NewLimiter(rate.Limit(rps), int(rps))
+		g.maxRating = maxRating
 	}
 }
 
 type geocoder struct {
-	httpClient *http.Client
-	googleKey  string
-	limiter    *rate.Limiter
+	pool         db.Pool
+	cacheEnabled bool
+	maxRating    int
 }
 
-// NewClient creates a new geocoding Client with the given options.
-func NewClient(opts ...Option) Client {
+// NewClient creates a new geocoding Client backed by PostGIS tiger geocoder.
+func NewClient(pool db.Pool, opts ...Option) Client {
 	g := &geocoder{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		limiter:    rate.NewLimiter(50, 50), // Census default: 50 req/s
+		pool:         pool,
+		cacheEnabled: true,
+		maxRating:    100,
 	}
 	for _, opt := range opts {
 		opt(g)
@@ -79,27 +75,34 @@ func NewClient(opts ...Option) Client {
 	return g
 }
 
-// Geocode geocodes a single address, trying Census first, then Google if configured.
+// Geocode geocodes a single address using PostGIS tiger geocoder.
 func (g *geocoder) Geocode(ctx context.Context, addr AddressInput) (*Result, error) {
-	result, censusErr := g.geocodeCensus(ctx, addr)
-	if censusErr == nil && result.Matched {
-		return result, nil
-	}
+	key := cacheKey(addr)
 
-	// If Census failed or didn't match, try Google if configured.
-	if g.googleKey != "" {
-		googleResult, googleErr := g.geocodeGoogle(ctx, addr)
-		if googleErr == nil && googleResult.Matched {
-			return googleResult, nil
+	// Check cache first.
+	if g.cacheEnabled {
+		cached, err := g.checkCache(ctx, key)
+		if err == nil && cached != nil {
+			return cached, nil
 		}
 	}
 
-	// No match from any provider — this is not an error, just unmatched.
-	return &Result{Matched: false}, nil
+	// Call PostGIS geocode().
+	result, err := g.tigerGeocode(ctx, addr)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache.
+	if g.cacheEnabled && result.Matched {
+		_ = g.storeCache(ctx, key, result)
+	}
+
+	return result, nil
 }
 
-// BatchGeocode geocodes multiple addresses using Census batch API, falling back
-// to Google for individual unmatched addresses.
+// BatchGeocode geocodes multiple addresses using individual PostGIS calls.
+// PostGIS geocoder is local SQL (~5-20ms per call) so no batch API is needed.
 func (g *geocoder) BatchGeocode(ctx context.Context, addrs []AddressInput) ([]Result, error) {
 	if len(addrs) == 0 {
 		return nil, nil
@@ -112,33 +115,28 @@ func (g *geocoder) BatchGeocode(ctx context.Context, addrs []AddressInput) ([]Re
 		}
 	}
 
-	// Try Census batch geocoding.
-	results, err := g.batchGeocodeCensus(ctx, addrs)
-	if err != nil {
-		// Fall back to individual geocoding.
-		results = make([]Result, len(addrs))
-		for i, addr := range addrs {
-			r, geocodeErr := g.Geocode(ctx, addr)
-			if geocodeErr != nil {
-				results[i] = Result{Matched: false}
-				continue
-			}
-			results[i] = *r
+	results := make([]Result, len(addrs))
+	for i, addr := range addrs {
+		r, err := g.Geocode(ctx, addr)
+		if err != nil {
+			results[i] = Result{Matched: false, Source: "tiger"}
+			continue
 		}
-		return results, nil
-	}
-
-	// For unmatched Census results, try Google individually if configured.
-	if g.googleKey != "" {
-		for i, r := range results {
-			if !r.Matched {
-				googleResult, googleErr := g.geocodeGoogle(ctx, addrs[i])
-				if googleErr == nil && googleResult.Matched {
-					results[i] = *googleResult
-				}
-			}
-		}
+		results[i] = *r
 	}
 
 	return results, nil
+}
+
+// formatOneLine formats an address as a single line for the geocoder.
+func formatOneLine(addr AddressInput) string {
+	parts := []string{addr.Street, addr.City, addr.State, addr.ZipCode}
+	var nonEmpty []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			nonEmpty = append(nonEmpty, p)
+		}
+	}
+	return strings.Join(nonEmpty, ", ")
 }

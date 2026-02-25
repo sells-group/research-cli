@@ -33,6 +33,7 @@ type Config struct {
 	Fedsync    FedsyncConfig    `yaml:"fedsync" mapstructure:"fedsync"`
 	Discovery  DiscoveryConfig  `yaml:"discovery" mapstructure:"discovery"`
 	Geo        GeoConfig        `yaml:"geo" mapstructure:"geo"`
+	Tiger      TigerConfig      `yaml:"tiger" mapstructure:"tiger"`
 	Scorer     ScorerConfig     `yaml:"scorer" mapstructure:"scorer"`
 	Waterfall  WaterfallConfig  `yaml:"waterfall" mapstructure:"waterfall"`
 	Retry      RetryConfig      `yaml:"retry" mapstructure:"retry"`
@@ -81,11 +82,20 @@ type DiscoveryConfig struct {
 
 // GeoConfig configures geocoding and MSA association.
 type GeoConfig struct {
-	Enabled        bool `yaml:"enabled" mapstructure:"enabled"`
-	CensusTimeout  int  `yaml:"census_timeout_secs" mapstructure:"census_timeout_secs"`
-	BatchSize      int  `yaml:"batch_size" mapstructure:"batch_size"`
-	FallbackGoogle bool `yaml:"fallback_google" mapstructure:"fallback_google"`
-	TopMSAs        int  `yaml:"top_msas" mapstructure:"top_msas"`
+	Enabled      bool `yaml:"enabled" mapstructure:"enabled"`
+	CacheEnabled bool `yaml:"cache_enabled" mapstructure:"cache_enabled"`
+	MaxRating    int  `yaml:"max_rating" mapstructure:"max_rating"`
+	BatchSize    int  `yaml:"batch_size" mapstructure:"batch_size"`
+	TopMSAs      int  `yaml:"top_msas" mapstructure:"top_msas"`
+}
+
+// TigerConfig configures TIGER/Line data loading.
+type TigerConfig struct {
+	Year        int      `yaml:"year" mapstructure:"year"`
+	TempDir     string   `yaml:"temp_dir" mapstructure:"temp_dir"`
+	States      []string `yaml:"states" mapstructure:"states"`
+	Concurrency int      `yaml:"concurrency" mapstructure:"concurrency"`
+	Tables      []string `yaml:"tables" mapstructure:"tables"`
 }
 
 // ScorerConfig configures the multi-pass firm scoring pipeline.
@@ -454,10 +464,13 @@ func Load() (*Config, error) {
 	v.SetDefault("discovery.t2_score_threshold", 0.3)
 	v.SetDefault("discovery.max_cost_per_run_usd", 50.0)
 	v.SetDefault("geo.enabled", true)
-	v.SetDefault("geo.census_timeout_secs", 30)
+	v.SetDefault("geo.cache_enabled", true)
+	v.SetDefault("geo.max_rating", 100)
 	v.SetDefault("geo.batch_size", 1000)
-	v.SetDefault("geo.fallback_google", true)
 	v.SetDefault("geo.top_msas", 3)
+	v.SetDefault("tiger.year", 2024)
+	v.SetDefault("tiger.temp_dir", "/tmp/tiger")
+	v.SetDefault("tiger.concurrency", 3)
 	v.SetDefault("scorer.aum_fit_weight", 25)
 	v.SetDefault("scorer.growth_weight", 10)
 	v.SetDefault("scorer.client_quality_weight", 15)

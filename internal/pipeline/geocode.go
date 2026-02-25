@@ -12,18 +12,18 @@ import (
 	"github.com/sells-group/research-cli/pkg/geocode"
 )
 
-// SetGeocoder sets the geocoding client for Phase 7B.
+// SetGeocoder sets the geocoding client for Phase 7D.
 func (p *Pipeline) SetGeocoder(gc geocode.Client) {
 	p.geocoder = gc
 }
 
-// SetGeoAssociator sets the MSA associator for Phase 7B.
+// SetGeoAssociator sets the MSA associator for Phase 7D.
 func (p *Pipeline) SetGeoAssociator(ga *geo.Associator) {
 	p.geoAssoc = ga
 }
 
-// Phase7BGeocode geocodes company addresses and associates with MSAs.
-func (p *Pipeline) Phase7BGeocode(ctx context.Context, companyModel model.Company, _ string) (*model.PhaseResult, error) {
+// Phase7DGeocode geocodes company addresses and associates with MSAs.
+func (p *Pipeline) Phase7DGeocode(ctx context.Context, companyModel model.Company, _ string) (*model.PhaseResult, error) {
 	log := zap.L().With(
 		zap.String("company", companyModel.Name),
 		zap.String("phase", "7d_geocode"),
