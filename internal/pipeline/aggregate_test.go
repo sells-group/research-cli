@@ -776,7 +776,7 @@ func TestPopulateOwnerFromContacts(t *testing.T) {
 		{Key: "owner_title", SFField: "Title", SFObject: "Contact", DataType: "string"},
 		{Key: "owner_email", SFField: "Email", SFObject: "Contact", DataType: "email"},
 		{Key: "owner_phone", SFField: "Phone", SFObject: "Contact", DataType: "phone"},
-		{Key: "owner_linkedin", SFField: "LinkedIn_URL__c", SFObject: "Contact", DataType: "url"},
+		{Key: "owner_linkedin", SFField: "LinkedIn__c", SFObject: "Contact", DataType: "url"},
 	})
 
 	t.Run("fills owner fields from contacts[0]", func(t *testing.T) {

@@ -527,7 +527,7 @@ func TestExtractContactsForSF_FromContacts(t *testing.T) {
 	assert.Equal(t, "Jane", contacts[0]["FirstName"])
 	assert.Equal(t, "CEO", contacts[0]["Title"])
 	assert.Equal(t, "jane@acme.com", contacts[0]["Email"])
-	assert.Equal(t, "https://linkedin.com/in/janedoe", contacts[0]["LinkedIn_URL__c"])
+	assert.Equal(t, "https://linkedin.com/in/janedoe", contacts[0]["LinkedIn__c"])
 	assert.Equal(t, "Smith", contacts[1]["LastName"])
 }
 
@@ -1540,9 +1540,9 @@ func TestInjectGeoFields(t *testing.T) {
 		}
 		injectGeoFields(fields, gd)
 
-		assert.Equal(t, 30.2672, fields["Latitude__c"])
-		assert.Equal(t, -97.7431, fields["Longitude__c"])
-		assert.Equal(t, "Austin-Round Rock-Georgetown, TX", fields["MSA_Name__c"])
+		assert.Equal(t, 30.2672, fields["Longitude_and_Lattitude__Latitude__s"])   //nolint:misspell // SF field name
+		assert.Equal(t, -97.7431, fields["Longitude_and_Lattitude__Longitude__s"]) //nolint:misspell // SF field name
+		assert.Equal(t, "Austin-Round Rock-Georgetown, TX", fields["Company_MSA__c"])
 		assert.Equal(t, "12420", fields["MSA_CBSA_Code__c"])
 		assert.Equal(t, "urban_core", fields["Urban_Classification__c"])
 		assert.Equal(t, 5.2, fields["Distance_to_MSA_Center_km__c"])
@@ -1558,9 +1558,9 @@ func TestInjectGeoFields(t *testing.T) {
 		}
 		injectGeoFields(fields, gd)
 
-		assert.Equal(t, 30.2672, fields["Latitude__c"])
-		assert.Equal(t, -97.7431, fields["Longitude__c"])
-		assert.Nil(t, fields["MSA_Name__c"])
+		assert.Equal(t, 30.2672, fields["Longitude_and_Lattitude__Latitude__s"])   //nolint:misspell // SF field name
+		assert.Equal(t, -97.7431, fields["Longitude_and_Lattitude__Longitude__s"]) //nolint:misspell // SF field name
+		assert.Nil(t, fields["Company_MSA__c"])
 		assert.Nil(t, fields["MSA_CBSA_Code__c"])
 	})
 }

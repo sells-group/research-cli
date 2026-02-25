@@ -249,13 +249,13 @@ func injectGeoFields(fields map[string]any, gd *model.GeoData) {
 		return
 	}
 	if gd.Latitude != 0 {
-		fields["Latitude__c"] = gd.Latitude
+		fields["Longitude_and_Lattitude__Latitude__s"] = gd.Latitude //nolint:misspell // SF field name has typo
 	}
 	if gd.Longitude != 0 {
-		fields["Longitude__c"] = gd.Longitude
+		fields["Longitude_and_Lattitude__Longitude__s"] = gd.Longitude //nolint:misspell // SF field name has typo
 	}
 	if gd.MSAName != "" {
-		fields["MSA_Name__c"] = gd.MSAName
+		fields["Company_MSA__c"] = gd.MSAName
 	}
 	if gd.CBSACode != "" {
 		fields["MSA_CBSA_Code__c"] = gd.CBSACode
@@ -440,7 +440,7 @@ func extractContactsForSF(fieldValues map[string]model.FieldValue, _ *model.Fiel
 		mapField("title", "Title")
 		mapField("email", "Email")
 		mapField("phone", "Phone")
-		mapField("linkedin_url", "LinkedIn_URL__c")
+		mapField("linkedin_url", "LinkedIn__c")
 
 		// LastName is required for SF Contact.
 		if sf["LastName"] != nil {
