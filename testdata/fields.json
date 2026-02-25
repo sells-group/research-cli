@@ -78,16 +78,6 @@
     "status": "Active"
   },
   {
-    "id": "f_owner_name",
-    "key": "owner_name",
-    "sf_field": "Owner_CEO__c",
-    "sf_object": "Account",
-    "data_type": "string",
-    "required": false,
-    "max_length": 255,
-    "status": "Active"
-  },
-  {
     "id": "f_employee_count",
     "key": "employee_count",
     "sf_field": "NumberOfEmployees",
@@ -149,7 +139,7 @@
   {
     "id": "f_description",
     "key": "description",
-    "sf_field": "Description__c",
+    "sf_field": "Description",
     "sf_object": "Account",
     "data_type": "string",
     "required": false,
@@ -174,55 +164,9 @@
     "status": "Active"
   },
   {
-    "id": "f_key_people",
-    "key": "key_people",
-    "sf_field": "Key_People__c",
-    "sf_object": "Account",
-    "data_type": "string",
-    "required": false,
-    "max_length": 1000,
-    "status": "Active"
-  },
-  {
-    "id": "f_exec_first_name",
-    "key": "exec_first_name",
-    "sf_field": "Exec_First_Name__c",
-    "sf_object": "Account",
-    "data_type": "string",
-    "required": false,
-    "status": "Active"
-  },
-  {
-    "id": "f_exec_last_name",
-    "key": "exec_last_name",
-    "sf_field": "Exec_Last_Name__c",
-    "sf_object": "Account",
-    "data_type": "string",
-    "required": false,
-    "status": "Active"
-  },
-  {
-    "id": "f_exec_title",
-    "key": "exec_title",
-    "sf_field": "Exec_Title__c",
-    "sf_object": "Account",
-    "data_type": "string",
-    "required": false,
-    "status": "Active"
-  },
-  {
-    "id": "f_exec_linkedin",
-    "key": "exec_linkedin",
-    "sf_field": "Exec_LinkedIn__c",
-    "sf_object": "Account",
-    "data_type": "url",
-    "required": false,
-    "status": "Active"
-  },
-  {
     "id": "f_review_count",
     "key": "review_count",
-    "sf_field": "Review_Count__c",
+    "sf_field": "Google_Reviews__c",
     "sf_object": "Account",
     "data_type": "integer",
     "required": false,
@@ -231,7 +175,7 @@
   {
     "id": "f_review_rating",
     "key": "review_rating",
-    "sf_field": "Review_Rating__c",
+    "sf_field": "Google_Review_Rating__c",
     "sf_object": "Account",
     "data_type": "float",
     "required": false,
@@ -267,7 +211,7 @@
   {
     "id": "f_employees_linkedin",
     "key": "employees_linkedin",
-    "sf_field": "Employees_LinkedIn__c",
+    "sf_field": "LinkedIn_Employees__c",
     "sf_object": "Account",
     "data_type": "integer",
     "required": false,
