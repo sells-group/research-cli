@@ -55,7 +55,7 @@ type Pipeline struct {
 	retryCfg      resilience.RetryConfig
 	fedsyncPool   db.Pool // optional: enables ADV pre-fill when set
 
-	// Geocoding (Phase 7B) — set via SetGeocoder / SetGeoAssociator.
+	// Geocoding (Phase 7D) — set via SetGeocoder / SetGeoAssociator.
 	geocoder geocode.Client
 	geoAssoc *geo.Associator
 
@@ -973,7 +973,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	// ===== Phase 7D: Geocode =====
 	if p.cfg.Geo.Enabled && p.geocoder != nil {
 		trackPhase("7d_geocode", func() (*model.PhaseResult, error) {
-			return p.Phase7BGeocode(ctx, company, run.ID)
+			return p.Phase7DGeocode(ctx, company, run.ID)
 		})
 	}
 

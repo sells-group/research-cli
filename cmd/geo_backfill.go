@@ -17,7 +17,7 @@ import (
 var geoBackfillCmd = &cobra.Command{
 	Use:   "backfill",
 	Short: "Geocode ungeocoded addresses",
-	Long:  "Geocodes existing ungeocoded addresses and optionally associates them with MSAs.",
+	Long:  "Geocodes existing ungeocoded addresses using PostGIS tiger geocoder and optionally associates them with MSAs.",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
@@ -34,14 +34,11 @@ var geoBackfillCmd = &cobra.Command{
 
 		log := zap.L().With(zap.String("command", "geo.backfill"))
 
-		// Build geocode client.
-		opts := []geocode.Option{
-			geocode.WithRateLimit(50),
-		}
-		if cfg.Geo.FallbackGoogle && cfg.Google.Key != "" {
-			opts = append(opts, geocode.WithGoogleAPIKey(cfg.Google.Key))
-		}
-		gcClient := geocode.NewClient(opts...)
+		// Build PostGIS geocode client.
+		gcClient := geocode.NewClient(pool,
+			geocode.WithCacheEnabled(cfg.Geo.CacheEnabled),
+			geocode.WithMaxRating(cfg.Geo.MaxRating),
+		)
 
 		// Build company store and geo associator.
 		cs := company.NewPostgresStore(pool)
@@ -89,22 +86,12 @@ var geoBackfillCmd = &cobra.Command{
 				}
 			}
 
-			// Batch geocode.
+			// Batch geocode via PostGIS.
 			results, batchErr := gcClient.BatchGeocode(ctx, inputs)
 			if batchErr != nil {
-				log.Warn("geocode batch failed, falling back to individual",
-					zap.Error(batchErr),
-				)
-				// Fall back to individual geocoding.
-				results = make([]geocode.Result, len(inputs))
-				for j, input := range inputs {
-					r, gcErr := gcClient.Geocode(ctx, input)
-					if gcErr != nil {
-						failed++
-						continue
-					}
-					results[j] = *r
-				}
+				log.Warn("geocode batch failed", zap.Error(batchErr))
+				failed += len(inputs)
+				continue
 			}
 
 			// Update addresses and associate with MSAs.
@@ -157,7 +144,7 @@ var geoBackfillCmd = &cobra.Command{
 
 func init() {
 	geoBackfillCmd.Flags().Int("limit", 100, "maximum number of addresses to geocode")
-	geoBackfillCmd.Flags().Int("batch-size", 1000, "batch size for Census API")
+	geoBackfillCmd.Flags().Int("batch-size", 1000, "batch size for geocoding")
 	geoBackfillCmd.Flags().Bool("skip-msa", false, "skip MSA association step")
 	geoCmd.AddCommand(geoBackfillCmd)
 }

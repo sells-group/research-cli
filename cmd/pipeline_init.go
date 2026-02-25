@@ -191,15 +191,13 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 
 	// Wire up geocoder for Phase 7D (MSA association) if enabled.
 	if cfg.Geo.Enabled {
-		var gcOpts []geocode.Option
-		if cfg.Google.Key != "" {
-			gcOpts = append(gcOpts, geocode.WithGoogleAPIKey(cfg.Google.Key))
-		}
-		gc := geocode.NewClient(gcOpts...)
-		p.SetGeocoder(gc)
-
-		// Set up geo associator if we have a Postgres pool.
 		if ps, ok := st.(*store.PostgresStore); ok {
+			gc := geocode.NewClient(ps.Pool(),
+				geocode.WithCacheEnabled(cfg.Geo.CacheEnabled),
+				geocode.WithMaxRating(cfg.Geo.MaxRating),
+			)
+			p.SetGeocoder(gc)
+
 			cStore := company.NewPostgresStore(ps.Pool())
 			assoc := geo.NewAssociator(ps.Pool(), cStore)
 			p.SetGeoAssociator(assoc)
