@@ -33,6 +33,7 @@ type Config struct {
 	Fedsync    FedsyncConfig    `yaml:"fedsync" mapstructure:"fedsync"`
 	Discovery  DiscoveryConfig  `yaml:"discovery" mapstructure:"discovery"`
 	Geo        GeoConfig        `yaml:"geo" mapstructure:"geo"`
+	Scorer     ScorerConfig     `yaml:"scorer" mapstructure:"scorer"`
 	Waterfall  WaterfallConfig  `yaml:"waterfall" mapstructure:"waterfall"`
 	Retry      RetryConfig      `yaml:"retry" mapstructure:"retry"`
 	Circuit    CircuitConfig    `yaml:"circuit" mapstructure:"circuit"`
@@ -85,6 +86,29 @@ type GeoConfig struct {
 	BatchSize      int  `yaml:"batch_size" mapstructure:"batch_size"`
 	FallbackGoogle bool `yaml:"fallback_google" mapstructure:"fallback_google"`
 	TopMSAs        int  `yaml:"top_msas" mapstructure:"top_msas"`
+}
+
+// ScorerConfig configures the multi-pass firm scoring pipeline.
+type ScorerConfig struct {
+	AUMFitWeight           float64  `yaml:"aum_fit_weight" mapstructure:"aum_fit_weight"`
+	GrowthWeight           float64  `yaml:"growth_weight" mapstructure:"growth_weight"`
+	ClientQualityWeight    float64  `yaml:"client_quality_weight" mapstructure:"client_quality_weight"`
+	ServiceFitWeight       float64  `yaml:"service_fit_weight" mapstructure:"service_fit_weight"`
+	GeoMatchWeight         float64  `yaml:"geo_match_weight" mapstructure:"geo_match_weight"`
+	IndustryMatchWeight    float64  `yaml:"industry_match_weight" mapstructure:"industry_match_weight"`
+	RegulatoryCleanWeight  float64  `yaml:"regulatory_clean_weight" mapstructure:"regulatory_clean_weight"`
+	SuccessionSignalWeight float64  `yaml:"succession_signal_weight" mapstructure:"succession_signal_weight"`
+	MinAUM                 int64    `yaml:"min_aum" mapstructure:"min_aum"`
+	MaxAUM                 int64    `yaml:"max_aum" mapstructure:"max_aum"`
+	MinEmployees           int      `yaml:"min_employees" mapstructure:"min_employees"`
+	MaxEmployees           int      `yaml:"max_employees" mapstructure:"max_employees"`
+	TargetStates           []string `yaml:"target_states" mapstructure:"target_states"`
+	GeoKeywords            []string `yaml:"geo_keywords" mapstructure:"geo_keywords"`
+	IndustryKeywords       []string `yaml:"industry_keywords" mapstructure:"industry_keywords"`
+	SuccessionKeywords     []string `yaml:"succession_keywords" mapstructure:"succession_keywords"`
+	NegativeKeywords       []string `yaml:"negative_keywords" mapstructure:"negative_keywords"`
+	MinScore               float64  `yaml:"min_score" mapstructure:"min_score"`
+	MaxFirms               int      `yaml:"max_firms" mapstructure:"max_firms"`
 }
 
 // WaterfallConfig configures the per-field waterfall cascade system.
@@ -247,6 +271,7 @@ type QualityWeights struct {
 
 // PipelineConfig configures extraction behavior.
 type PipelineConfig struct {
+	Mode                          string         `yaml:"mode" mapstructure:"mode"`
 	ConfidenceEscalationThreshold float64        `yaml:"confidence_escalation_threshold" mapstructure:"confidence_escalation_threshold"`
 	EscalationFailRateThreshold   float64        `yaml:"escalation_fail_rate_threshold" mapstructure:"escalation_fail_rate_threshold"`
 	Tier3Gate                     string         `yaml:"tier3_gate" mapstructure:"tier3_gate"`
@@ -383,6 +408,7 @@ func Load() (*Config, error) {
 	v.SetDefault("crawl.exclude_paths", []string{"/blog/*", "/news/*", "/press/*", "/careers/*"})
 	v.SetDefault("scrape.search_timeout_secs", 15)
 	v.SetDefault("scrape.search_retries", 1)
+	v.SetDefault("pipeline.mode", "full")
 	v.SetDefault("pipeline.confidence_escalation_threshold", 0.4)
 	v.SetDefault("pipeline.escalation_fail_rate_threshold", 0.35)
 	v.SetDefault("pipeline.tier3_gate", "off")
@@ -432,6 +458,28 @@ func Load() (*Config, error) {
 	v.SetDefault("geo.batch_size", 1000)
 	v.SetDefault("geo.fallback_google", true)
 	v.SetDefault("geo.top_msas", 3)
+	v.SetDefault("scorer.aum_fit_weight", 25)
+	v.SetDefault("scorer.growth_weight", 10)
+	v.SetDefault("scorer.client_quality_weight", 15)
+	v.SetDefault("scorer.service_fit_weight", 10)
+	v.SetDefault("scorer.geo_match_weight", 10)
+	v.SetDefault("scorer.industry_match_weight", 10)
+	v.SetDefault("scorer.regulatory_clean_weight", 10)
+	v.SetDefault("scorer.succession_signal_weight", 10)
+	v.SetDefault("scorer.min_aum", 100000000)
+	v.SetDefault("scorer.max_aum", 5000000000)
+	v.SetDefault("scorer.min_employees", 3)
+	v.SetDefault("scorer.max_employees", 200)
+	v.SetDefault("scorer.min_score", 50)
+	v.SetDefault("scorer.max_firms", 500)
+	v.SetDefault("scorer.succession_keywords", []string{
+		"succession", "retirement", "transition", "selling practice",
+		"exit planning", "next chapter", "winding down",
+	})
+	v.SetDefault("scorer.negative_keywords", []string{
+		"bankruptcy", "fraud", "ponzi", "sec enforcement",
+		"criminal charges", "revoked",
+	})
 	v.SetDefault("waterfall.config_path", "config/waterfall.yaml")
 	v.SetDefault("waterfall.confidence_threshold", 0.7)
 	v.SetDefault("waterfall.max_premium_cost_usd", 2.00)

@@ -219,9 +219,10 @@ func initOfflinePipeline(ctx context.Context) (*pipelineEnv, error) {
 	sfClient := &pipeline.StubSalesforceClient{}
 	notionClient := &pipeline.StubNotionClient{}
 
-	// Build scrape chain with stub Jina adapter.
+	// Build scrape chain: Local → Jina.
 	matcher := scrape.NewPathMatcher(cfg.Crawl.ExcludePaths)
 	chain := scrape.NewChain(matcher,
+		scrape.NewLocalScraper(),
 		scrape.NewJinaAdapter(jinaClient),
 	)
 

@@ -7,11 +7,43 @@ type Question struct {
 	ID           string     `json:"id"`
 	Text         string     `json:"text"`
 	Tier         int        `json:"tier"`
+	Priority     string     `json:"priority"`
 	FieldKey     string     `json:"field_key"`
 	PageTypes    []PageType `json:"page_types"`
 	Instructions string     `json:"instructions"`
 	OutputFormat string     `json:"output_format"`
 	Status       string     `json:"status"`
+}
+
+// priorityRank maps priority strings to numeric ranks for comparison.
+// Lower rank means higher priority (P0 is highest).
+var priorityRank = map[string]int{
+	"P0": 0,
+	"P1": 1,
+	"P2": 2,
+	"P3": 3,
+}
+
+// FilterByMaxPriority returns questions at or above the given priority level.
+// P0 is the highest priority; P3 is the lowest. For example, maxPriority "P1"
+// returns P0 and P1 questions. Questions with unrecognized priority values are
+// excluded.
+func FilterByMaxPriority(questions []Question, maxPriority string) []Question {
+	maxRank, ok := priorityRank[maxPriority]
+	if !ok {
+		return nil
+	}
+	var result []Question
+	for _, q := range questions {
+		rank, ok := priorityRank[q.Priority]
+		if !ok {
+			continue
+		}
+		if rank <= maxRank {
+			result = append(result, q)
+		}
+	}
+	return result
 }
 
 // RoutedQuestion is a question matched to specific pages.

@@ -47,6 +47,32 @@ func TestLoadQuestionRegistry_Success(t *testing.T) {
 
 	assert.Equal(t, "q2", questions[1].ID)
 	assert.Equal(t, 2, questions[1].Tier)
+	// Priority defaults to "P2" when not set in Notion.
+	assert.Equal(t, "P2", questions[0].Priority)
+	assert.Equal(t, "P2", questions[1].Priority)
+	mc.AssertExpectations(t)
+}
+
+func TestLoadQuestionRegistry_WithPriority(t *testing.T) {
+	mc := notionmocks.NewMockClient(t)
+	ctx := context.Background()
+
+	page := makeQuestionPage("q1", "Critical question?", 1, "critical_field", nil, "", "text", "Active")
+	page.Properties["Priority"] = &notionapi.SelectProperty{
+		Type:   notionapi.PropertyTypeSelect,
+		Select: notionapi.Option{Name: "P0"},
+	}
+
+	mc.On("QueryDatabase", ctx, "q-db", mock.AnythingOfType("*notionapi.DatabaseQueryRequest")).
+		Return(&notionapi.DatabaseQueryResponse{
+			Results: []notionapi.Page{page},
+			HasMore: false,
+		}, nil).Once()
+
+	questions, err := LoadQuestionRegistry(ctx, mc, "q-db")
+	assert.NoError(t, err)
+	assert.Len(t, questions, 1)
+	assert.Equal(t, "P0", questions[0].Priority)
 	mc.AssertExpectations(t)
 }
 

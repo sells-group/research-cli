@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS public.company_sources (
     extracted_fields JSONB,
     data_as_of      TIMESTAMPTZ,
     fetched_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    run_id          BIGINT REFERENCES runs(id),
+    run_id          TEXT REFERENCES runs(id),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 

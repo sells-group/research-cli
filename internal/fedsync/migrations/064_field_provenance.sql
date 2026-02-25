@@ -1,7 +1,7 @@
 -- Waterfall provenance: per-field per-run audit trail of source evaluation.
 CREATE TABLE IF NOT EXISTS public.field_provenance (
     id                  BIGSERIAL PRIMARY KEY,
-    run_id              BIGINT REFERENCES runs(id),
+    run_id              TEXT REFERENCES runs(id),
     company_url         VARCHAR(500) NOT NULL,
     field_key           VARCHAR(100) NOT NULL,
     winner_source       VARCHAR(50),

@@ -2,7 +2,6 @@ package main
 
 import (
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/rotisserie/eris"
@@ -91,16 +90,4 @@ func init() {
 	discoverPPPCmd.Flags().Int("limit", 1000, "maximum borrowers to process")
 	discoverPPPCmd.Flags().Bool("score", false, "run T0 disqualification after discovery")
 	discoverCmd.AddCommand(discoverPPPCmd)
-}
-
-func splitAndTrim(s string) []string {
-	parts := strings.Split(s, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
-		}
-	}
-	return result
 }
