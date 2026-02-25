@@ -496,6 +496,39 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		return result, noPagesErr
 	}
 
+	// Post-Phase-1: extract structured address from BBB/SoS pages if missing.
+	if company.Street == "" || company.City == "" {
+		for _, page := range externalPages {
+			street, city, state, zip, extracted := ExtractStructuredAddress(page.Markdown, page.Title)
+			if extracted {
+				if company.Street == "" {
+					company.Street = street
+				}
+				if company.City == "" {
+					company.City = city
+				}
+				if company.State == "" {
+					company.State = state
+				}
+				if company.ZipCode == "" {
+					company.ZipCode = zip
+				}
+				if company.Location == "" && city != "" && state != "" {
+					company.Location = city + ", " + state
+				}
+				result.Company = company
+				log.Info("pipeline: extracted address from external page",
+					zap.String("source", page.Title),
+					zap.String("street", street),
+					zap.String("city", city),
+					zap.String("state", state),
+					zap.String("zip", zip),
+				)
+				break
+			}
+		}
+	}
+
 	// ===== Phase 2: Classification =====
 	setStatus(model.RunStatusClassifying)
 	var pageIndex model.PageIndex
@@ -973,7 +1006,11 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	// ===== Phase 7D: Geocode =====
 	if p.cfg.Geo.Enabled && p.geocoder != nil {
 		trackPhase("7d_geocode", func() (*model.PhaseResult, error) {
-			return p.Phase7DGeocode(ctx, company, run.ID)
+			phaseRes, phaseErr := p.Phase7DGeocode(ctx, company, run.ID)
+			if phaseErr == nil && phaseRes != nil {
+				result.GeoData = p.collectGeoData(ctx, company)
+			}
+			return phaseRes, phaseErr
 		})
 	}
 

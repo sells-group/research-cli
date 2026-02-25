@@ -56,6 +56,8 @@ func init() {
 	f.Int64("min-aum", 0, "minimum AUM filter (overrides config)")
 	f.Int64("max-aum", 0, "maximum AUM filter (overrides config)")
 	f.String("states", "", "comma-separated state codes (e.g., TX,FL,CA)")
+	f.String("acquirer-cbsas", "", "comma-separated CBSA codes for acquirer offices (e.g., 12420,19100)")
+	f.String("target-cbsas", "", "comma-separated CBSA codes for target markets (e.g., 47900,35620)")
 	f.String("geo-keywords", "", "comma-separated geography keywords (overrides config)")
 	f.String("industry-keywords", "", "comma-separated industry keywords (overrides config)")
 	f.Float64("min-score", 0, "minimum score threshold (overrides config)")
@@ -229,6 +231,12 @@ func applyScorerOverrides(cmd *cobra.Command, base config.ScorerConfig) config.S
 	}
 	if v, _ := cmd.Flags().GetString("states"); v != "" {
 		c.TargetStates = splitAndTrim(v)
+	}
+	if v, _ := cmd.Flags().GetString("acquirer-cbsas"); v != "" {
+		c.AcquirerCBSAs = splitAndTrim(v)
+	}
+	if v, _ := cmd.Flags().GetString("target-cbsas"); v != "" {
+		c.TargetCBSAs = splitAndTrim(v)
 	}
 	if v, _ := cmd.Flags().GetString("geo-keywords"); v != "" {
 		c.GeoKeywords = splitAndTrim(v)

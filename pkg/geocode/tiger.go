@@ -2,6 +2,7 @@ package geocode
 
 import (
 	"context"
+	"database/sql"
 
 	"go.uber.org/zap"
 )
@@ -16,18 +17,20 @@ func (g *geocoder) tigerGeocode(ctx context.Context, addr AddressInput) (*Result
 	var lat, lon float64
 	var rating int
 	var matchedAddr string
+	var countyFIPS sql.NullString
 
 	row := g.pool.QueryRow(ctx, `
 		SELECT
 			ST_Y(geomout) AS lat,
 			ST_X(geomout) AS lon,
 			rating,
-			pprint_addy(addy) AS matched_address
+			pprint_addy(addy) AS matched_address,
+			(addy).statefp || (addy).countyfp AS county_fips
 		FROM geocode($1, 1)`,
 		oneLine,
 	)
 
-	err := row.Scan(&lat, &lon, &rating, &matchedAddr)
+	err := row.Scan(&lat, &lon, &rating, &matchedAddr, &countyFIPS)
 	if err != nil {
 		// No rows = no match (not an error).
 		zap.L().Debug("tiger geocode: no match",
@@ -47,14 +50,18 @@ func (g *geocoder) tigerGeocode(ctx context.Context, addr AddressInput) (*Result
 		return &Result{Matched: false, Source: "tiger", Rating: rating}, nil
 	}
 
-	return &Result{
+	result := &Result{
 		Latitude:  lat,
 		Longitude: lon,
 		Source:    "tiger",
 		Quality:   ratingToQuality(rating),
 		Matched:   true,
 		Rating:    rating,
-	}, nil
+	}
+	if countyFIPS.Valid {
+		result.CountyFIPS = countyFIPS.String
+	}
+	return result, nil
 }
 
 // ratingToQuality maps PostGIS geocoder rating to quality taxonomy.

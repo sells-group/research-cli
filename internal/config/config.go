@@ -84,6 +84,7 @@ type DiscoveryConfig struct {
 type GeoConfig struct {
 	Enabled      bool `yaml:"enabled" mapstructure:"enabled"`
 	CacheEnabled bool `yaml:"cache_enabled" mapstructure:"cache_enabled"`
+	CacheTTLDays int  `yaml:"cache_ttl_days" mapstructure:"cache_ttl_days"`
 	MaxRating    int  `yaml:"max_rating" mapstructure:"max_rating"`
 	BatchSize    int  `yaml:"batch_size" mapstructure:"batch_size"`
 	TopMSAs      int  `yaml:"top_msas" mapstructure:"top_msas"`
@@ -113,6 +114,8 @@ type ScorerConfig struct {
 	MinEmployees           int      `yaml:"min_employees" mapstructure:"min_employees"`
 	MaxEmployees           int      `yaml:"max_employees" mapstructure:"max_employees"`
 	TargetStates           []string `yaml:"target_states" mapstructure:"target_states"`
+	AcquirerCBSAs          []string `yaml:"acquirer_cbsas" mapstructure:"acquirer_cbsas"`
+	TargetCBSAs            []string `yaml:"target_cbsas" mapstructure:"target_cbsas"`
 	GeoKeywords            []string `yaml:"geo_keywords" mapstructure:"geo_keywords"`
 	IndustryKeywords       []string `yaml:"industry_keywords" mapstructure:"industry_keywords"`
 	SuccessionKeywords     []string `yaml:"succession_keywords" mapstructure:"succession_keywords"`
@@ -467,6 +470,7 @@ func Load() (*Config, error) {
 	v.SetDefault("geo.cache_enabled", true)
 	v.SetDefault("geo.max_rating", 100)
 	v.SetDefault("geo.batch_size", 1000)
+	v.SetDefault("geo.cache_ttl_days", 90)
 	v.SetDefault("geo.top_msas", 3)
 	v.SetDefault("tiger.year", 2024)
 	v.SetDefault("tiger.temp_dir", "/tmp/tiger")

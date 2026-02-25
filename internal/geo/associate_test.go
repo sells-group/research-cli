@@ -91,7 +91,7 @@ func (m *mockCompanyStore) FindByMatch(_ context.Context, _, _ string) (*company
 func (m *mockCompanyStore) GetUngeocodedAddresses(_ context.Context, _ int) ([]company.Address, error) {
 	return nil, nil
 }
-func (m *mockCompanyStore) UpdateAddressGeocode(_ context.Context, _ int64, _, _ float64, _, _ string) error {
+func (m *mockCompanyStore) UpdateAddressGeocode(_ context.Context, _ int64, _, _ float64, _, _, _ string) error {
 	return nil
 }
 func (m *mockCompanyStore) GetAddressMSAs(_ context.Context, _ int64) ([]company.AddressMSA, error) {

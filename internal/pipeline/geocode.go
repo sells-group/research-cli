@@ -146,7 +146,7 @@ func (p *Pipeline) Phase7DGeocode(ctx context.Context, companyModel model.Compan
 		}
 
 		// Update address with geocode results.
-		if updateErr := companyStore.UpdateAddressGeocode(ctx, addr.ID, result.Latitude, result.Longitude, result.Source, result.Quality); updateErr != nil {
+		if updateErr := companyStore.UpdateAddressGeocode(ctx, addr.ID, result.Latitude, result.Longitude, result.Source, result.Quality, result.CountyFIPS); updateErr != nil {
 			log.Warn("geocode: failed to update address",
 				zap.Int64("address_id", addr.ID),
 				zap.Error(updateErr),
@@ -203,6 +203,58 @@ func (p *Pipeline) Phase7DGeocode(ctx context.Context, companyModel model.Compan
 			"addresses_checked": len(addrs),
 		},
 	}, nil
+}
+
+// collectGeoData reads the primary address and MSA data for a company,
+// returning a GeoData struct for Salesforce field injection in Phase 9.
+func (p *Pipeline) collectGeoData(ctx context.Context, companyModel model.Company) *model.GeoData {
+	cs, ok := p.companyStore()
+	if !ok {
+		return nil
+	}
+
+	domain := extractDomain(companyModel.URL)
+	cr, err := cs.GetCompanyByDomain(ctx, domain)
+	if err != nil || cr == nil {
+		return nil
+	}
+
+	addrs, err := cs.GetAddresses(ctx, cr.ID)
+	if err != nil || len(addrs) == 0 {
+		return nil
+	}
+
+	// Find the primary geocoded address.
+	var primary *company.Address
+	for i := range addrs {
+		if addrs[i].Latitude != nil && addrs[i].Longitude != nil {
+			if addrs[i].IsPrimary || primary == nil {
+				primary = &addrs[i]
+			}
+		}
+	}
+	if primary == nil {
+		return nil
+	}
+
+	gd := &model.GeoData{
+		Latitude:   *primary.Latitude,
+		Longitude:  *primary.Longitude,
+		CountyFIPS: primary.CountyFIPS,
+	}
+
+	// Get MSA associations (ordered by centroid distance).
+	msas, err := cs.GetCompanyMSAs(ctx, cr.ID)
+	if err == nil && len(msas) > 0 {
+		best := msas[0]
+		gd.MSAName = best.MSAName
+		gd.CBSACode = best.CBSACode
+		gd.Classification = best.Classification
+		gd.CentroidKM = best.CentroidKM
+		gd.EdgeKM = best.EdgeKM
+	}
+
+	return gd
 }
 
 // companyStore returns the company.CompanyStore if the store supports it.

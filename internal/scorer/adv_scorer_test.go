@@ -14,6 +14,7 @@ func defaultTestConfig() config.ScorerConfig {
 }
 
 func ptrFloat64(v float64) *float64 { return &v }
+func ptrString(v string) *string    { return &v }
 
 func TestScoreAUMFit(t *testing.T) {
 	tests := []struct {
@@ -118,26 +119,367 @@ func TestScoreServiceFit(t *testing.T) {
 }
 
 func TestScoreGeoMatch(t *testing.T) {
+	t.Run("no preferences returns neutral", func(t *testing.T) {
+		row := &scoringRow{State: "CA"}
+		cfg := defaultTestConfig()
+		got := scoreGeoMatch(row, cfg, nil)
+		assert.InDelta(t, 0.5, got, 0.01)
+	})
+
+	t.Run("acquirer CBSA match scores highest", func(t *testing.T) {
+		row := &scoringRow{
+			State:          "TX",
+			CBSACode:       ptrString("12420"),
+			CentroidKM:     ptrFloat64(5.0),
+			Classification: ptrString("urban_core"),
+		}
+		cfg := defaultTestConfig()
+		cfg.AcquirerCBSAs = []string{"12420"}
+		cfg.TargetStates = []string{"TX"}
+		got := scoreGeoMatch(row, cfg, nil)
+		assert.Greater(t, got, 0.95, "acquirer CBSA match should score >0.95")
+		assert.LessOrEqual(t, got, 1.0)
+	})
+
+	t.Run("target CBSA match scores high", func(t *testing.T) {
+		row := &scoringRow{
+			State:          "NY",
+			CBSACode:       ptrString("35620"),
+			CentroidKM:     ptrFloat64(10.0),
+			Classification: ptrString("urban_core"),
+		}
+		cfg := defaultTestConfig()
+		cfg.TargetCBSAs = []string{"35620"}
+		cfg.TargetStates = []string{"NY"}
+		got := scoreGeoMatch(row, cfg, nil)
+		assert.Greater(t, got, 0.85, "target CBSA match should score >0.85")
+		assert.LessOrEqual(t, got, 0.95)
+	})
+
+	t.Run("state match with urban classification", func(t *testing.T) {
+		row := &scoringRow{
+			State:          "TX",
+			CBSACode:       ptrString("99999"),
+			CentroidKM:     ptrFloat64(15.0),
+			Classification: ptrString("urban_core"),
+		}
+		cfg := defaultTestConfig()
+		cfg.TargetStates = []string{"TX"}
+		got := scoreGeoMatch(row, cfg, nil)
+		assert.InDelta(t, 0.85, got, 0.01)
+	})
+
+	t.Run("state match with suburban classification", func(t *testing.T) {
+		row := &scoringRow{
+			State:          "TX",
+			CBSACode:       ptrString("99999"),
+			Classification: ptrString("suburban"),
+		}
+		cfg := defaultTestConfig()
+		cfg.TargetStates = []string{"TX"}
+		got := scoreGeoMatch(row, cfg, nil)
+		assert.InDelta(t, 0.75, got, 0.01)
+	})
+
+	t.Run("state match with exurban classification nil edge", func(t *testing.T) {
+		row := &scoringRow{
+			State:          "TX",
+			CBSACode:       ptrString("99999"),
+			Classification: ptrString("exurban"),
+		}
+		cfg := defaultTestConfig()
+		cfg.TargetStates = []string{"TX"}
+		got := scoreGeoMatch(row, cfg, nil)
+		// applyEdgeDecay(0.7, nil) = 0.7 * 0.9 = 0.63
+		assert.InDelta(t, 0.63, got, 0.01)
+	})
+
+	t.Run("state match with exurban close to edge", func(t *testing.T) {
+		row := &scoringRow{
+			State:          "TX",
+			CBSACode:       ptrString("99999"),
+			EdgeKM:         ptrFloat64(5),
+			Classification: ptrString("exurban"),
+		}
+		cfg := defaultTestConfig()
+		cfg.TargetStates = []string{"TX"}
+		got := scoreGeoMatch(row, cfg, nil)
+		// applyEdgeDecay(0.7, 5) = 0.7 (within 10km plateau)
+		assert.InDelta(t, 0.7, got, 0.01)
+	})
+
+	t.Run("state match with exurban far from edge", func(t *testing.T) {
+		row := &scoringRow{
+			State:          "TX",
+			CBSACode:       ptrString("99999"),
+			EdgeKM:         ptrFloat64(40),
+			Classification: ptrString("exurban"),
+		}
+		cfg := defaultTestConfig()
+		cfg.TargetStates = []string{"TX"}
+		got := scoreGeoMatch(row, cfg, nil)
+		// applyEdgeDecay(0.7, 40) = 0.7 * 0.85 = 0.595
+		assert.InDelta(t, 0.595, got, 0.01)
+	})
+
+	t.Run("state match with rural classification nil edge", func(t *testing.T) {
+		row := &scoringRow{
+			State:          "TX",
+			CBSACode:       ptrString("99999"),
+			Classification: ptrString("rural"),
+		}
+		cfg := defaultTestConfig()
+		cfg.TargetStates = []string{"TX"}
+		got := scoreGeoMatch(row, cfg, nil)
+		// applyEdgeDecay(0.45, nil) = 0.45 * 0.9 = 0.405
+		assert.InDelta(t, 0.405, got, 0.01)
+	})
+
+	t.Run("state match with rural close to edge", func(t *testing.T) {
+		row := &scoringRow{
+			State:          "TX",
+			CBSACode:       ptrString("99999"),
+			EdgeKM:         ptrFloat64(5),
+			Classification: ptrString("rural"),
+		}
+		cfg := defaultTestConfig()
+		cfg.TargetStates = []string{"TX"}
+		got := scoreGeoMatch(row, cfg, nil)
+		// applyEdgeDecay(0.45, 5) = 0.45 (within 10km plateau)
+		assert.InDelta(t, 0.45, got, 0.01)
+	})
+
+	t.Run("state match without CBSA data fallback", func(t *testing.T) {
+		row := &scoringRow{State: "TX"}
+		cfg := defaultTestConfig()
+		cfg.TargetStates = []string{"TX", "CA"}
+		got := scoreGeoMatch(row, cfg, nil)
+		assert.InDelta(t, 0.5, got, 0.01, "state-only fallback should be 0.5")
+	})
+
+	t.Run("keyword match only", func(t *testing.T) {
+		row := &scoringRow{
+			State:        "NY",
+			BrochureText: "We serve clients in the Austin metropolitan area",
+		}
+		cfg := defaultTestConfig()
+		cfg.GeoKeywords = []string{"austin"}
+		cfg.TargetStates = []string{"TX"}
+		got := scoreGeoMatch(row, cfg, nil)
+		assert.InDelta(t, 0.3, got, 0.01, "keyword-only match should be 0.3")
+	})
+
+	t.Run("multi-MSA acquirer match picks best", func(t *testing.T) {
+		row := &scoringRow{
+			State: "TX",
+			AllMSAs: []msaEntry{
+				{CBSACode: "99999", CentroidKM: 20.0, Classification: "suburban"},
+				{CBSACode: "12420", CentroidKM: 5.0, Classification: "urban_core"},
+			},
+		}
+		cfg := defaultTestConfig()
+		cfg.AcquirerCBSAs = []string{"12420"}
+		cfg.TargetStates = []string{"TX"}
+		got := scoreGeoMatch(row, cfg, nil)
+		assert.Greater(t, got, 0.95, "multi-MSA acquirer match should score >0.95")
+		assert.LessOrEqual(t, got, 1.0)
+	})
+
+	t.Run("multi-MSA target match no acquirer", func(t *testing.T) {
+		row := &scoringRow{
+			State: "NY",
+			AllMSAs: []msaEntry{
+				{CBSACode: "99999", CentroidKM: 30.0, Classification: "suburban"},
+				{CBSACode: "35620", CentroidKM: 10.0, Classification: "urban_core"},
+			},
+		}
+		cfg := defaultTestConfig()
+		cfg.TargetCBSAs = []string{"35620"}
+		cfg.TargetStates = []string{"NY"}
+		got := scoreGeoMatch(row, cfg, nil)
+		assert.Greater(t, got, 0.85, "multi-MSA target match should score >0.85")
+		assert.LessOrEqual(t, got, 0.95)
+	})
+
+	t.Run("multi-MSA no CBSA match falls through", func(t *testing.T) {
+		row := &scoringRow{
+			State: "TX",
+			AllMSAs: []msaEntry{
+				{CBSACode: "11111", CentroidKM: 10.0, Classification: "suburban"},
+				{CBSACode: "22222", CentroidKM: 20.0, Classification: "exurban"},
+			},
+		}
+		cfg := defaultTestConfig()
+		cfg.AcquirerCBSAs = []string{"12420"}
+		cfg.TargetStates = []string{"TX"}
+		got := scoreGeoMatch(row, cfg, nil)
+		// No CBSA match in AllMSAs, no single-MSA CBSACode set → state fallback = 0.5.
+		assert.InDelta(t, 0.5, got, 0.01, "no CBSA match should fall through to state")
+	})
+
+	t.Run("nil AllMSAs uses single-MSA path", func(t *testing.T) {
+		row := &scoringRow{
+			State:          "TX",
+			CBSACode:       ptrString("12420"),
+			CentroidKM:     ptrFloat64(5.0),
+			Classification: ptrString("urban_core"),
+		}
+		cfg := defaultTestConfig()
+		cfg.AcquirerCBSAs = []string{"12420"}
+		cfg.TargetStates = []string{"TX"}
+		got := scoreGeoMatch(row, cfg, nil)
+		assert.Greater(t, got, 0.95, "nil AllMSAs should use single-MSA path")
+	})
+
+	t.Run("no match at all", func(t *testing.T) {
+		row := &scoringRow{State: "NY"}
+		cfg := defaultTestConfig()
+		cfg.TargetStates = []string{"TX", "CA"}
+		got := scoreGeoMatch(row, cfg, nil)
+		assert.InDelta(t, 0.0, got, 0.01)
+	})
+
+	t.Run("centroid distance decay", func(t *testing.T) {
+		// Close to centroid (5km) should score higher than far (45km).
+		rowClose := &scoringRow{
+			State:          "TX",
+			CBSACode:       ptrString("12420"),
+			CentroidKM:     ptrFloat64(5.0),
+			Classification: ptrString("urban_core"),
+		}
+		rowFar := &scoringRow{
+			State:          "TX",
+			CBSACode:       ptrString("12420"),
+			CentroidKM:     ptrFloat64(45.0),
+			Classification: ptrString("suburban"),
+		}
+		cfg := defaultTestConfig()
+		cfg.AcquirerCBSAs = []string{"12420"}
+		cfg.TargetStates = []string{"TX"}
+
+		scoreClose := scoreGeoMatch(rowClose, cfg, nil)
+		scoreFar := scoreGeoMatch(rowFar, cfg, nil)
+		assert.Greater(t, scoreClose, scoreFar, "closer firm should score higher")
+	})
+
+	t.Run("nil centroid km in distance decay", func(t *testing.T) {
+		row := &scoringRow{
+			State:          "TX",
+			CBSACode:       ptrString("12420"),
+			CentroidKM:     nil, // unknown distance
+			Classification: ptrString("urban_core"),
+		}
+		cfg := defaultTestConfig()
+		cfg.AcquirerCBSAs = []string{"12420"}
+		got := scoreGeoMatch(row, cfg, nil)
+		assert.InDelta(t, 0.95, got, 0.01, "nil centroid should apply 0.95 base")
+	})
+}
+
+func TestHaversineKM(t *testing.T) {
+	// Austin (30.2672, -97.7431) to Dallas (32.7767, -96.7970) ≈ 290km.
+	d := haversineKM(30.2672, -97.7431, 32.7767, -96.7970)
+	assert.InDelta(t, 290, d, 10, "Austin-Dallas should be ~290km")
+
+	// Same point should be 0.
+	assert.InDelta(t, 0, haversineKM(30.0, -97.0, 30.0, -97.0), 0.001)
+}
+
+func TestAcquirerProximityScore(t *testing.T) {
+	centroids := []msaCentroid{
+		{CBSACode: "12420", Latitude: 30.2672, Longitude: -97.7431}, // Austin
+	}
+
+	t.Run("within 50km", func(t *testing.T) {
+		// Round Rock is ~25km from Austin centroid.
+		got := acquirerProximityScore(30.5083, -97.6789, centroids)
+		assert.InDelta(t, 0.65, got, 0.01)
+	})
+
+	t.Run("50-100km", func(t *testing.T) {
+		// Waco TX is ~85km from Austin centroid.
+		got := acquirerProximityScore(30.85, -97.50, centroids)
+		assert.InDelta(t, 0.5, got, 0.01)
+	})
+
+	t.Run("beyond 100km", func(t *testing.T) {
+		// Dallas is ~290km from Austin.
+		got := acquirerProximityScore(32.7767, -96.7970, centroids)
+		assert.InDelta(t, 0.0, got, 0.01)
+	})
+
+	t.Run("no centroids", func(t *testing.T) {
+		got := acquirerProximityScore(30.2672, -97.7431, nil)
+		assert.InDelta(t, 0.0, got, 0.01)
+	})
+}
+
+func TestScoreGeoMatch_Proximity(t *testing.T) {
+	// Firm near Austin (within 50km) but NOT in any MSA.
+	centroids := []msaCentroid{
+		{CBSACode: "12420", Latitude: 30.2672, Longitude: -97.7431},
+	}
+	lat := 30.5083
+	lon := -97.6789
+	row := &scoringRow{
+		State:     "TX",
+		Latitude:  &lat,
+		Longitude: &lon,
+	}
+	cfg := defaultTestConfig()
+	cfg.AcquirerCBSAs = []string{"12420"}
+	cfg.TargetStates = []string{"TX"}
+
+	got := scoreGeoMatch(row, cfg, centroids)
+	assert.InDelta(t, 0.65, got, 0.01, "firm within 50km of acquirer should get 0.65")
+}
+
+func TestStateMatches(t *testing.T) {
+	assert.True(t, stateMatches("TX", []string{"TX", "CA"}))
+	assert.True(t, stateMatches("tx", []string{"TX"}))
+	assert.False(t, stateMatches("NY", []string{"TX", "CA"}))
+	assert.False(t, stateMatches("TX", nil))
+}
+
+func TestApplyEdgeDecay(t *testing.T) {
 	tests := []struct {
-		name         string
-		state        string
-		targetStates []string
-		geoKeywords  []string
-		brochureText string
-		want         float64
+		name   string
+		base   float64
+		edgeKM *float64
+		want   float64
 	}{
-		{"no preferences", "CA", nil, nil, "", 0.5},
-		{"state match", "TX", []string{"TX", "CA"}, nil, "", 1.0},
-		{"no state match", "NY", []string{"TX", "CA"}, nil, "", 0},
-		{"keyword match in brochure", "NY", nil, []string{"new york"}, "We serve clients in New York metropolitan area", 0.7},
+		{"nil edge 0.7 base", 0.7, nil, 0.63},
+		{"0km", 0.7, ptrFloat64(0), 0.7},
+		{"5km inside plateau", 0.7, ptrFloat64(5), 0.7},
+		{"10km boundary", 0.7, ptrFloat64(10), 0.7},
+		{"25km mid decay", 0.7, ptrFloat64(25), 0.6475},
+		{"40km full decay", 0.7, ptrFloat64(40), 0.595},
+		{"60km capped", 0.7, ptrFloat64(60), 0.595},
+		{"nil edge 0.45 base", 0.45, nil, 0.405},
+		{"25km 0.45 base", 0.45, ptrFloat64(25), 0.41625},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := scoreGeoMatch(tt.state, tt.targetStates, tt.geoKeywords, tt.brochureText)
-			assert.InDelta(t, tt.want, got, 0.01)
+			got := applyEdgeDecay(tt.base, tt.edgeKM)
+			assert.InDelta(t, tt.want, got, 0.001)
 		})
 	}
+}
+
+func TestApplyDistanceDecay(t *testing.T) {
+	// At centroid (0km): full score.
+	assert.InDelta(t, 1.0, applyDistanceDecay(1.0, ptrFloat64(0)), 0.01)
+
+	// At 50km+: minimum decay.
+	assert.InDelta(t, 0.95, applyDistanceDecay(1.0, ptrFloat64(50)), 0.01)
+	assert.InDelta(t, 0.95, applyDistanceDecay(1.0, ptrFloat64(100)), 0.01)
+
+	// At 25km: midpoint.
+	assert.InDelta(t, 0.975, applyDistanceDecay(1.0, ptrFloat64(25)), 0.01)
+
+	// nil centroid: 0.95 factor.
+	assert.InDelta(t, 0.95, applyDistanceDecay(1.0, nil), 0.01)
 }
 
 func TestScoreRegulatoryClean(t *testing.T) {
@@ -228,7 +570,7 @@ func TestComputeScore(t *testing.T) {
 			BrochureText:              "We specialize in retirement planning and succession strategies",
 		}
 
-		score := computeScore(row, cfg)
+		score := computeScore(row, cfg, nil)
 		assert.Equal(t, 12345, score.CRDNumber)
 		assert.Equal(t, "Ideal Wealth Management", score.FirmName)
 		assert.Greater(t, score.Score, 50.0, "ideal firm should score above 50")
@@ -244,7 +586,7 @@ func TestComputeScore(t *testing.T) {
 			AUM:       200_000_000,
 		}
 
-		score := computeScore(row, cfg)
+		score := computeScore(row, cfg, nil)
 		assert.Equal(t, 99999, score.CRDNumber)
 		// Should still produce a score (growth defaults to 0.5 when nil).
 		assert.GreaterOrEqual(t, score.Score, 0.0)
@@ -258,7 +600,7 @@ func TestComputeScore(t *testing.T) {
 			AUM:       0,
 		}
 
-		score := computeScore(row, cfg)
+		score := computeScore(row, cfg, nil)
 		assert.Equal(t, 0.0, score.ComponentScores["aum_fit"])
 	})
 
@@ -279,8 +621,8 @@ func TestComputeScore(t *testing.T) {
 			BrochureText: "Despite past fraud allegations and ponzi scheme concerns",
 		}
 
-		cleanScore := computeScore(cleanRow, cfg)
-		dirtyScore := computeScore(dirtyRow, cfg)
+		cleanScore := computeScore(cleanRow, cfg, nil)
+		dirtyScore := computeScore(dirtyRow, cfg, nil)
 
 		assert.Greater(t, cleanScore.Score, dirtyScore.Score, "clean firm should score higher")
 		assert.NotNil(t, dirtyScore.MatchedKeywords)
@@ -296,8 +638,37 @@ func TestComputeScore(t *testing.T) {
 			DRPCriminalFirm: true,
 		}
 
-		score := computeScore(row, cfg)
+		score := computeScore(row, cfg, nil)
 		assert.Equal(t, 0.0, score.ComponentScores["regulatory_clean"])
+	})
+
+	t.Run("MSA data boosts geo score", func(t *testing.T) {
+		cfgWithGeo := defaultTestConfig()
+		cfgWithGeo.AcquirerCBSAs = []string{"12420"}
+		cfgWithGeo.TargetStates = []string{"TX"}
+
+		rowWithMSA := &scoringRow{
+			CRDNumber:      66666,
+			FirmName:       "MSA Firm",
+			State:          "TX",
+			AUM:            500_000_000,
+			CBSACode:       ptrString("12420"),
+			CentroidKM:     ptrFloat64(10.0),
+			Classification: ptrString("urban_core"),
+		}
+		rowWithoutMSA := &scoringRow{
+			CRDNumber: 77777,
+			FirmName:  "No MSA Firm",
+			State:     "TX",
+			AUM:       500_000_000,
+		}
+
+		scoreWithMSA := computeScore(rowWithMSA, cfgWithGeo, nil)
+		scoreWithoutMSA := computeScore(rowWithoutMSA, cfgWithGeo, nil)
+
+		geoWithMSA := scoreWithMSA.ComponentScores["geo_match"]
+		geoWithoutMSA := scoreWithoutMSA.ComponentScores["geo_match"]
+		assert.Greater(t, geoWithMSA, geoWithoutMSA, "MSA-aware firm should have higher geo_match")
 	})
 }
 
@@ -326,7 +697,7 @@ func TestComputeScoreNormalization(t *testing.T) {
 	cfg.SuccessionKeywords = []string{"retirement"}
 	row.BrochureText = "wealth management and retirement planning"
 
-	score := computeScore(row, cfg)
+	score := computeScore(row, cfg, nil)
 	assert.Greater(t, score.Score, 80.0, "perfect firm should score above 80")
 	assert.LessOrEqual(t, score.Score, 100.0, "score should not exceed 100")
 }

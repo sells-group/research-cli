@@ -2,6 +2,7 @@
 package pipeline
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/sells-group/research-cli/internal/model"
@@ -92,6 +93,119 @@ func containsWord(text, needle string) bool {
 
 func isAlphaNum(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+// Compiled regexps for structured address extraction.
+var (
+	// cityStateZipRe matches "City, ST 12345" or "City, ST 12345-6789".
+	// Uses [^\S\n] instead of \s to avoid matching newlines in city names.
+	cityStateZipRe = regexp.MustCompile(`(?m)([\w][\w ]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)`)
+
+	// streetRe matches a line starting with a street number (e.g., "123 Main St").
+	streetRe = regexp.MustCompile(`(?m)^(\d+\s+.+)$`)
+
+	// embeddedStreetRe extracts a street address embedded within a longer line
+	// (e.g., "located at 500 Market Street").
+	embeddedStreetRe = regexp.MustCompile(`(\d+\s+[\w][\w\s]*(?:Street|St|Avenue|Ave|Boulevard|Blvd|Drive|Dr|Road|Rd|Lane|Ln|Way|Place|Pl|Court|Ct|Circle|Cir|Parkway|Pkwy|Highway|Hwy|Trail|Trl)\.?)`)
+
+	// sectionHeaderRe matches BBB/SoS address section headers.
+	sectionHeaderRe = regexp.MustCompile(`(?mi)(?:business\s+address|^address|principal\s+office|registered\s+agent)`)
+)
+
+// ExtractStructuredAddress attempts to parse a structured US address from
+// BBB or SoS page markdown using regex patterns. Returns the parsed
+// components and true if a valid address was found.
+func ExtractStructuredAddress(markdown, _ string) (street, city, state, zip string, ok bool) {
+	if markdown == "" {
+		return "", "", "", "", false
+	}
+
+	// Find city/state/zip matches.
+	cszMatches := cityStateZipRe.FindAllStringSubmatchIndex(markdown, -1)
+	if len(cszMatches) == 0 {
+		return "", "", "", "", false
+	}
+
+	// Prefer a match near a section header if one exists.
+	headerLoc := sectionHeaderRe.FindStringIndex(markdown)
+
+	bestIdx := 0
+	if headerLoc != nil && len(cszMatches) > 1 {
+		bestDist := len(markdown)
+		for i, m := range cszMatches {
+			dist := m[0] - headerLoc[1]
+			if dist < 0 {
+				dist = -dist
+			}
+			if dist < bestDist {
+				bestDist = dist
+				bestIdx = i
+			}
+		}
+	}
+
+	m := cszMatches[bestIdx]
+	city = strings.TrimSpace(markdown[m[2]:m[3]])
+	state = markdown[m[4]:m[5]]
+	zip = markdown[m[6]:m[7]]
+
+	// Look for a street line in the text preceding the city/state/zip match.
+	// Search up to 200 chars before the match for the street.
+	searchStart := m[0] - 200
+	if searchStart < 0 {
+		searchStart = 0
+	}
+	preceding := markdown[searchStart:m[0]]
+
+	// Split preceding text into lines and search backwards for street lines.
+	lines := strings.Split(preceding, "\n")
+	var streetParts []string
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		// Skip empty lines and markdown formatting.
+		if line == "" || line == "---" {
+			if len(streetParts) > 0 {
+				break // Stop at a gap if we already found street parts.
+			}
+			continue
+		}
+		// Remove markdown bold markers.
+		line = strings.ReplaceAll(line, "**", "")
+		line = strings.TrimSpace(line)
+
+		// If this looks like a section header, stop.
+		if sectionHeaderRe.MatchString(line) {
+			break
+		}
+
+		// Check if this line looks like a street address or suite/floor.
+		if streetRe.MatchString(line) || isSuiteLine(line) {
+			streetParts = append([]string{line}, streetParts...)
+		} else if len(streetParts) > 0 {
+			break // Non-street line after collecting street parts — stop.
+		} else if em := embeddedStreetRe.FindString(line); em != "" {
+			// Fallback: extract street address embedded within a sentence.
+			streetParts = append([]string{em}, streetParts...)
+		}
+	}
+
+	if len(streetParts) > 0 {
+		street = strings.Join(streetParts, ", ")
+	}
+
+	return street, city, state, zip, true
+}
+
+// isSuiteLine checks if a line is a suite/floor/unit continuation of a street address.
+func isSuiteLine(line string) bool {
+	lower := strings.ToLower(line)
+	prefixes := []string{"suite ", "ste ", "ste. ", "#", "unit ", "floor ", "fl ", "apt ", "bldg ", "building "}
+	for _, p := range prefixes {
+		if strings.HasPrefix(lower, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // CrossReferenceAddress checks scraped page content for mentions of the

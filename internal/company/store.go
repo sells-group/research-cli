@@ -49,7 +49,7 @@ type CompanyStore interface { //nolint:revive // stutters but widely used across
 
 	// Geocoding
 	GetUngeocodedAddresses(ctx context.Context, limit int) ([]Address, error)
-	UpdateAddressGeocode(ctx context.Context, id int64, lat, lon float64, source, quality string) error
+	UpdateAddressGeocode(ctx context.Context, id int64, lat, lon float64, source, quality, countyFIPS string) error
 
 	// MSA associations
 	UpsertAddressMSA(ctx context.Context, am *AddressMSA) error
