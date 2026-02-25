@@ -96,6 +96,16 @@ func parseQuestionPage(p notionapi.Page) (model.Question, error) {
 		}
 	}
 
+	// Priority (select)
+	if prop, ok := p.Properties["Priority"]; ok {
+		if sp, ok := prop.(*notionapi.SelectProperty); ok && sp.Select.Name != "" {
+			q.Priority = sp.Select.Name
+		}
+	}
+	if q.Priority == "" {
+		q.Priority = "P2"
+	}
+
 	// Status (status)
 	if prop, ok := p.Properties["Status"]; ok {
 		if sp, ok := prop.(*notionapi.StatusProperty); ok {
