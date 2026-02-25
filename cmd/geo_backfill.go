@@ -102,7 +102,7 @@ var geoBackfillCmd = &cobra.Command{
 				}
 
 				addr := batch[j]
-				if updateErr := cs.UpdateAddressGeocode(ctx, addr.ID, result.Latitude, result.Longitude, result.Source, result.Quality); updateErr != nil {
+				if updateErr := cs.UpdateAddressGeocode(ctx, addr.ID, result.Latitude, result.Longitude, result.Source, result.Quality, result.CountyFIPS); updateErr != nil {
 					log.Warn("failed to update address geocode",
 						zap.Int64("address_id", addr.ID),
 						zap.Error(updateErr),

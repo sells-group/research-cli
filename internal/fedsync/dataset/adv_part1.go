@@ -1027,7 +1027,7 @@ func streamBaseFile(ctx context.Context, pool db.Pool, path string, latestFiling
 	}
 	colIdx := mapColumnsNormalized(header)
 
-	firmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website"}
+	firmCols := []string{"crd_number", "firm_name", "sec_number", "street1", "street2", "city", "state", "country", "zip", "website"}
 	firmConflict := []string{"crd_number"}
 
 	var firmBatch, filingBatch [][]any
@@ -1063,17 +1063,23 @@ func streamBaseFile(ctx context.Context, pool db.Pool, path string, latestFiling
 
 			firmName := trimQuotes(getColN(record, colIdx, "1a"))
 			secNumber := trimQuotes(getColN(record, colIdx, "1d"))
+			street1 := firstNonEmpty(record, colIdx, "1f1-street 1", "1f1_street1", "1f1-street1")
+			street2 := firstNonEmpty(record, colIdx, "1f1-street 2", "1f1_street2", "1f1-street2")
 			city := firstNonEmpty(record, colIdx, "1f1-city", "1f1_city")
 			state := firstNonEmpty(record, colIdx, "1f1-state", "1f1_state")
 			country := firstNonEmpty(record, colIdx, "1f1-country", "1f1_country")
+			zip := firstNonEmpty(record, colIdx, "1f1-zip", "1f1_zip", "1f1-zipcode", "1f1_zipcode")
 
 			firmRow := []any{
 				parseIntOr(crd, 0),
 				sanitizeUTF8(firmName),
 				sanitizeUTF8(secNumber),
+				sanitizeUTF8(street1),
+				sanitizeUTF8(street2),
 				sanitizeUTF8(city),
 				sanitizeUTF8(state),
 				sanitizeUTF8(country),
+				sanitizeUTF8(zip),
 				sanitizeUTF8(website),
 			}
 			firmBatch = append(firmBatch, firmRow)

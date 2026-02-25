@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/sells-group/research-cli/internal/db"
 )
 
@@ -29,12 +31,13 @@ type AddressInput struct {
 
 // Result holds the geocoding output for an address.
 type Result struct {
-	Latitude  float64
-	Longitude float64
-	Source    string // "tiger"
-	Quality   string // "rooftop", "range", "centroid", "approximate"
-	Matched   bool
-	Rating    int // PostGIS geocoder rating (0=best)
+	Latitude   float64
+	Longitude  float64
+	Source     string // "tiger"
+	Quality    string // "rooftop", "range", "centroid", "approximate"
+	Matched    bool
+	Rating     int    // PostGIS geocoder rating (0=best)
+	CountyFIPS string // 5-digit state+county FIPS (e.g., "48453" for Travis County TX)
 }
 
 // Option configures the geocoder.
@@ -56,18 +59,39 @@ func WithMaxRating(maxRating int) Option {
 	}
 }
 
+// WithCacheTTLDays sets the cache time-to-live in days.
+// Cached entries older than this are ignored. 0 means no expiry.
+func WithCacheTTLDays(days int) Option {
+	return func(g *geocoder) {
+		g.cacheTTLDays = days
+	}
+}
+
+// WithBatchConcurrency sets the maximum parallel PostGIS calls for BatchGeocode.
+// Default is 10.
+func WithBatchConcurrency(n int) Option {
+	return func(g *geocoder) {
+		if n > 0 {
+			g.batchConcurrency = n
+		}
+	}
+}
+
 type geocoder struct {
-	pool         db.Pool
-	cacheEnabled bool
-	maxRating    int
+	pool             db.Pool
+	cacheEnabled     bool
+	maxRating        int
+	cacheTTLDays     int
+	batchConcurrency int
 }
 
 // NewClient creates a new geocoding Client backed by PostGIS tiger geocoder.
 func NewClient(pool db.Pool, opts ...Option) Client {
 	g := &geocoder{
-		pool:         pool,
-		cacheEnabled: true,
-		maxRating:    100,
+		pool:             pool,
+		cacheEnabled:     true,
+		maxRating:        100,
+		batchConcurrency: 10,
 	}
 	for _, opt := range opts {
 		opt(g)
@@ -93,16 +117,15 @@ func (g *geocoder) Geocode(ctx context.Context, addr AddressInput) (*Result, err
 		return nil, err
 	}
 
-	// Store in cache.
-	if g.cacheEnabled && result.Matched {
+	// Store in cache (both matches and non-matches for negative caching).
+	if g.cacheEnabled {
 		_ = g.storeCache(ctx, key, result)
 	}
 
 	return result, nil
 }
 
-// BatchGeocode geocodes multiple addresses using individual PostGIS calls.
-// PostGIS geocoder is local SQL (~5-20ms per call) so no batch API is needed.
+// BatchGeocode geocodes multiple addresses using parallel PostGIS calls.
 func (g *geocoder) BatchGeocode(ctx context.Context, addrs []AddressInput) ([]Result, error) {
 	if len(addrs) == 0 {
 		return nil, nil
@@ -116,15 +139,23 @@ func (g *geocoder) BatchGeocode(ctx context.Context, addrs []AddressInput) ([]Re
 	}
 
 	results := make([]Result, len(addrs))
+
+	eg, gCtx := errgroup.WithContext(ctx)
+	eg.SetLimit(g.batchConcurrency)
+
 	for i, addr := range addrs {
-		r, err := g.Geocode(ctx, addr)
-		if err != nil {
-			results[i] = Result{Matched: false, Source: "tiger"}
-			continue
-		}
-		results[i] = *r
+		eg.Go(func() error {
+			r, gcErr := g.Geocode(gCtx, addr)
+			if gcErr != nil || r == nil {
+				results[i] = Result{Matched: false, Source: "tiger"}
+				return nil //nolint:nilerr // individual geocode failures don't fail the batch
+			}
+			results[i] = *r
+			return nil
+		})
 	}
 
+	_ = eg.Wait() // errors are swallowed per-address above
 	return results, nil
 }
 

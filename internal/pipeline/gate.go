@@ -79,6 +79,7 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 				accountFields["Enrichment_Report__c"] = result.Report
 			}
 			ensureMinimumSFFields(accountFields, result.Company, result.FieldValues)
+			injectGeoFields(accountFields, result.GeoData)
 
 			accountID := result.Company.SalesforceID
 
@@ -239,6 +240,38 @@ func buildSFFieldsByObject(fieldValues map[string]model.FieldValue, registry *mo
 		}
 	}
 	return accountFields, contactFields
+}
+
+// injectGeoFields adds geographic enrichment data from Phase 7D to the
+// Salesforce account field map. No-op if geo data is nil.
+func injectGeoFields(fields map[string]any, gd *model.GeoData) {
+	if gd == nil {
+		return
+	}
+	if gd.Latitude != 0 {
+		fields["Latitude__c"] = gd.Latitude
+	}
+	if gd.Longitude != 0 {
+		fields["Longitude__c"] = gd.Longitude
+	}
+	if gd.MSAName != "" {
+		fields["MSA_Name__c"] = gd.MSAName
+	}
+	if gd.CBSACode != "" {
+		fields["MSA_CBSA_Code__c"] = gd.CBSACode
+	}
+	if gd.Classification != "" {
+		fields["Urban_Classification__c"] = gd.Classification
+	}
+	if gd.CentroidKM != 0 {
+		fields["Distance_to_MSA_Center_km__c"] = gd.CentroidKM
+	}
+	if gd.EdgeKM != 0 {
+		fields["Distance_to_MSA_Edge_km__c"] = gd.EdgeKM
+	}
+	if gd.CountyFIPS != "" {
+		fields["County_FIPS__c"] = gd.CountyFIPS
+	}
 }
 
 // ensureMinimumSFFields sets Name and Website from the Company if not already
@@ -662,6 +695,7 @@ func PrepareGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 				accountFields["Enrichment_Report__c"] = result.Report
 			}
 			ensureMinimumSFFields(accountFields, result.Company, result.FieldValues)
+			injectGeoFields(accountFields, result.GeoData)
 
 			intent = &SFWriteIntent{
 				AccountFields: accountFields,

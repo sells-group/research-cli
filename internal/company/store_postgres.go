@@ -183,18 +183,18 @@ func (s *PostgresStore) FindByIdentifier(ctx context.Context, system, identifier
 // UpsertAddress inserts or updates a company address.
 func (s *PostgresStore) UpsertAddress(ctx context.Context, addr *Address) error {
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO company_addresses (company_id, address_type, street, city, state, zip_code, country, latitude, longitude, source, confidence, is_primary)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		INSERT INTO company_addresses (company_id, address_type, street, city, state, zip_code, country, latitude, longitude, source, confidence, is_primary, county_fips)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		ON CONFLICT (id) DO UPDATE SET
 			street=EXCLUDED.street, city=EXCLUDED.city, state=EXCLUDED.state,
 			zip_code=EXCLUDED.zip_code, country=EXCLUDED.country,
 			latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude,
 			source=EXCLUDED.source, confidence=EXCLUDED.confidence,
-			is_primary=EXCLUDED.is_primary, updated_at=now()
+			is_primary=EXCLUDED.is_primary, county_fips=EXCLUDED.county_fips, updated_at=now()
 		RETURNING id, created_at, updated_at`,
 		addr.CompanyID, addr.AddressType, addr.Street, addr.City, addr.State,
 		addr.ZipCode, addr.Country, addr.Latitude, addr.Longitude,
-		addr.Source, addr.Confidence, addr.IsPrimary,
+		addr.Source, addr.Confidence, addr.IsPrimary, addr.CountyFIPS,
 	).Scan(&addr.ID, &addr.CreatedAt, &addr.UpdatedAt)
 	if err != nil {
 		return eris.Wrap(err, "company: upsert address")
@@ -206,7 +206,7 @@ func (s *PostgresStore) UpsertAddress(ctx context.Context, addr *Address) error 
 func (s *PostgresStore) GetAddresses(ctx context.Context, companyID int64) ([]Address, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, company_id, address_type, street, city, state, zip_code, country,
-			latitude, longitude, source, confidence, is_primary, created_at, updated_at
+			latitude, longitude, source, confidence, is_primary, county_fips, created_at, updated_at
 		FROM company_addresses WHERE company_id=$1 ORDER BY is_primary DESC`, companyID)
 	if err != nil {
 		return nil, eris.Wrap(err, "company: get addresses")
@@ -218,7 +218,7 @@ func (s *PostgresStore) GetAddresses(ctx context.Context, companyID int64) ([]Ad
 		var a Address
 		if err := rows.Scan(&a.ID, &a.CompanyID, &a.AddressType, &a.Street, &a.City, &a.State,
 			&a.ZipCode, &a.Country, &a.Latitude, &a.Longitude, &a.Source, &a.Confidence,
-			&a.IsPrimary, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			&a.IsPrimary, &a.CountyFIPS, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, eris.Wrap(err, "company: scan address")
 		}
 		addrs = append(addrs, a)
@@ -550,7 +550,7 @@ func (s *PostgresStore) GetUngeocodedAddresses(ctx context.Context, limit int) (
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, company_id, address_type, street, city, state, zip_code, country,
-			latitude, longitude, source, confidence, is_primary,
+			latitude, longitude, source, confidence, is_primary, county_fips,
 			geocode_source, geocode_quality, geocoded_at,
 			created_at, updated_at
 		FROM company_addresses
@@ -568,16 +568,24 @@ func (s *PostgresStore) GetUngeocodedAddresses(ctx context.Context, limit int) (
 }
 
 // UpdateAddressGeocode updates an address with geocoded coordinates.
-func (s *PostgresStore) UpdateAddressGeocode(ctx context.Context, id int64, lat, lon float64, source, quality string) error {
+func (s *PostgresStore) UpdateAddressGeocode(ctx context.Context, id int64, lat, lon float64, source, quality, countyFIPS string) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE company_addresses
-		SET latitude = $2, longitude = $3, geocode_source = $4, geocode_quality = $5, geocoded_at = now(), updated_at = now()
+		SET latitude = $2, longitude = $3, geocode_source = $4, geocode_quality = $5, county_fips = $6, geocoded_at = now(), updated_at = now()
 		WHERE id = $1`,
-		id, lat, lon, source, quality)
+		id, lat, lon, source, quality, nilIfEmptyStr(countyFIPS))
 	if err != nil {
 		return eris.Wrapf(err, "company: update address geocode %d", id)
 	}
 	return nil
+}
+
+// nilIfEmptyStr returns nil for empty strings, allowing NULL storage in Postgres.
+func nilIfEmptyStr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // UpsertAddressMSA inserts or updates an address-MSA association.
@@ -656,7 +664,7 @@ func scanAddressesWithGeo(rows pgx.Rows) ([]Address, error) {
 		var a Address
 		if err := rows.Scan(&a.ID, &a.CompanyID, &a.AddressType, &a.Street, &a.City, &a.State,
 			&a.ZipCode, &a.Country, &a.Latitude, &a.Longitude, &a.Source, &a.Confidence,
-			&a.IsPrimary, &a.GeocodeSource, &a.GeocodeQuality, &a.GeocodedAt,
+			&a.IsPrimary, &a.CountyFIPS, &a.GeocodeSource, &a.GeocodeQuality, &a.GeocodedAt,
 			&a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, eris.Wrap(err, "company: scan address with geo")
 		}
