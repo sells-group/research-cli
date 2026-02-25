@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS public.companies (
     -- Enrichment metadata
     enrichment_score NUMERIC(4,2),
     last_enriched_at TIMESTAMPTZ,
-    last_run_id      BIGINT REFERENCES runs(id),
+    last_run_id      TEXT REFERENCES runs(id),
 
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()

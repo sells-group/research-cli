@@ -89,7 +89,7 @@ func (lc *LocalCrawler) Probe(ctx context.Context, rawURL string) (*model.ProbeR
 	result.Body = body
 
 	// Block detection.
-	blocked, blockType := DetectBlock(resp, body)
+	blocked, blockType := scrape.DetectBlock(resp, body)
 	if blocked {
 		result.Blocked = true
 		result.BlockType = string(blockType)

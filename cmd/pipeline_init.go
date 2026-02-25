@@ -155,9 +155,10 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 		zap.Int("fields", len(fields.Fields)),
 	)
 
-	// Build scrape chain: Jina primary → Firecrawl fallback.
+	// Build scrape chain: Local → Jina → Firecrawl.
 	matcher := scrape.NewPathMatcher(cfg.Crawl.ExcludePaths)
 	chain := scrape.NewChain(matcher,
+		scrape.NewLocalScraper(),
 		scrape.NewJinaAdapter(jinaClient),
 		scrape.NewFirecrawlAdapter(firecrawlClient),
 	)
