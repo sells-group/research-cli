@@ -7,6 +7,13 @@ type Rates struct {
 	Jina       JinaRate             `yaml:"jina" mapstructure:"jina"`
 	Perplexity PerplexityRate       `yaml:"perplexity" mapstructure:"perplexity"`
 	Firecrawl  FirecrawlRate        `yaml:"firecrawl" mapstructure:"firecrawl"`
+	Google     GoogleRate           `yaml:"google" mapstructure:"google"`
+}
+
+// GoogleRate holds Google API pricing.
+type GoogleRate struct {
+	PerTextSearch float64 `yaml:"per_text_search" mapstructure:"per_text_search"`
+	PerGeocodeReq float64 `yaml:"per_geocode_req" mapstructure:"per_geocode_req"`
 }
 
 // ModelRate holds per-model token pricing (per million tokens).
@@ -74,6 +81,16 @@ func (c *Calculator) PerplexityQuery() float64 {
 	return c.rates.Perplexity.PerQuery
 }
 
+// GooglePlacesSearch returns the cost for the given number of Places Text Search requests.
+func (c *Calculator) GooglePlacesSearch(count int) float64 {
+	return float64(count) * c.rates.Google.PerTextSearch
+}
+
+// GoogleGeocode returns the cost for the given number of Google Geocoding requests.
+func (c *Calculator) GoogleGeocode(count int) float64 {
+	return float64(count) * c.rates.Google.PerGeocodeReq
+}
+
 // RatesFromConfig converts config pricing into cost rates, falling back
 // to DefaultRates() for any zero-value fields.
 func RatesFromConfig(cfg PricingConfig) Rates {
@@ -127,6 +144,12 @@ func RatesFromConfig(cfg PricingConfig) Rates {
 	if cfg.Firecrawl.CreditsIncluded > 0 {
 		rates.Firecrawl.CreditsIncluded = cfg.Firecrawl.CreditsIncluded
 	}
+	if cfg.Google.PerTextSearch > 0 {
+		rates.Google.PerTextSearch = cfg.Google.PerTextSearch
+	}
+	if cfg.Google.PerGeocodeReq > 0 {
+		rates.Google.PerGeocodeReq = cfg.Google.PerGeocodeReq
+	}
 
 	return rates
 }
@@ -138,6 +161,13 @@ type PricingConfig struct {
 	Jina       JinaPricing
 	Perplexity PerplexityPricing
 	Firecrawl  FirecrawlPricing
+	Google     GooglePricing
+}
+
+// GooglePricing mirrors config Google pricing.
+type GooglePricing struct {
+	PerTextSearch float64
+	PerGeocodeReq float64
 }
 
 // ModelPricing mirrors config.ModelPricing.
@@ -185,5 +215,6 @@ func DefaultRates() Rates {
 		Jina:       JinaRate{PerMTok: 0.02},
 		Perplexity: PerplexityRate{PerQuery: 0.005},
 		Firecrawl:  FirecrawlRate{PlanMonthly: 19.00, CreditsIncluded: 3000},
+		Google:     GoogleRate{PerTextSearch: 0.032, PerGeocodeReq: 0.005},
 	}
 }

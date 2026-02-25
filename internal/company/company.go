@@ -1,7 +1,9 @@
 // Package company defines the golden record type for enriched company data.
 package company
 
-import "time"
+import (
+	"time"
+)
 
 // CompanyRecord is the golden record for a company.
 type CompanyRecord struct { //nolint:revive // stutters but widely used across codebase
@@ -71,25 +73,29 @@ const (
 	SystemEPARegistry = "epa_registry"
 	SystemLinkedIn    = "linkedin"
 	SystemGrata       = "grata"
+	SystemGooglePlace = "google_place"
 )
 
 // Address is a physical address for a company.
 type Address struct {
-	ID          int64     `json:"id" db:"id"`
-	CompanyID   int64     `json:"company_id" db:"company_id"`
-	AddressType string    `json:"address_type" db:"address_type"`
-	Street      string    `json:"street,omitempty" db:"street"`
-	City        string    `json:"city,omitempty" db:"city"`
-	State       string    `json:"state,omitempty" db:"state"`
-	ZipCode     string    `json:"zip_code,omitempty" db:"zip_code"`
-	Country     string    `json:"country,omitempty" db:"country"`
-	Latitude    *float64  `json:"latitude,omitempty" db:"latitude"`
-	Longitude   *float64  `json:"longitude,omitempty" db:"longitude"`
-	Source      string    `json:"source,omitempty" db:"source"`
-	Confidence  *float64  `json:"confidence,omitempty" db:"confidence"`
-	IsPrimary   bool      `json:"is_primary" db:"is_primary"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+	ID             int64      `json:"id" db:"id"`
+	CompanyID      int64      `json:"company_id" db:"company_id"`
+	AddressType    string     `json:"address_type" db:"address_type"`
+	Street         string     `json:"street,omitempty" db:"street"`
+	City           string     `json:"city,omitempty" db:"city"`
+	State          string     `json:"state,omitempty" db:"state"`
+	ZipCode        string     `json:"zip_code,omitempty" db:"zip_code"`
+	Country        string     `json:"country,omitempty" db:"country"`
+	Latitude       *float64   `json:"latitude,omitempty" db:"latitude"`
+	Longitude      *float64   `json:"longitude,omitempty" db:"longitude"`
+	Source         string     `json:"source,omitempty" db:"source"`
+	Confidence     *float64   `json:"confidence,omitempty" db:"confidence"`
+	IsPrimary      bool       `json:"is_primary" db:"is_primary"`
+	GeocodeSource  string     `json:"geocode_source,omitempty" db:"geocode_source"`
+	GeocodeQuality string     `json:"geocode_quality,omitempty" db:"geocode_quality"`
+	GeocodedAt     *time.Time `json:"geocoded_at,omitempty" db:"geocoded_at"`
+	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // Address types.
@@ -191,6 +197,20 @@ const (
 	TagDifferentiator     = "differentiator"
 	TagInvestmentStrategy = "investment_strategy"
 )
+
+// AddressMSA links an address to a CBSA metropolitan area with precomputed distances.
+type AddressMSA struct {
+	ID             int64     `json:"id" db:"id"`
+	AddressID      int64     `json:"address_id" db:"address_id"`
+	CBSACode       string    `json:"cbsa_code" db:"cbsa_code"`
+	MSAName        string    `json:"msa_name,omitempty"`
+	IsWithin       bool      `json:"is_within" db:"is_within"`
+	DistanceKM     float64   `json:"distance_km" db:"distance_km"`
+	CentroidKM     float64   `json:"centroid_km" db:"centroid_km"`
+	EdgeKM         float64   `json:"edge_km" db:"edge_km"`
+	Classification string    `json:"classification" db:"classification"`
+	ComputedAt     time.Time `json:"computed_at" db:"computed_at"`
+}
 
 // Match links a company to a fed_data entity.
 type Match struct {

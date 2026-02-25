@@ -7,7 +7,9 @@ import (
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
 
+	"github.com/sells-group/research-cli/internal/company"
 	"github.com/sells-group/research-cli/internal/estimate"
+	"github.com/sells-group/research-cli/internal/geo"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/pipeline"
 	"github.com/sells-group/research-cli/internal/registry"
@@ -17,6 +19,7 @@ import (
 	"github.com/sells-group/research-cli/internal/waterfall/provider"
 	anthropicpkg "github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
+	"github.com/sells-group/research-cli/pkg/geocode"
 	"github.com/sells-group/research-cli/pkg/google"
 	"github.com/sells-group/research-cli/pkg/jina"
 	"github.com/sells-group/research-cli/pkg/notion"
@@ -184,6 +187,24 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 	}
 
 	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, googleClient, pppClient, revenueEstimator, waterfallExec, questions, fields)
+
+	// Wire up geocoder for Phase 7D (MSA association) if enabled.
+	if cfg.Geo.Enabled {
+		var gcOpts []geocode.Option
+		if cfg.Google.Key != "" {
+			gcOpts = append(gcOpts, geocode.WithGoogleAPIKey(cfg.Google.Key))
+		}
+		gc := geocode.NewClient(gcOpts...)
+		p.SetGeocoder(gc)
+
+		// Set up geo associator if we have a Postgres pool.
+		if ps, ok := st.(*store.PostgresStore); ok {
+			cStore := company.NewPostgresStore(ps.Pool())
+			assoc := geo.NewAssociator(ps.Pool(), cStore)
+			p.SetGeoAssociator(assoc)
+			zap.L().Info("geocoding + MSA association enabled")
+		}
+	}
 
 	return &pipelineEnv{
 		Store:     st,

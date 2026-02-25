@@ -15,6 +15,7 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/cost"
 	"github.com/sells-group/research-cli/internal/estimate"
+	"github.com/sells-group/research-cli/internal/geo"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/resilience"
 	"github.com/sells-group/research-cli/internal/scrape"
@@ -22,6 +23,7 @@ import (
 	"github.com/sells-group/research-cli/internal/waterfall"
 	"github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
+	"github.com/sells-group/research-cli/pkg/geocode"
 	"github.com/sells-group/research-cli/pkg/google"
 	"github.com/sells-group/research-cli/pkg/jina"
 	"github.com/sells-group/research-cli/pkg/notion"
@@ -50,6 +52,10 @@ type Pipeline struct {
 	fields        *model.FieldRegistry
 	breakers      *resilience.ServiceBreakers
 	retryCfg      resilience.RetryConfig
+
+	// Geocoding (Phase 7B) — set via SetGeocoder / SetGeoAssociator.
+	geocoder geocode.Client
+	geoAssoc *geo.Associator
 
 	// Deferred SF write mode: when set, Phase 9 builds write intents
 	// via PrepareGate instead of executing SF writes via QualityGate.
@@ -880,6 +886,13 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			},
 		}, nil
 	})
+
+	// ===== Phase 7D: Geocode =====
+	if p.cfg.Geo.Enabled && p.geocoder != nil {
+		trackPhase("7d_geocode", func() (*model.PhaseResult, error) {
+			return p.Phase7BGeocode(ctx, company, run.ID)
+		})
+	}
 
 	// ===== Phase 8: Report =====
 	// Set totalUsage.Cost from per-phase costs so the report shows the correct total.

@@ -46,4 +46,13 @@ type CompanyStore interface { //nolint:revive // stutters but widely used across
 	UpsertMatch(ctx context.Context, m *Match) error
 	GetMatches(ctx context.Context, companyID int64) ([]Match, error)
 	FindByMatch(ctx context.Context, matchedSource, matchedKey string) (*CompanyRecord, error)
+
+	// Geocoding
+	GetUngeocodedAddresses(ctx context.Context, limit int) ([]Address, error)
+	UpdateAddressGeocode(ctx context.Context, id int64, lat, lon float64, source, quality string) error
+
+	// MSA associations
+	UpsertAddressMSA(ctx context.Context, am *AddressMSA) error
+	GetAddressMSAs(ctx context.Context, addressID int64) ([]AddressMSA, error)
+	GetCompanyMSAs(ctx context.Context, companyID int64) ([]AddressMSA, error)
 }
