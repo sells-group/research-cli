@@ -966,25 +966,29 @@ func TestCompareField_BusinessModel(t *testing.T) {
 		grata     string
 		ours      string
 		wantMatch bool
+		wantType  string
 	}{
-		{"exact match", "Services", "Services", true},
-		{"containment", "Services", "B2B Services", true},
-		{"stem match services", "Services", "B2B Service Provider", true},
-		{"stem match manufacturer", "Manufacturer", "Manufacturing Company", true},
-		{"no match", "Manufacturer", "B2B Service Provider", false},
+		{"exact match", "Services", "Services", true, "exact"},
+		{"canonical services", "Services", "B2B Service Provider", true, "canonical"},
+		{"canonical manufacturer", "Manufacturer", "Manufacturing Company", true, "canonical"},
+		{"canonical containment", "Services", "B2B Services", true, "canonical"},
+		{"no match", "Manufacturer", "B2B Service Provider", false, "wrong"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			match, _, _ := compareField("business_model", tc.grata, tc.ours, 0)
+			match, _, matchType := compareField("business_model", tc.grata, tc.ours, 0)
 			if match != tc.wantMatch {
 				t.Errorf("compareField business_model(%q, %q) match = %v, want %v", tc.grata, tc.ours, match, tc.wantMatch)
+			}
+			if matchType != tc.wantType {
+				t.Errorf("compareField business_model(%q, %q) matchType = %q, want %q", tc.grata, tc.ours, matchType, tc.wantType)
 			}
 		})
 	}
 }
 
-func TestCompareField_BusinessModel_HighConf(t *testing.T) {
+func TestCompareField_BusinessModel_Canonical(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name      string
@@ -994,11 +998,11 @@ func TestCompareField_BusinessModel_HighConf(t *testing.T) {
 		wantMatch bool
 		wantType  string
 	}{
-		{"high conf accepts mismatch", "Manufacturer", "B2B2C / Service Provider", 0.85, true, "high_conf"},
-		{"high conf above threshold", "Manufacturer", "B2B2C / Service Provider", 0.90, true, "high_conf"},
-		{"low conf rejects mismatch", "Manufacturer", "B2B2C / Service Provider", 0.84, false, "wrong"},
-		{"zero conf rejects", "Manufacturer", "B2B2C / Service Provider", 0, false, "wrong"},
-		{"stem match still works at low conf", "Manufacturer", "Manufacturing Company", 0.50, true, "close"},
+		{"canonical match ignores conf", "Manufacturer", "Manufacturing Company", 0.50, true, "canonical"},
+		{"canonical match at high conf", "Manufacturer", "Manufacturing Company", 0.90, true, "canonical"},
+		{"different categories reject at high conf", "Manufacturer", "B2B Service Provider", 0.95, false, "wrong"},
+		{"different categories reject at low conf", "Manufacturer", "B2B Service Provider", 0.50, false, "wrong"},
+		{"financial services canonical", "Financial Services", "Wealth Management Firm", 0, true, "canonical"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

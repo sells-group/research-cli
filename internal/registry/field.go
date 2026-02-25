@@ -70,6 +70,13 @@ func parseFieldPage(p notionapi.Page) (model.FieldMapping, error) {
 			f.SFObject = sp.Select.Name
 		}
 	}
+	// Validate SFObject: only "", "Account", and "Contact" are valid.
+	switch f.SFObject {
+	case "", "Account", "Contact":
+		// valid
+	default:
+		return f, eris.Errorf("invalid SFObject %q (must be Account, Contact, or empty)", f.SFObject)
+	}
 
 	// DataType (select)
 	if prop, ok := p.Properties["DataType"]; ok {

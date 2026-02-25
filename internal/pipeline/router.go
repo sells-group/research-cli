@@ -92,7 +92,9 @@ func findPagesForQuestion(q model.Question, index model.PageIndex) []model.Class
 // EscalateQuestions takes T1 answers and escalates questions to T2 when
 // a majority of their fields are null or low-confidence. This avoids
 // re-running an entire multi-field question at T2 when most fields succeeded.
-func EscalateQuestions(answers []model.ExtractionAnswer, questions []model.Question, index model.PageIndex, threshold float64) []model.RoutedQuestion {
+// threshold is the per-answer confidence threshold; failRateThreshold is the
+// fraction of a question's fields that must fail before the question escalates.
+func EscalateQuestions(answers []model.ExtractionAnswer, questions []model.Question, index model.PageIndex, threshold, failRateThreshold float64) []model.RoutedQuestion {
 	// Build a lookup from question ID to question.
 	qMap := make(map[string]model.Question, len(questions))
 	for _, q := range questions {
@@ -125,7 +127,7 @@ func EscalateQuestions(answers []model.ExtractionAnswer, questions []model.Quest
 			continue
 		}
 		failRate := float64(stats.failed) / float64(stats.total)
-		if failRate <= 0.35 {
+		if failRate <= failRateThreshold {
 			continue // Majority succeeded, don't re-run at T2.
 		}
 		if seen[qid] {

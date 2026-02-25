@@ -220,3 +220,19 @@ func makeFieldPage(id, key, sfField, sfObject, dataType string, required bool, m
 		Properties: props,
 	}
 }
+
+func TestParseFieldPage_InvalidSFObject(t *testing.T) {
+	page := makeFieldPage("f1", "test_field", "Test__c", "Contac", "string", false, 0, "", "Active")
+	_, err := parseFieldPage(page)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid SFObject")
+}
+
+func TestParseFieldPage_ValidSFObjects(t *testing.T) {
+	for _, sfObj := range []string{"", "Account", "Contact"} {
+		page := makeFieldPage("f1", "test_field", "Test__c", sfObj, "string", false, 0, "", "Active")
+		f, err := parseFieldPage(page)
+		assert.NoError(t, err, "SFObject %q should be valid", sfObj)
+		assert.Equal(t, sfObj, f.SFObject)
+	}
+}

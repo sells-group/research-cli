@@ -3,6 +3,8 @@ package pipeline
 import (
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
 )
@@ -28,6 +30,7 @@ func computeQualityScore(fieldValues map[string]model.FieldValue, fields *model.
 
 	totalWeight := weights.Confidence + weights.Completeness + weights.Diversity + weights.Freshness
 	if totalWeight == 0 {
+		zap.L().Warn("score: all quality weights are zero, falling back to confidence-only")
 		// Fallback: confidence-only for backward compat.
 		return ScoreBreakdown{
 			Confidence:   conf,

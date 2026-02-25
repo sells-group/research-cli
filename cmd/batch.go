@@ -7,6 +7,7 @@ import (
 	"math"
 	"os/signal"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -18,11 +19,17 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/pipeline"
 	"github.com/sells-group/research-cli/internal/resilience"
+	"github.com/sells-group/research-cli/internal/store"
 	"github.com/sells-group/research-cli/pkg/notion"
 )
 
-var batchLimit int
+var (
+	batchLimit    int
+	reEnrichDays  int
+	reEnrichLimit int
+)
 
 var batchCmd = &cobra.Command{
 	Use:   "batch",
@@ -68,9 +75,41 @@ var batchCmd = &cobra.Command{
 			dlqMaxRetries = 3
 		}
 
-		return processBatch(ctx, leads, batchLimit, cfg.Batch.MaxConcurrentCompanies, env.Notion, env.Store, dlqMaxRetries, func(ctx context.Context, company model.Company) (*model.EnrichmentResult, error) {
+		// Enable deferred SF writes: collect intents during enrichment,
+		// flush in bulk after all companies are processed.
+		var intentsMu sync.Mutex
+		var intents []*pipeline.SFWriteIntent
+
+		env.Pipeline.SetDeferredWrites(func(intent *pipeline.SFWriteIntent) {
+			intentsMu.Lock()
+			intents = append(intents, intent)
+			intentsMu.Unlock()
+		})
+
+		batchErr := processBatch(ctx, leads, batchLimit, cfg.Batch.MaxConcurrentCompanies, env.Notion, env.Store, dlqMaxRetries, func(ctx context.Context, company model.Company) (*model.EnrichmentResult, error) {
 			return env.Pipeline.Run(ctx, company)
 		})
+		if batchErr != nil {
+			return batchErr
+		}
+
+		// Flush deferred SF writes in bulk.
+		if len(intents) > 0 {
+			zap.L().Info("flushing deferred SF writes",
+				zap.Int("intents", len(intents)),
+			)
+			summary, flushErr := env.Pipeline.FlushDeferredWrites(ctx, intents)
+			if flushErr != nil {
+				return eris.Wrap(flushErr, "flush deferred SF writes")
+			}
+			if summary != nil && len(summary.Failures) > 0 {
+				zap.L().Warn("batch: SF write failures detected",
+					zap.Int("total_failures", len(summary.Failures)),
+				)
+			}
+		}
+
+		return nil
 	},
 }
 
@@ -156,10 +195,114 @@ var retryFailedCmd = &cobra.Command{
 	},
 }
 
+var reEnrichCmd = &cobra.Command{
+	Use:   "re-enrich",
+	Short: "Re-enrich companies with stale data",
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+
+		env, err := initPipeline(ctx)
+		if err != nil {
+			return err
+		}
+		defer env.Close()
+
+		cutoff := time.Now().AddDate(0, 0, -reEnrichDays)
+		stale, err := env.Store.ListStaleCompanies(ctx, store.StaleCompanyFilter{
+			LastEnrichedBefore: cutoff,
+			Limit:              reEnrichLimit,
+		})
+		if err != nil {
+			return eris.Wrap(err, "list stale companies")
+		}
+
+		if len(stale) == 0 {
+			zap.L().Info("no stale companies found",
+				zap.Int("days_threshold", reEnrichDays),
+			)
+			return nil
+		}
+
+		zap.L().Info("re-enriching stale companies",
+			zap.Int("companies", len(stale)),
+			zap.Int("days_threshold", reEnrichDays),
+		)
+
+		// Enable deferred SF writes.
+		var intentsMu sync.Mutex
+		var intents []*pipeline.SFWriteIntent
+
+		env.Pipeline.SetDeferredWrites(func(intent *pipeline.SFWriteIntent) {
+			intentsMu.Lock()
+			intents = append(intents, intent)
+			intentsMu.Unlock()
+		})
+		env.Pipeline.SetForceReExtract(true)
+
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(cfg.Batch.MaxConcurrentCompanies)
+
+		var succeeded, failed atomic.Int64
+
+		for _, sc := range stale {
+			g.Go(func() error {
+				log := zap.L().With(
+					zap.String("company", sc.Company.URL),
+					zap.String("last_run", sc.LastRunID),
+				)
+
+				result, enrichErr := env.Pipeline.Run(gctx, sc.Company)
+				if enrichErr != nil {
+					failed.Add(1)
+					log.Error("re-enrichment failed", zap.Error(enrichErr))
+					return nil
+				}
+
+				succeeded.Add(1)
+				log.Info("re-enrichment complete",
+					zap.Float64("score", result.Score),
+					zap.Float64("prev_score", sc.LastScore),
+				)
+				return nil
+			})
+		}
+
+		if err := g.Wait(); err != nil {
+			return eris.Wrap(err, "re-enrich processing")
+		}
+
+		// Flush deferred SF writes.
+		if len(intents) > 0 {
+			zap.L().Info("flushing deferred SF writes",
+				zap.Int("intents", len(intents)),
+			)
+			summary, flushErr := env.Pipeline.FlushDeferredWrites(ctx, intents)
+			if flushErr != nil {
+				return eris.Wrap(flushErr, "flush deferred SF writes")
+			}
+			if summary != nil && len(summary.Failures) > 0 {
+				zap.L().Warn("re-enrich: SF write failures detected",
+					zap.Int("total_failures", len(summary.Failures)),
+				)
+			}
+		}
+
+		zap.L().Info("re-enrich complete",
+			zap.Int64("succeeded", succeeded.Load()),
+			zap.Int64("failed", failed.Load()),
+		)
+		return nil
+	},
+}
+
 func init() {
 	batchCmd.Flags().IntVar(&batchLimit, "limit", 100, "max number of leads to process")
 	batchCmd.AddCommand(retryFailedCmd)
 	retryFailedCmd.Flags().IntVar(&batchLimit, "limit", 50, "max number of DLQ entries to retry")
+	batchCmd.AddCommand(reEnrichCmd)
+	reEnrichCmd.Flags().IntVar(&reEnrichDays, "days", 90, "re-enrich companies older than this many days")
+	reEnrichCmd.Flags().IntVar(&reEnrichLimit, "limit", 50, "max number of stale companies to re-enrich")
 	rootCmd.AddCommand(batchCmd)
 }
 

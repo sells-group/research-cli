@@ -428,3 +428,21 @@ func TestScoreDiversity_MultiFieldQuestion(t *testing.T) {
 	// Each field gets 2 sources → 0.75 each
 	assert.InDelta(t, 0.75, score, 0.01)
 }
+
+func TestComputeQualityScore_ZeroWeightsWarning(t *testing.T) {
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", Required: true},
+	})
+	fv := map[string]model.FieldValue{
+		"industry": {Value: "Tech", Confidence: 0.8},
+	}
+	questions := []model.Question{{ID: "q1", FieldKey: "industry"}}
+	answers := []model.ExtractionAnswer{{FieldKey: "industry", Value: "Tech", Confidence: 0.8, Tier: 1}}
+
+	// All weights zero → should fall back to confidence-only.
+	weights := config.QualityWeights{}
+	bd := computeQualityScore(fv, fields, questions, answers, weights, time.Now())
+
+	// Final should equal confidence (fallback).
+	assert.InDelta(t, bd.Confidence, bd.Final, 0.001)
+}

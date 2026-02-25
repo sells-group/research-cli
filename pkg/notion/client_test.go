@@ -7,6 +7,8 @@ import (
 	"github.com/jomei/notionapi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 )
 
 // MockClient implements Client for testing.
@@ -109,6 +111,26 @@ func TestNewClientReturnsClient(t *testing.T) {
 	c := NewClient("test-token")
 	assert.NotNil(t, c)
 	var _ Client = c //nolint:staticcheck // interface compliance check
+}
+
+func TestNewClient_DefaultRateLimiter(t *testing.T) {
+	c := NewClient("test-token").(*notionClient)
+	require.NotNil(t, c.limiter)
+	assert.Equal(t, rate.Limit(3), c.limiter.Limit())
+}
+
+func TestNewClient_WithRateLimit(t *testing.T) {
+	t.Run("custom rate", func(t *testing.T) {
+		c := NewClient("test-token", WithRateLimit(10)).(*notionClient)
+		require.NotNil(t, c.limiter)
+		assert.Equal(t, rate.Limit(10), c.limiter.Limit())
+		assert.Equal(t, 10, c.limiter.Burst())
+	})
+
+	t.Run("zero disables limiter", func(t *testing.T) {
+		c := NewClient("test-token", WithRateLimit(0)).(*notionClient)
+		assert.Nil(t, c.limiter)
+	})
 }
 
 func TestQueryDatabaseError(t *testing.T) {

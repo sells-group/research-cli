@@ -22,7 +22,7 @@ func TestEscalateQuestions_AllAboveThreshold(t *testing.T) {
 		model.PageTypeAbout: {{CrawledPage: model.CrawledPage{URL: "https://acme.com/about"}}},
 	}
 
-	escalated := EscalateQuestions(answers, questions, index, 0.4)
+	escalated := EscalateQuestions(answers, questions, index, 0.4, 0.35)
 	assert.Empty(t, escalated)
 }
 
@@ -41,7 +41,7 @@ func TestEscalateQuestions_SomeBelowThreshold(t *testing.T) {
 		model.PageTypeAbout: {{CrawledPage: model.CrawledPage{URL: "https://acme.com/about"}}},
 	}
 
-	escalated := EscalateQuestions(answers, questions, index, 0.4)
+	escalated := EscalateQuestions(answers, questions, index, 0.4, 0.35)
 	assert.Len(t, escalated, 1)
 	assert.Equal(t, "q1", escalated[0].Question.ID)
 }
@@ -57,7 +57,7 @@ func TestEscalateQuestions_QuestionNotFoundInMap(t *testing.T) {
 
 	index := model.PageIndex{}
 
-	escalated := EscalateQuestions(answers, questions, index, 0.4)
+	escalated := EscalateQuestions(answers, questions, index, 0.4, 0.35)
 	assert.Empty(t, escalated)
 }
 
@@ -73,12 +73,12 @@ func TestEscalateQuestions_NoPagesForQuestion(t *testing.T) {
 	// Empty index: no pages match.
 	index := model.PageIndex{}
 
-	escalated := EscalateQuestions(answers, questions, index, 0.4)
+	escalated := EscalateQuestions(answers, questions, index, 0.4, 0.35)
 	assert.Empty(t, escalated)
 }
 
 func TestEscalateQuestions_Empty(t *testing.T) {
-	escalated := EscalateQuestions(nil, nil, nil, 0.4)
+	escalated := EscalateQuestions(nil, nil, nil, 0.4, 0.35)
 	assert.Empty(t, escalated)
 }
 

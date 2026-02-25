@@ -52,6 +52,13 @@ type Pipeline struct {
 	breakers      *resilience.ServiceBreakers
 	retryCfg      resilience.RetryConfig
 	fedsyncPool   db.Pool // optional: enables ADV pre-fill when set
+
+	// Deferred SF write mode: when set, Phase 9 builds write intents
+	// via PrepareGate instead of executing SF writes via QualityGate.
+	// The callback is invoked with each intent for external collection.
+	deferSFWrites  bool
+	onWriteIntent  func(*SFWriteIntent)
+	forceReExtract bool
 }
 
 // New creates a new Pipeline with all dependencies.
@@ -121,6 +128,26 @@ func New(
 // SetFedsyncPool sets an optional fed_data database pool for ADV pre-fill.
 func (p *Pipeline) SetFedsyncPool(pool db.Pool) {
 	p.fedsyncPool = pool
+}
+
+// SetDeferredWrites enables deferred SF write mode for batch aggregation.
+// When set, Phase 9 calls PrepareGate (building intents) instead of QualityGate
+// (executing writes). The callback fn is invoked with each write intent.
+// Call FlushDeferredWrites after all pipeline runs complete.
+func (p *Pipeline) SetDeferredWrites(fn func(*SFWriteIntent)) {
+	p.deferSFWrites = true
+	p.onWriteIntent = fn
+}
+
+// SetForceReExtract disables answer reuse so all fields are re-extracted.
+func (p *Pipeline) SetForceReExtract(force bool) {
+	p.forceReExtract = force
+}
+
+// FlushDeferredWrites executes collected SF write intents in bulk using the
+// Pipeline's own SF and Notion clients.
+func (p *Pipeline) FlushDeferredWrites(ctx context.Context, intents []*SFWriteIntent) (*FlushSummary, error) {
+	return FlushSFWrites(ctx, p.salesforce, p.notion, intents)
 }
 
 // convertAnthropicPricing maps config pricing to cost pricing types.
@@ -514,28 +541,37 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 
 	// --- Optimization: Existing-answer lookup ---
 	// Skip questions that already have high-confidence answers from prior runs.
-	skipThreshold := p.cfg.Pipeline.SkipConfidenceThreshold
-	if skipThreshold <= 0 {
-		skipThreshold = 0.8
-	}
-	existingAnswers, existErr := p.store.GetHighConfidenceAnswers(ctx, company.URL, skipThreshold)
-	if existErr != nil {
-		log.Warn("pipeline: failed to load existing answers", zap.Error(existErr))
-	}
+	// Disabled when forceReExtract is set (--force flag).
+	var existingAnswers []model.ExtractionAnswer
 	var skippedByExisting int
-	if len(existingAnswers) > 0 {
-		existingKeys := make(map[string]bool, len(existingAnswers))
-		for _, a := range existingAnswers {
-			existingKeys[a.FieldKey] = true
+	if !p.forceReExtract {
+		skipThreshold := p.cfg.Pipeline.SkipConfidenceThreshold
+		if skipThreshold <= 0 {
+			skipThreshold = 0.8
 		}
-		batches.Tier1 = filterRoutedQuestions(batches.Tier1, existingKeys, &skippedByExisting)
-		batches.Tier2 = filterRoutedQuestions(batches.Tier2, existingKeys, &skippedByExisting)
-		batches.Tier3 = filterRoutedQuestions(batches.Tier3, existingKeys, &skippedByExisting)
-		if skippedByExisting > 0 {
-			log.Info("pipeline: skipped questions with existing high-confidence answers",
-				zap.Int("skipped", skippedByExisting),
-				zap.Int("existing_answers", len(existingAnswers)),
-			)
+		var reuseTTL time.Duration
+		if p.cfg.Pipeline.AnswerReuseTTLDays > 0 {
+			reuseTTL = time.Duration(p.cfg.Pipeline.AnswerReuseTTLDays) * 24 * time.Hour
+		}
+		var existErr error
+		existingAnswers, existErr = p.store.GetHighConfidenceAnswers(ctx, company.URL, skipThreshold, reuseTTL)
+		if existErr != nil {
+			log.Warn("pipeline: failed to load existing answers", zap.Error(existErr))
+		}
+		if len(existingAnswers) > 0 {
+			existingKeys := make(map[string]bool, len(existingAnswers))
+			for _, a := range existingAnswers {
+				existingKeys[a.FieldKey] = true
+			}
+			batches.Tier1 = filterRoutedQuestions(batches.Tier1, existingKeys, &skippedByExisting)
+			batches.Tier2 = filterRoutedQuestions(batches.Tier2, existingKeys, &skippedByExisting)
+			batches.Tier3 = filterRoutedQuestions(batches.Tier3, existingKeys, &skippedByExisting)
+			if skippedByExisting > 0 {
+				log.Info("pipeline: skipped questions with existing high-confidence answers",
+					zap.Int("skipped", skippedByExisting),
+					zap.Int("existing_answers", len(existingAnswers)),
+				)
+			}
 		}
 	}
 
@@ -694,7 +730,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 				return nil
 			}
 
-			esc := EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold)
+			esc := EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold, p.cfg.Pipeline.EscalationFailRateThreshold)
 			if len(esc) == 0 {
 				return nil
 			}
@@ -715,7 +751,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	// Escalation count for reporting (re-derive from answers).
 	var escalated []model.RoutedQuestion
 	if !isSourcing {
-		escalated = EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold)
+		escalated = EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold, p.cfg.Pipeline.EscalationFailRateThreshold)
 	}
 
 	// ===== Phase 5: Combine T2 results =====
@@ -857,6 +893,8 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		allAnswers = CrossValidateEmployeeCount(allAnswers, linkedInData)
 		// Validate NAICS codes against reference data and cross-reference with SoS filings.
 		allAnswers = ValidateAndCrossReferenceNAICS(allAnswers, allPages)
+		// Normalize business model to canonical taxonomy.
+		allAnswers = NormalizeBusinessModelAnswer(allAnswers)
 		// Enrich with CBP-based revenue estimate if available.
 		allAnswers = EnrichWithRevenueEstimate(ctx, allAnswers, company, p.estimator)
 		// Enrich with PPP loan data (revenue + employees from database).
@@ -943,21 +981,45 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	// ===== Phase 9: Quality Gate =====
 	setStatus(model.RunStatusWritingSF)
 
-	trackPhaseWithRetry("9_gate", "salesforce", func() (*model.PhaseResult, error) {
-		gate, gateErr := QualityGate(ctx, result, p.fields, p.questions, p.salesforce, p.notion, p.cfg)
-		if gateErr != nil {
-			return nil, gateErr
-		}
-		return &model.PhaseResult{
-			Metadata: map[string]any{
-				"score":           gate.Score,
-				"score_breakdown": gate.ScoreBreakdown,
-				"passed":          gate.Passed,
-				"sf_updated":      gate.SFUpdated,
-				"manual_review":   gate.ManualReview,
-			},
-		}, nil
-	})
+	if p.deferSFWrites && p.onWriteIntent != nil {
+		// Deferred mode: build write intent without executing SF writes.
+		trackPhaseWithRetry("9_gate", "salesforce", func() (*model.PhaseResult, error) {
+			gate, intent, gateErr := PrepareGate(ctx, result, p.fields, p.questions, p.salesforce, p.notion, p.cfg)
+			if gateErr != nil {
+				return nil, gateErr
+			}
+			if intent != nil {
+				p.onWriteIntent(intent)
+			}
+			return &model.PhaseResult{
+				Metadata: map[string]any{
+					"score":           gate.Score,
+					"score_breakdown": gate.ScoreBreakdown,
+					"passed":          gate.Passed,
+					"dedup_match":     gate.DedupMatch,
+					"manual_review":   gate.ManualReview,
+					"deferred":        true,
+				},
+			}, nil
+		})
+	} else {
+		// Immediate mode: execute SF writes inline (single-company run).
+		trackPhaseWithRetry("9_gate", "salesforce", func() (*model.PhaseResult, error) {
+			gate, gateErr := QualityGate(ctx, result, p.fields, p.questions, p.salesforce, p.notion, p.cfg)
+			if gateErr != nil {
+				return nil, gateErr
+			}
+			return &model.PhaseResult{
+				Metadata: map[string]any{
+					"score":           gate.Score,
+					"score_breakdown": gate.ScoreBreakdown,
+					"passed":          gate.Passed,
+					"sf_updated":      gate.SFUpdated,
+					"manual_review":   gate.ManualReview,
+				},
+			}, nil
+		})
+	}
 
 	// Finalize: sum per-phase costs for accurate per-model pricing.
 	result.TotalTokens = totalUsage.InputTokens + totalUsage.OutputTokens
