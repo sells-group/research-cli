@@ -14,6 +14,7 @@ import (
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/cost"
+	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/estimate"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/resilience"
@@ -50,6 +51,7 @@ type Pipeline struct {
 	fields        *model.FieldRegistry
 	breakers      *resilience.ServiceBreakers
 	retryCfg      resilience.RetryConfig
+	fedsyncPool   db.Pool // optional: enables ADV pre-fill when set
 }
 
 // New creates a new Pipeline with all dependencies.
@@ -116,6 +118,11 @@ func New(
 	}
 }
 
+// SetFedsyncPool sets an optional fed_data database pool for ADV pre-fill.
+func (p *Pipeline) SetFedsyncPool(pool db.Pool) {
+	p.fedsyncPool = pool
+}
+
 // convertAnthropicPricing maps config pricing to cost pricing types.
 func convertAnthropicPricing(src map[string]config.ModelPricing) map[string]cost.ModelPricing {
 	if len(src) == 0 {
@@ -137,7 +144,13 @@ func convertAnthropicPricing(src map[string]config.ModelPricing) map[string]cost
 // Run executes the full enrichment pipeline for a single company.
 func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.EnrichmentResult, error) {
 	log := zap.L().With(zap.String("company", company.Name), zap.String("url", company.URL))
-	log.Info("pipeline: starting enrichment")
+
+	mode := p.cfg.Pipeline.Mode
+	if mode == "" {
+		mode = "full"
+	}
+	isSourcing := mode == "sourcing"
+	log.Info("pipeline: starting", zap.String("mode", mode))
 
 	result := &model.EnrichmentResult{
 		Company: company,
@@ -295,8 +308,15 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		return nil
 	})
 
-	// Phase 1B: External Scrape — needs Name.
-	if hasName {
+	// Phase 1B: External Scrape — needs Name. Skipped in sourcing mode.
+	if isSourcing {
+		trackPhase("1b_scrape", func() (*model.PhaseResult, error) {
+			return &model.PhaseResult{
+				Status:   model.PhaseStatusSkipped,
+				Metadata: map[string]any{"reason": "sourcing_mode"},
+			}, nil
+		})
+	} else if hasName {
 		g.Go(func() error {
 			pr := trackPhase("1b_scrape", func() (*model.PhaseResult, error) {
 				ep, addrMatches, sourceResults := ScrapePhase(gCtx, company, p.jina, p.chain, p.perplexity, p.google, p.cfg.Scrape)
@@ -469,9 +489,19 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	}
 
 	// ===== Phase 3: Routing =====
+	// In sourcing mode, filter to P0+P1 questions only.
+	questionsForRouting := p.questions
+	if isSourcing {
+		questionsForRouting = model.FilterByMaxPriority(p.questions, "P1")
+		log.Info("pipeline: sourcing mode question filter",
+			zap.Int("total_questions", len(p.questions)),
+			zap.Int("after_filter", len(questionsForRouting)),
+		)
+	}
+
 	var batches *model.RoutedBatches
 	trackPhase("3_route", func() (*model.PhaseResult, error) {
-		batches = RouteQuestions(p.questions, pageIndex)
+		batches = RouteQuestions(questionsForRouting, pageIndex)
 		return &model.PhaseResult{
 			Metadata: map[string]any{
 				"tier1_count":   len(batches.Tier1),
@@ -506,6 +536,44 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 				zap.Int("skipped", skippedByExisting),
 				zap.Int("existing_answers", len(existingAnswers)),
 			)
+		}
+	}
+
+	// --- Optimization: ADV pre-fill ---
+	// If a CRD number is available (e.g., from pre-seeded data) and a fedsync
+	// pool is connected, pre-fill answers from ADV filing data.
+	var advPrefilled []model.ExtractionAnswer
+	if p.fedsyncPool != nil {
+		var crdNumber int
+		if v, ok := company.PreSeeded["crd_number"]; ok {
+			switch n := v.(type) {
+			case int:
+				crdNumber = n
+			case float64:
+				crdNumber = int(n)
+			}
+		}
+		if crdNumber > 0 {
+			prefilled, prefillErr := prefillFromADV(ctx, p.fedsyncPool, crdNumber, questionsForRouting)
+			if prefillErr != nil {
+				log.Warn("pipeline: ADV pre-fill failed", zap.Error(prefillErr))
+			} else if len(prefilled) > 0 {
+				advPrefilled = prefilled
+				// Filter pre-filled questions from extraction batches.
+				pfKeys := prefilledKeySet(prefilled)
+				var pfSkipped int
+				batches.Tier1, pfSkipped = filterPrefilledQuestions(batches.Tier1, pfKeys)
+				t2Skip := 0
+				batches.Tier2, t2Skip = filterPrefilledQuestions(batches.Tier2, pfKeys)
+				pfSkipped += t2Skip
+				t3Skip := 0
+				batches.Tier3, t3Skip = filterPrefilledQuestions(batches.Tier3, pfKeys)
+				pfSkipped += t3Skip
+				log.Info("pipeline: ADV pre-fill complete",
+					zap.Int("prefilled_answers", len(prefilled)),
+					zap.Int("skipped_questions", pfSkipped),
+				)
+			}
 		}
 	}
 
@@ -595,7 +663,8 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 
 	// T2-native: questions routed directly to T2. Waits for T1 so it can
 	// receive T1 answers as supplementary context for better synthesis.
-	if len(batches.Tier2) > 0 {
+	// Skipped in sourcing mode (lean T1 only).
+	if len(batches.Tier2) > 0 && !isSourcing {
 		g2.Go(func() error {
 			// Wait for T1 to finish so we can pass its answers as context.
 			select {
@@ -616,32 +685,38 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	}
 
 	// T2-escalated: starts as soon as T1 completes, overlapping with T2-native.
-	g2.Go(func() error {
-		select {
-		case <-t1Done:
-		case <-g2Ctx.Done():
-			return nil
-		}
+	// Skipped in sourcing mode (no confidence-based re-queuing).
+	if !isSourcing {
+		g2.Go(func() error {
+			select {
+			case <-t1Done:
+			case <-g2Ctx.Done():
+				return nil
+			}
 
-		esc := EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold)
-		if len(esc) == 0 {
-			return nil
-		}
+			esc := EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold)
+			if len(esc) == 0 {
+				return nil
+			}
 
-		t2Result, t2Err := ExtractTier2(g2Ctx, esc, t1Answers, company, pppMatches, p.anthropic, p.cfg.Anthropic)
-		if t2Err != nil {
-			zap.L().Warn("pipeline: t2-escalated extraction failed", zap.Error(t2Err))
+			t2Result, t2Err := ExtractTier2(g2Ctx, esc, t1Answers, company, pppMatches, p.anthropic, p.cfg.Anthropic)
+			if t2Err != nil {
+				zap.L().Warn("pipeline: t2-escalated extraction failed", zap.Error(t2Err))
+				return nil
+			}
+			escalatedAnswers = t2Result.Answers
+			escalatedUsage = t2Result.TokenUsage
 			return nil
-		}
-		escalatedAnswers = t2Result.Answers
-		escalatedUsage = t2Result.TokenUsage
-		return nil
-	})
+		})
+	}
 
 	_ = g2.Wait()
 
 	// Escalation count for reporting (re-derive from answers).
-	escalated := EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold)
+	var escalated []model.RoutedQuestion
+	if !isSourcing {
+		escalated = EscalateQuestions(t1Answers, p.questions, pageIndex, p.cfg.Pipeline.ConfidenceEscalationThreshold)
+	}
 
 	// ===== Phase 5: Combine T2 results =====
 	var t2Answers []model.ExtractionAnswer
@@ -673,9 +748,13 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		cumulativeCost += ph.TokenUsage.Cost
 	}
 
-	// Determine if T3 should run.
+	// Determine if T3 should run. Sourcing mode always skips T3.
 	shouldRunT3 := len(batches.Tier3) > 0
 	var t3SkipReason string
+	if isSourcing {
+		shouldRunT3 = false
+		t3SkipReason = "sourcing_mode"
+	}
 	switch p.cfg.Pipeline.Tier3Gate {
 	case "always":
 		// Run T3 unconditionally (if there are T3 questions).
@@ -744,6 +823,10 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 
 	trackPhase("7_aggregate", func() (*model.PhaseResult, error) {
 		allAnswers = MergeAnswers(t1Answers, t2Answers, t3Answers)
+		// Merge in ADV pre-filled answers (Tier 0, high confidence).
+		if len(advPrefilled) > 0 {
+			allAnswers = MergeAnswers(advPrefilled, allAnswers, nil)
+		}
 		// Merge in existing high-confidence answers for fields we skipped.
 		if len(existingAnswers) > 0 {
 			allAnswers = MergeAnswers(existingAnswers, allAnswers, nil)
