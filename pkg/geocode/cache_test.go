@@ -266,6 +266,31 @@ func TestGeocode_NegativeCacheHitSkipsPostGIS(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestStoreCache_Error(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectExec(`INSERT INTO public.geocode_cache`).
+		WithArgs("hashkey", 25.77, -80.19, "rooftop", 5, true, "12086").
+		WillReturnError(assert.AnError)
+
+	g := &geocoder{pool: mock, cacheEnabled: true}
+	err = g.storeCache(context.Background(), "hashkey", &Result{
+		Latitude:   25.77,
+		Longitude:  -80.19,
+		Quality:    "rooftop",
+		Rating:     5,
+		Matched:    true,
+		CountyFIPS: "12086",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "geocode: store cache")
+
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestGeocode_CacheDisabled(t *testing.T) {
 	mock, err := pgxmock.NewPool()
 	require.NoError(t, err)

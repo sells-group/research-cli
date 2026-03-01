@@ -31,7 +31,11 @@ func (g *geocoder) checkCache(ctx context.Context, key string) (*Result, error) 
 	var matched bool
 	var countyFIPS *string
 
-	query := "SELECT latitude, longitude, quality, rating, matched, county_fips FROM public.geocode_cache WHERE address_hash = $1"
+	table := g.cacheTable
+	if table == "" {
+		table = "public.geocode_cache"
+	}
+	query := fmt.Sprintf("SELECT latitude, longitude, quality, rating, matched, county_fips FROM %s WHERE address_hash = $1", table)
 	args := []any{key}
 
 	if g.cacheTTLDays > 0 {
@@ -67,8 +71,12 @@ func (g *geocoder) checkCache(ctx context.Context, key string) (*Result, error) 
 
 // storeCache inserts a geocode result (match or non-match) into the cache.
 func (g *geocoder) storeCache(ctx context.Context, key string, result *Result) error {
-	_, err := g.pool.Exec(ctx, `
-		INSERT INTO public.geocode_cache (address_hash, latitude, longitude, quality, rating, matched, county_fips, cached_at)
+	table := g.cacheTable
+	if table == "" {
+		table = "public.geocode_cache"
+	}
+	_, err := g.pool.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO %s (address_hash, latitude, longitude, quality, rating, matched, county_fips, cached_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
 		ON CONFLICT (address_hash) DO UPDATE SET
 			latitude = EXCLUDED.latitude,
@@ -77,7 +85,7 @@ func (g *geocoder) storeCache(ctx context.Context, key string, result *Result) e
 			rating = EXCLUDED.rating,
 			matched = EXCLUDED.matched,
 			county_fips = EXCLUDED.county_fips,
-			cached_at = now()`,
+			cached_at = now()`, table),
 		key, result.Latitude, result.Longitude, result.Quality, result.Rating, result.Matched, nilIfEmpty(result.CountyFIPS),
 	)
 	if err != nil {
