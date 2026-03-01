@@ -26,7 +26,7 @@ func TestRegisterAll(t *testing.T) {
 	RegisterAll(reg)
 
 	names := reg.AllNames()
-	require.Len(t, names, 5) // 4 HIFLD + 1 FEMA
+	require.Len(t, names, 6) // 4 HIFLD + 1 FEMA + 1 EPA
 
 	// All should be National category.
 	for _, s := range reg.All() {
@@ -52,4 +52,5 @@ var (
 	_ geoscraper.GeoScraper = (*HIFLDTransmissionLines)(nil)
 	_ geoscraper.GeoScraper = (*HIFLDPipelines)(nil)
 	_ geoscraper.GeoScraper = (*FEMAFloodZones)(nil)
+	_ geoscraper.GeoScraper = (*EPASites)(nil)
 )
