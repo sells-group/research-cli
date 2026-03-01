@@ -1,0 +1,35 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "GEOID": "48201950100",
+        "STATE": "48",
+        "COUNTY": "201",
+        "TRACT": "950100",
+        "NAME": "9501",
+        "AREALAND": 5000000,
+        "AREAWATER": 100000
+      },
+      "geometry": {
+        "rings": [[[-95.4, 29.7], [-95.3, 29.7], [-95.3, 29.8], [-95.4, 29.8], [-95.4, 29.7]]]
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "GEOID": "48201950200",
+        "STATE": "48",
+        "COUNTY": "201",
+        "TRACT": "950200",
+        "NAME": "9502",
+        "AREALAND": 6000000,
+        "AREAWATER": 200000
+      },
+      "geometry": {
+        "rings": [[[-95.2, 29.6], [-95.1, 29.6], [-95.1, 29.7], [-95.2, 29.7], [-95.2, 29.6]]]
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

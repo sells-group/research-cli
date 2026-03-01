@@ -23,10 +23,10 @@ func TestRegisterHIFLD(t *testing.T) {
 
 func TestRegisterAll(t *testing.T) {
 	reg := geoscraper.NewRegistry()
-	RegisterAll(reg)
+	RegisterAll(reg, nil)
 
 	names := reg.AllNames()
-	require.Len(t, names, 6) // 4 HIFLD + 1 FEMA + 1 EPA
+	require.Len(t, names, 7) // 4 HIFLD + 1 FEMA + 1 EPA + 1 Census
 
 	// All should be National category.
 	for _, s := range reg.All() {
@@ -36,7 +36,7 @@ func TestRegisterAll(t *testing.T) {
 
 func TestRegisterAll_NoDuplicates(t *testing.T) {
 	reg := geoscraper.NewRegistry()
-	RegisterAll(reg)
+	RegisterAll(reg, nil)
 
 	seen := make(map[string]bool)
 	for _, name := range reg.AllNames() {
@@ -53,4 +53,5 @@ var (
 	_ geoscraper.GeoScraper = (*HIFLDPipelines)(nil)
 	_ geoscraper.GeoScraper = (*FEMAFloodZones)(nil)
 	_ geoscraper.GeoScraper = (*EPASites)(nil)
+	_ geoscraper.GeoScraper = (*CensusDemographics)(nil)
 )
