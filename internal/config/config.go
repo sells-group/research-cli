@@ -82,12 +82,27 @@ type DiscoveryConfig struct {
 
 // GeoConfig configures geocoding and MSA association.
 type GeoConfig struct {
-	Enabled      bool `yaml:"enabled" mapstructure:"enabled"`
-	CacheEnabled bool `yaml:"cache_enabled" mapstructure:"cache_enabled"`
-	CacheTTLDays int  `yaml:"cache_ttl_days" mapstructure:"cache_ttl_days"`
-	MaxRating    int  `yaml:"max_rating" mapstructure:"max_rating"`
-	BatchSize    int  `yaml:"batch_size" mapstructure:"batch_size"`
-	TopMSAs      int  `yaml:"top_msas" mapstructure:"top_msas"`
+	Enabled      bool            `yaml:"enabled" mapstructure:"enabled"`
+	CacheEnabled bool            `yaml:"cache_enabled" mapstructure:"cache_enabled"`
+	CacheTTLDays int             `yaml:"cache_ttl_days" mapstructure:"cache_ttl_days"`
+	MaxRating    int             `yaml:"max_rating" mapstructure:"max_rating"`
+	BatchSize    int             `yaml:"batch_size" mapstructure:"batch_size"`
+	TopMSAs      int             `yaml:"top_msas" mapstructure:"top_msas"`
+	Tiles        TileConfig      `yaml:"tiles" mapstructure:"tiles"`
+	TileCache    TileCacheConfig `yaml:"tile_cache" mapstructure:"tile_cache"`
+}
+
+// TileConfig configures the tile server and basemap proxy.
+type TileConfig struct {
+	Port          int    `yaml:"port" mapstructure:"port"`
+	BasemapURL    string `yaml:"basemap_url" mapstructure:"basemap_url"`
+	BasemapFormat string `yaml:"basemap_format" mapstructure:"basemap_format"`
+}
+
+// TileCacheConfig configures the MVT tile cache.
+type TileCacheConfig struct {
+	MaxEntries int `yaml:"max_entries" mapstructure:"max_entries"`
+	TTLMinutes int `yaml:"ttl_minutes" mapstructure:"ttl_minutes"`
 }
 
 // TigerConfig configures TIGER/Line data loading.
@@ -472,6 +487,11 @@ func Load() (*Config, error) {
 	v.SetDefault("geo.batch_size", 1000)
 	v.SetDefault("geo.cache_ttl_days", 90)
 	v.SetDefault("geo.top_msas", 3)
+	v.SetDefault("geo.tiles.port", 8081)
+	v.SetDefault("geo.tiles.basemap_url", "https://tile.openstreetmap.org")
+	v.SetDefault("geo.tiles.basemap_format", "png")
+	v.SetDefault("geo.tile_cache.max_entries", 10000)
+	v.SetDefault("geo.tile_cache.ttl_minutes", 60)
 	v.SetDefault("tiger.year", 2024)
 	v.SetDefault("tiger.temp_dir", "/tmp/tiger")
 	v.SetDefault("tiger.concurrency", 3)

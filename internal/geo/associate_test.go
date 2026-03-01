@@ -162,3 +162,53 @@ func TestAssociateAddress_NoResults(t *testing.T) {
 
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestAssociateAddress_WithGeoSchema(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	cs := &mockCompanyStore{}
+	assoc := NewAssociator(mock, cs, WithGeoSchema())
+
+	// The query should reference geo.cbsa instead of public.cbsa_areas.
+	mock.ExpectQuery("FROM geo.cbsa").
+		WithArgs(-97.7431, 30.2672, 3).
+		WillReturnRows(
+			pgxmock.NewRows([]string{"cbsa_code", "name", "is_within", "distance_km", "centroid_km", "edge_km"}).
+				AddRow("12420", "Austin-Round Rock-Georgetown, TX", true, 0.0, 8.1, 0.0),
+		)
+
+	relations, err := assoc.AssociateAddress(context.Background(), 10, 30.2672, -97.7431, 3)
+	require.NoError(t, err)
+	require.Len(t, relations, 1)
+	assert.Equal(t, "12420", relations[0].CBSACode)
+	assert.True(t, relations[0].IsWithin)
+
+	require.Len(t, cs.upserted, 1)
+	assert.Equal(t, "12420", cs.upserted[0].CBSACode)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAssociateAddress_DefaultUsesPublicSchema(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	cs := &mockCompanyStore{}
+	assoc := NewAssociator(mock, cs) // no WithGeoSchema
+
+	// The query should reference public.cbsa_areas.
+	mock.ExpectQuery("FROM public.cbsa_areas").
+		WithArgs(-97.7431, 30.2672, 3).
+		WillReturnRows(
+			pgxmock.NewRows([]string{"cbsa_code", "name", "is_within", "distance_km", "centroid_km", "edge_km"}),
+		)
+
+	relations, err := assoc.AssociateAddress(context.Background(), 10, 30.2672, -97.7431, 3)
+	require.NoError(t, err)
+	assert.Empty(t, relations)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
