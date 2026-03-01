@@ -15,6 +15,7 @@ import (
 	"github.com/sells-group/research-cli/internal/fedsync"
 	"github.com/sells-group/research-cli/internal/fetcher"
 	"github.com/sells-group/research-cli/internal/geoscraper"
+	"github.com/sells-group/research-cli/internal/geoscraper/scraper"
 	"github.com/sells-group/research-cli/internal/geospatial"
 )
 
@@ -74,6 +75,7 @@ Use --force to ignore ShouldRun() scheduling logic.`,
 		// Build engine dependencies.
 		syncLog := fedsync.NewSyncLog(pool)
 		reg := geoscraper.NewRegistry()
+		scraper.RegisterAll(reg)
 		queue := geospatial.NewGeocodeQueue(pool, nil, cfg.Geo.BatchSize)
 		engine := geoscraper.NewEngine(pool, f, syncLog, reg, queue, runDir)
 
