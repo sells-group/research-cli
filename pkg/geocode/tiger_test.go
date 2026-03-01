@@ -2,6 +2,7 @@ package geocode
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
 	"github.com/pashagolub/pgxmock/v4"
@@ -187,6 +188,37 @@ func TestBatchGeocode_Sequential(t *testing.T) {
 	require.Len(t, results, 2)
 	assert.True(t, results[0].Matched)
 	assert.False(t, results[1].Matched)
+
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGeocoderClient_ReverseGeocode(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	fullAddr := sql.NullString{String: "200 Main St, Tampa, FL 33602", Valid: true}
+	state := sql.NullString{String: "FL", Valid: true}
+	zip := sql.NullString{String: "33602", Valid: true}
+	countyFIPS := sql.NullString{String: "12057", Valid: true}
+
+	mock.ExpectQuery(`SELECT\s+pprint_addy`).
+		WithArgs(-82.46, 27.95).
+		WillReturnRows(
+			pgxmock.NewRows([]string{"pprint_addy", "stateusps", "zip", "county_fips", "rating"}).
+				AddRow(fullAddr, state, zip, countyFIPS, 5),
+		)
+
+	g := NewClient(mock, WithCacheEnabled(false))
+	result, err := g.ReverseGeocode(context.Background(), 27.95, -82.46)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "200 Main St, Tampa, FL 33602", result.Street)
+	assert.Equal(t, "FL", result.State)
+	assert.Equal(t, "33602", result.ZipCode)
+	assert.Equal(t, "12057", result.CountyFIPS)
+	assert.Equal(t, 5, result.Rating)
 
 	require.NoError(t, mock.ExpectationsWereMet())
 }

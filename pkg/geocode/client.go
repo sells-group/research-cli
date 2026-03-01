@@ -18,6 +18,9 @@ type Client interface {
 
 	// BatchGeocode geocodes multiple addresses.
 	BatchGeocode(ctx context.Context, addrs []AddressInput) ([]Result, error)
+
+	// ReverseGeocode converts lat/lng to a street address.
+	ReverseGeocode(ctx context.Context, lat, lng float64) (*ReverseResult, error)
 }
 
 // AddressInput represents an address to geocode.
@@ -77,12 +80,20 @@ func WithBatchConcurrency(n int) Option {
 	}
 }
 
+// WithCacheTable sets the cache table name. Default is "public.geocode_cache".
+func WithCacheTable(table string) Option {
+	return func(g *geocoder) {
+		g.cacheTable = table
+	}
+}
+
 type geocoder struct {
 	pool             db.Pool
 	cacheEnabled     bool
 	maxRating        int
 	cacheTTLDays     int
 	batchConcurrency int
+	cacheTable       string
 }
 
 // NewClient creates a new geocoding Client backed by PostGIS tiger geocoder.
@@ -157,6 +168,11 @@ func (g *geocoder) BatchGeocode(ctx context.Context, addrs []AddressInput) ([]Re
 
 	_ = eg.Wait() // errors are swallowed per-address above
 	return results, nil
+}
+
+// ReverseGeocode implements Client by delegating to the package-level function.
+func (g *geocoder) ReverseGeocode(ctx context.Context, lat, lng float64) (*ReverseResult, error) {
+	return ReverseGeocode(ctx, g.pool, lat, lng)
 }
 
 // formatOneLine formats an address as a single line for the geocoder.
