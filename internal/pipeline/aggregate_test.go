@@ -605,6 +605,48 @@ func TestInjectPageMetadata(t *testing.T) {
 		assert.Equal(t, 0.95, byField["google_reviews_rating"].Confidence)
 	})
 
+	t.Run("google_api source gets 0.98 confidence", func(t *testing.T) {
+		pages := []model.CrawledPage{
+			{
+				Metadata: &model.PageMetadata{
+					ReviewCount: 50,
+					Rating:      4.0,
+					Source:      "google_api",
+				},
+			},
+		}
+		result := InjectPageMetadata(nil, pages)
+		assert.Len(t, result, 2)
+
+		byField := make(map[string]model.ExtractionAnswer)
+		for _, a := range result {
+			byField[a.FieldKey] = a
+		}
+		assert.Equal(t, 0.98, byField["google_reviews_count"].Confidence)
+		assert.Equal(t, 0.98, byField["google_reviews_rating"].Confidence)
+	})
+
+	t.Run("jina_search source gets 0.85 confidence", func(t *testing.T) {
+		pages := []model.CrawledPage{
+			{
+				Metadata: &model.PageMetadata{
+					ReviewCount: 30,
+					Rating:      3.5,
+					Source:      "jina_search",
+				},
+			},
+		}
+		result := InjectPageMetadata(nil, pages)
+		assert.Len(t, result, 2)
+
+		byField := make(map[string]model.ExtractionAnswer)
+		for _, a := range result {
+			byField[a.FieldKey] = a
+		}
+		assert.Equal(t, 0.85, byField["google_reviews_count"].Confidence)
+		assert.Equal(t, 0.85, byField["google_reviews_rating"].Confidence)
+	})
+
 	t.Run("perplexity source gets 0.70 confidence", func(t *testing.T) {
 		pages := []model.CrawledPage{
 			{
@@ -667,8 +709,8 @@ func TestInjectPageMetadata(t *testing.T) {
 		result := InjectPageMetadata(nil, pages, preSeeded)
 		assert.Len(t, result, 1)
 
-		// Close to pre-seed, confidence stays at 0.70
-		assert.Equal(t, 0.70, result[0].Confidence)
+		// Close to pre-seed, confidence boosted to 0.80
+		assert.Equal(t, 0.80, result[0].Confidence)
 	})
 
 	t.Run("injects phone from metadata", func(t *testing.T) {
@@ -685,6 +727,56 @@ func TestInjectPageMetadata(t *testing.T) {
 		assert.Equal(t, "5617936029", result[0].Value)
 		assert.Equal(t, 0.90, result[0].Confidence)
 		assert.Equal(t, "website_metadata", result[0].Source)
+	})
+
+	t.Run("phone cross-validated against pre-seeded boosts confidence", func(t *testing.T) {
+		pages := []model.CrawledPage{
+			{
+				Metadata: &model.PageMetadata{
+					Phone: "5617936029",
+				},
+			},
+		}
+		preSeeded := map[string]any{
+			"phone": "561-793-6029",
+		}
+		result := InjectPageMetadata(nil, pages, preSeeded)
+		assert.Len(t, result, 1)
+		assert.Equal(t, 0.95, result[0].Confidence)
+	})
+
+	t.Run("phone disagreement with pre-seeded lowers confidence", func(t *testing.T) {
+		pages := []model.CrawledPage{
+			{
+				Metadata: &model.PageMetadata{
+					Phone: "5617936029",
+				},
+			},
+		}
+		preSeeded := map[string]any{
+			"phone": "999-888-7777",
+		}
+		result := InjectPageMetadata(nil, pages, preSeeded)
+		assert.Len(t, result, 1)
+		assert.Equal(t, 0.70, result[0].Confidence)
+	})
+
+	t.Run("perplexity review count boosted when close to pre-seed", func(t *testing.T) {
+		pages := []model.CrawledPage{
+			{
+				Metadata: &model.PageMetadata{
+					ReviewCount: 78,
+					Source:      "perplexity",
+				},
+			},
+		}
+		preSeeded := map[string]any{
+			"google_reviews_count": 80,
+		}
+		result := InjectPageMetadata(nil, pages, preSeeded)
+		assert.Len(t, result, 1)
+		// Close to pre-seed, confidence boosted to 0.80
+		assert.Equal(t, 0.80, result[0].Confidence)
 	})
 }
 
