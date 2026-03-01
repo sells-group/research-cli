@@ -75,7 +75,7 @@ Use --force to ignore ShouldRun() scheduling logic.`,
 		// Build engine dependencies.
 		syncLog := fedsync.NewSyncLog(pool)
 		reg := geoscraper.NewRegistry()
-		scraper.RegisterAll(reg)
+		scraper.RegisterAll(reg, cfg)
 		queue := geospatial.NewGeocodeQueue(pool, nil, cfg.Geo.BatchSize)
 		engine := geoscraper.NewEngine(pool, f, syncLog, reg, queue, runDir)
 
