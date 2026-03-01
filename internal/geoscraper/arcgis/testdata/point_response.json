@@ -1,0 +1,31 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "NAME": "Plant Alpha",
+        "TYPE": "GAS",
+        "CAPACITY_MW": 500.5,
+        "STATE": "TX"
+      },
+      "geometry": {
+        "x": -95.5,
+        "y": 30.2
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "NAME": "Plant Beta",
+        "TYPE": "SOLAR",
+        "CAPACITY_MW": 200.0,
+        "STATE": "CA"
+      },
+      "geometry": {
+        "x": -118.2,
+        "y": 34.0
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

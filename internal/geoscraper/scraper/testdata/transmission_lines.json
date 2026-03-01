@@ -1,0 +1,17 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 301,
+        "OWNER": "Texas Power Co",
+        "VOLTAGE": 500.0,
+        "STATUS": "IN SERVICE",
+        "NAICS_DESC": "Electric Power Transmission"
+      },
+      "geometry": {
+        "paths": [[[-97.0, 30.0], [-96.0, 31.0], [-95.0, 32.0]]]
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

@@ -1,0 +1,18 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 201,
+        "NAME": "Downtown Substation",
+        "MAX_VOLT": 345.0,
+        "STATE": "TX",
+        "STATUS": "IN SERVICE"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

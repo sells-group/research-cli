@@ -1,0 +1,33 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 101,
+        "NAME": "Sunrise Solar Farm",
+        "TYPE": "SOLAR",
+        "CAPACITY_MW": 250.0,
+        "STATE": "TX",
+        "COUNTY": "Travis"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 102,
+        "NAME": "River Gas Plant",
+        "TYPE": "GAS",
+        "CAPACITY_MW": 800.5,
+        "STATE": "TX",
+        "COUNTY": "Harris"
+      },
+      "geometry": {
+        "x": -95.3698,
+        "y": 29.7604
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}
