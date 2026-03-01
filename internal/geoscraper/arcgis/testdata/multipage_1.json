@@ -1,0 +1,13 @@
+{
+  "features": [
+    {
+      "attributes": {"OBJECTID": 1, "NAME": "Item 1"},
+      "geometry": {"x": -95.0, "y": 30.0}
+    },
+    {
+      "attributes": {"OBJECTID": 2, "NAME": "Item 2"},
+      "geometry": {"x": -96.0, "y": 31.0}
+    }
+  ],
+  "exceededTransferLimit": true
+}
