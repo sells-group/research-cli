@@ -56,11 +56,11 @@ Use --force to ignore ShouldRun() scheduling logic.`,
 
 		// Create temp directory with a unique run-specific subdirectory.
 		tempDir := cfg.Fedsync.TempDir
-		if err := os.MkdirAll(tempDir, 0o755); err != nil {
+		if err := os.MkdirAll(tempDir, 0o750); err != nil {
 			return eris.Wrapf(err, "geo scrape: create temp dir %s", tempDir)
 		}
 		runDir := filepath.Join(tempDir, fmt.Sprintf("geo-run-%d", time.Now().UnixNano()))
-		if err := os.MkdirAll(runDir, 0o755); err != nil {
+		if err := os.MkdirAll(runDir, 0o750); err != nil {
 			return eris.Wrapf(err, "geo scrape: create run dir %s", runDir)
 		}
 		defer os.RemoveAll(runDir) //nolint:errcheck
