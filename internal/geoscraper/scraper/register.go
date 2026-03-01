@@ -10,8 +10,13 @@ func RegisterHIFLD(reg *geoscraper.Registry) {
 	reg.Register(&HIFLDPipelines{})
 }
 
+// RegisterFEMA registers all FEMA scrapers.
+func RegisterFEMA(reg *geoscraper.Registry) {
+	reg.Register(&FEMAFloodZones{})
+}
+
 // RegisterAll registers all geo scraper implementations.
-// Future additions (FEMA, EPA, etc.) should add their own Register* calls here.
 func RegisterAll(reg *geoscraper.Registry) {
 	RegisterHIFLD(reg)
+	RegisterFEMA(reg)
 }

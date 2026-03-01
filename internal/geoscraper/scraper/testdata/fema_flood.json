@@ -1,0 +1,39 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 501,
+        "FLD_ZONE": "AE",
+        "FLD_AR_ID": "48201C0100F",
+        "DFIRM_ID": "48201C",
+        "SFHA_TF": "T",
+        "STATIC_BFE": 35.2,
+        "DEPTH": null,
+        "ZONE_SUBTY": "FLOODWAY",
+        "LEN_UNIT": "FEET",
+        "SOURCE_CIT": "48201C_STUDY1"
+      },
+      "geometry": {
+        "rings": [[[-95.4, 29.7], [-95.3, 29.7], [-95.3, 29.8], [-95.4, 29.8], [-95.4, 29.7]]]
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 502,
+        "FLD_ZONE": "X",
+        "FLD_AR_ID": "48201C0101F",
+        "DFIRM_ID": "48201C",
+        "SFHA_TF": "F",
+        "STATIC_BFE": -9999.0,
+        "DEPTH": null,
+        "ZONE_SUBTY": "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+        "LEN_UNIT": "FEET",
+        "SOURCE_CIT": "48201C_STUDY1"
+      },
+      "geometry": {
+        "rings": [[[-95.2, 29.6], [-95.1, 29.6], [-95.1, 29.7], [-95.2, 29.7], [-95.2, 29.6]]]
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

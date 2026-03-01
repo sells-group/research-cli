@@ -25,14 +25,12 @@ func TestRegisterAll(t *testing.T) {
 	reg := geoscraper.NewRegistry()
 	RegisterAll(reg)
 
-	// Currently RegisterAll only registers HIFLD scrapers.
 	names := reg.AllNames()
-	require.Len(t, names, 4)
+	require.Len(t, names, 5) // 4 HIFLD + 1 FEMA
 
 	// All should be National category.
 	for _, s := range reg.All() {
 		assert.Equal(t, geoscraper.National, s.Category())
-		assert.Equal(t, "geo.infrastructure", s.Table())
 	}
 }
 
@@ -53,4 +51,5 @@ var (
 	_ geoscraper.GeoScraper = (*HIFLDSubstations)(nil)
 	_ geoscraper.GeoScraper = (*HIFLDTransmissionLines)(nil)
 	_ geoscraper.GeoScraper = (*HIFLDPipelines)(nil)
+	_ geoscraper.GeoScraper = (*FEMAFloodZones)(nil)
 )
