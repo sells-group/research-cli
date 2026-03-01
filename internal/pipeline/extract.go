@@ -190,10 +190,10 @@ func FormatPreSeededContext(preSeeded map[string]any) string {
 		fmt.Fprintf(&b, "Employee Count (industry estimate): %v — use this as baseline unless website explicitly states a different current headcount\n", v)
 	}
 	if v, ok := preSeeded["naics_code"]; ok {
-		fmt.Fprintf(&b, "NAICS Code: %v\n", v)
+		fmt.Fprintf(&b, "NAICS Code: %v — use this code if the website's services are consistent with this industry classification. Only assign a different code if the website clearly indicates a different primary industry.\n", v)
 	}
 	if v, ok := preSeeded["description"]; ok {
-		fmt.Fprintf(&b, "Business Description: %v\n", v)
+		fmt.Fprintf(&b, "Business Description: %v — use this as baseline description unless the website clearly describes a different business.\n", v)
 	}
 	if v, ok := preSeeded["revenue_range"]; ok {
 		fmt.Fprintf(&b, "Revenue Estimate: %v\n", v)

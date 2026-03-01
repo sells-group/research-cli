@@ -404,6 +404,9 @@ func InjectPageMetadata(answers []model.ExtractionAnswer, pages []model.CrawledP
 						prox := intProximity(psCount, p.Metadata.ReviewCount)
 						if prox < 0.5 {
 							reviewConf = 0.50 // Below gap-fill threshold (0.60)
+						} else {
+							// Cross-check passed — Perplexity agrees with pre-seeded.
+							reviewConf = 0.80
 						}
 					}
 				}
@@ -416,8 +419,23 @@ func InjectPageMetadata(answers []model.ExtractionAnswer, pages []model.CrawledP
 				p.Metadata.Rating, conf, "google_maps_metadata")
 		}
 		if p.Metadata.Phone != "" {
+			phoneConf := 0.90
+			// Cross-validate regex phone against pre-seeded phone.
+			if ps != nil {
+				if psPhone, ok := ps["phone"]; ok {
+					psNorm := normalizePhone(fmt.Sprintf("%v", psPhone))
+					regexNorm := normalizePhone(p.Metadata.Phone)
+					if psNorm != "" && regexNorm != "" {
+						if psNorm == regexNorm || strings.HasSuffix(psNorm, regexNorm) || strings.HasSuffix(regexNorm, psNorm) {
+							phoneConf = 0.95 // Cross-validated
+						} else {
+							phoneConf = 0.70 // Disagrees with pre-seeded
+						}
+					}
+				}
+			}
 			answers = appendOrUpgrade(answers, "phone",
-				p.Metadata.Phone, 0.90, "website_metadata")
+				p.Metadata.Phone, phoneConf, "website_metadata")
 		}
 	}
 	return answers

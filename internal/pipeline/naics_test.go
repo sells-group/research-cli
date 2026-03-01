@@ -303,6 +303,47 @@ func TestValidateAndCrossReferenceNAICS(t *testing.T) {
 		require.NotNil(t, naics)
 		assert.LessOrEqual(t, naics.Confidence, 0.95)
 	})
+
+	t.Run("pre-seeded NAICS match boosts confidence", func(t *testing.T) {
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "naics_code", Value: "541512", Confidence: 0.7, Tier: 1, Source: "website"},
+		}
+		preSeeded := map[string]any{"naics_code": "541512"}
+		result := ValidateAndCrossReferenceNAICS(answers, nil, preSeeded)
+
+		naics := findAnswer(result, "naics_code")
+		require.NotNil(t, naics)
+		assert.Contains(t, naics.Source, "preseeded_match")
+		assert.Greater(t, naics.Confidence, 0.7)
+	})
+
+	t.Run("pre-seeded sector mismatch overrides low-confidence extraction", func(t *testing.T) {
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "naics_code", Value: "541512", Confidence: 0.35, Tier: 1, Source: "website"},
+		}
+		preSeeded := map[string]any{"naics_code": "236115"}
+		result := ValidateAndCrossReferenceNAICS(answers, nil, preSeeded)
+
+		naics := findAnswer(result, "naics_code")
+		require.NotNil(t, naics)
+		assert.Equal(t, "236115", naics.Value)
+		assert.Contains(t, naics.Source, "preseeded_override")
+		assert.Equal(t, 0.60, naics.Confidence)
+	})
+
+	t.Run("pre-seeded sector mismatch does not override high-confidence", func(t *testing.T) {
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "naics_code", Value: "541512", Confidence: 0.8, Tier: 1, Source: "website"},
+		}
+		preSeeded := map[string]any{"naics_code": "236115"}
+		result := ValidateAndCrossReferenceNAICS(answers, nil, preSeeded)
+
+		naics := findAnswer(result, "naics_code")
+		require.NotNil(t, naics)
+		// Should keep extracted value since confidence >= 0.5
+		assert.NotEqual(t, "236115", naics.Value)
+		assert.NotContains(t, naics.Source, "preseeded_override")
+	})
 }
 
 func TestExtractIndustryKeywords(t *testing.T) {
