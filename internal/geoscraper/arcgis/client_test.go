@@ -249,3 +249,148 @@ func TestQueryAll_InvalidJSON(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode response")
 }
+
+func TestGeometry_Centroid_Polygon(t *testing.T) {
+	g := Geometry{
+		Rings: [][][2]float64{
+			{{-84.3, 33.7}, {-84.2, 33.7}, {-84.2, 33.8}, {-84.3, 33.8}, {-84.3, 33.7}},
+		},
+	}
+
+	lat, lon := g.Centroid()
+	// avg lat = (33.7+33.7+33.8+33.8+33.7)/5 = 33.74
+	// avg lon = (-84.3-84.2-84.2-84.3-84.3)/5 = -84.26
+	assert.InDelta(t, 33.74, lat, 0.001)
+	assert.InDelta(t, -84.26, lon, 0.001)
+}
+
+func TestGeometry_Centroid_MultiRing(t *testing.T) {
+	g := Geometry{
+		Rings: [][][2]float64{
+			{{-100.0, 30.0}, {-90.0, 40.0}},
+			{{-80.0, 30.0}, {-70.0, 40.0}},
+		},
+	}
+
+	lat, lon := g.Centroid()
+	assert.InDelta(t, 35.0, lat, 0.001)
+	assert.InDelta(t, -85.0, lon, 0.001)
+}
+
+func TestGeometry_BBox_Polygon(t *testing.T) {
+	g := Geometry{
+		Rings: [][][2]float64{
+			{{-84.3, 33.7}, {-84.2, 33.7}, {-84.2, 33.8}, {-84.3, 33.8}, {-84.3, 33.7}},
+		},
+	}
+
+	bbox := g.BBox()
+	require.Len(t, bbox, 4)
+	assert.InDelta(t, -84.3, bbox[0], 0.001)
+	assert.InDelta(t, 33.7, bbox[1], 0.001)
+	assert.InDelta(t, -84.2, bbox[2], 0.001)
+	assert.InDelta(t, 33.8, bbox[3], 0.001)
+}
+
+func TestGeometry_RingsToEWKT_Simple(t *testing.T) {
+	g := Geometry{
+		Rings: [][][2]float64{
+			{{-84.3, 33.7}, {-84.2, 33.7}, {-84.2, 33.8}, {-84.3, 33.8}, {-84.3, 33.7}},
+		},
+	}
+
+	ewkt := g.RingsToEWKT()
+	assert.Equal(t, "SRID=4326;MULTIPOLYGON(((-84.3 33.7,-84.2 33.7,-84.2 33.8,-84.3 33.8,-84.3 33.7)))", ewkt)
+}
+
+func TestGeometry_RingsToEWKT_MultiRing(t *testing.T) {
+	g := Geometry{
+		Rings: [][][2]float64{
+			{{-84.3, 33.7}, {-84.2, 33.7}, {-84.2, 33.8}, {-84.3, 33.7}},
+			{{-95.0, 29.0}, {-94.0, 29.0}, {-94.0, 30.0}, {-95.0, 29.0}},
+		},
+	}
+
+	ewkt := g.RingsToEWKT()
+	assert.Contains(t, ewkt, "SRID=4326;MULTIPOLYGON(((")
+	assert.Contains(t, ewkt, "-84.3 33.7")
+	assert.Contains(t, ewkt, "-95 29")
+	assert.Contains(t, ewkt, ")),((")
+}
+
+func TestGeometry_RingsToEWKT_Empty(t *testing.T) {
+	g := Geometry{}
+	assert.Equal(t, "", g.RingsToEWKT())
+}
+
+func TestQueryAll_OutSR(t *testing.T) {
+	var receivedURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedURL = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"features":[],"exceededTransferLimit":false}`))
+	}))
+	defer srv.Close()
+
+	err := QueryAll(context.Background(), newTestFetcher(), QueryConfig{
+		BaseURL: srv.URL + "/query",
+		OutSR:   4326,
+	}, func(_ []Feature) error {
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Contains(t, receivedURL, "outSR=4326")
+}
+
+func TestQueryAll_OutSR_Zero(t *testing.T) {
+	var receivedURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedURL = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"features":[],"exceededTransferLimit":false}`))
+	}))
+	defer srv.Close()
+
+	err := QueryAll(context.Background(), newTestFetcher(), QueryConfig{
+		BaseURL: srv.URL + "/query",
+	}, func(_ []Feature) error {
+		return nil
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, receivedURL, "outSR")
+}
+
+func TestQueryAll_PolygonResponse(t *testing.T) {
+	data, err := os.ReadFile("testdata/polygon_response.json")
+	require.NoError(t, err)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	var collected []Feature
+	err = QueryAll(context.Background(), newTestFetcher(), QueryConfig{
+		BaseURL: srv.URL + "/query",
+	}, func(features []Feature) error {
+		collected = append(collected, features...)
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Len(t, collected, 2)
+
+	// Verify polygon geometry was parsed.
+	require.NotNil(t, collected[0].Geometry)
+	assert.Len(t, collected[0].Geometry.Rings, 1)
+	assert.Len(t, collected[0].Geometry.Rings[0], 5)
+
+	// Verify centroid works for polygon.
+	lat, lon := collected[0].Geometry.Centroid()
+	assert.InDelta(t, 33.74, lat, 0.01)
+	assert.InDelta(t, -84.26, lon, 0.01)
+
+	// Verify EWKT conversion.
+	ewkt := collected[0].Geometry.RingsToEWKT()
+	assert.Contains(t, ewkt, "SRID=4326;MULTIPOLYGON")
+}

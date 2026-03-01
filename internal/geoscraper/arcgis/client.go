@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
@@ -25,6 +26,7 @@ type QueryConfig struct {
 	Where     string   // SQL WHERE clause (default "1=1")
 	OutFields []string // fields to return (default ["*"])
 	PageSize  int      // records per request (default 2000)
+	OutSR     int      // output spatial reference WKID (e.g., 4326 for WGS84); 0 = server default
 }
 
 // Feature represents a single ArcGIS feature with attributes and geometry.
@@ -33,16 +35,17 @@ type Feature struct {
 	Geometry   *Geometry      `json:"geometry"`
 }
 
-// Geometry holds either point (X/Y) or polyline (Paths) data from ArcGIS.
+// Geometry holds point (X/Y), polyline (Paths), or polygon (Rings) data from ArcGIS.
 type Geometry struct {
 	X     *float64       `json:"x,omitempty"`
 	Y     *float64       `json:"y,omitempty"`
 	Paths [][][2]float64 `json:"paths,omitempty"`
+	Rings [][][2]float64 `json:"rings,omitempty"`
 }
 
 // Centroid returns the latitude and longitude for this geometry.
 // For points it returns Y (lat) and X (lon) directly.
-// For polylines it returns the average of all vertex coordinates.
+// For polylines and polygons it returns the average of all vertex coordinates.
 func (g *Geometry) Centroid() (lat, lon float64) {
 	if g.X != nil && g.Y != nil {
 		return *g.Y, *g.X
@@ -57,40 +60,83 @@ func (g *Geometry) Centroid() (lat, lon float64) {
 			count++
 		}
 	}
+	for _, ring := range g.Rings {
+		for _, coord := range ring {
+			sumLon += coord[0]
+			sumLat += coord[1]
+			count++
+		}
+	}
 	if count == 0 {
 		return 0, 0
 	}
 	return sumLat / float64(count), sumLon / float64(count)
 }
 
-// BBox returns the bounding box [minLon, minLat, maxLon, maxLat] for polyline geometries.
-// Returns nil for point geometries.
+// BBox returns the bounding box [minLon, minLat, maxLon, maxLat] for polyline
+// and polygon geometries. Returns nil for point geometries.
 func (g *Geometry) BBox() []float64 {
-	if len(g.Paths) == 0 {
+	if len(g.Paths) == 0 && len(g.Rings) == 0 {
 		return nil
 	}
 
 	minLon, minLat := 180.0, 90.0
 	maxLon, maxLat := -180.0, -90.0
 
+	updateBounds := func(coord [2]float64) {
+		if coord[0] < minLon {
+			minLon = coord[0]
+		}
+		if coord[0] > maxLon {
+			maxLon = coord[0]
+		}
+		if coord[1] < minLat {
+			minLat = coord[1]
+		}
+		if coord[1] > maxLat {
+			maxLat = coord[1]
+		}
+	}
+
 	for _, path := range g.Paths {
 		for _, coord := range path {
-			if coord[0] < minLon {
-				minLon = coord[0]
-			}
-			if coord[0] > maxLon {
-				maxLon = coord[0]
-			}
-			if coord[1] < minLat {
-				minLat = coord[1]
-			}
-			if coord[1] > maxLat {
-				maxLat = coord[1]
-			}
+			updateBounds(coord)
+		}
+	}
+	for _, ring := range g.Rings {
+		for _, coord := range ring {
+			updateBounds(coord)
 		}
 	}
 
 	return []float64{minLon, minLat, maxLon, maxLat}
+}
+
+// RingsToEWKT converts ArcGIS polygon rings to an EWKT string for PostGIS:
+// SRID=4326;MULTIPOLYGON(((x y, x y, ...))). Each ring becomes a separate
+// polygon within the MultiPolygon.
+func (g *Geometry) RingsToEWKT() string {
+	if len(g.Rings) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("SRID=4326;MULTIPOLYGON(((")
+
+	for i, ring := range g.Rings {
+		if i > 0 {
+			sb.WriteString(")),((")
+		}
+		for j, coord := range ring {
+			if j > 0 {
+				sb.WriteString(",")
+			}
+			fmt.Fprintf(&sb, "%g %g", coord[0], coord[1])
+		}
+	}
+
+	sb.WriteString(")))")
+	return sb.String()
 }
 
 // Response is the Esri JSON envelope returned by FeatureServer queries.
@@ -138,7 +184,7 @@ func QueryAll(ctx context.Context, f fetcher.Fetcher, cfg QueryConfig, callback 
 		default:
 		}
 
-		u, err := buildURL(cfg.BaseURL, where, outFields, pageSize, offset)
+		u, err := buildURL(cfg.BaseURL, where, outFields, pageSize, offset, cfg.OutSR)
 		if err != nil {
 			return eris.Wrap(err, "arcgis: build query URL")
 		}
@@ -178,7 +224,7 @@ func QueryAll(ctx context.Context, f fetcher.Fetcher, cfg QueryConfig, callback 
 }
 
 // buildURL constructs the ArcGIS query URL with pagination parameters.
-func buildURL(baseURL, where, outFields string, pageSize, offset int) (string, error) {
+func buildURL(baseURL, where, outFields string, pageSize, offset, outSR int) (string, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return "", eris.Wrapf(err, "parse base URL %q", baseURL)
@@ -191,6 +237,9 @@ func buildURL(baseURL, where, outFields string, pageSize, offset int) (string, e
 	q.Set("f", "json")
 	q.Set("resultRecordCount", strconv.Itoa(pageSize))
 	q.Set("resultOffset", strconv.Itoa(offset))
+	if outSR > 0 {
+		q.Set("outSR", strconv.Itoa(outSR))
+	}
 	u.RawQuery = q.Encode()
 
 	return u.String(), nil
