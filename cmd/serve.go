@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -14,145 +12,11 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/api"
 	"github.com/sells-group/research-cli/internal/monitoring"
-	"github.com/sells-group/research-cli/internal/pipeline"
-	"github.com/sells-group/research-cli/internal/store"
 )
 
 var servePort int
-
-// webhookSemSize limits concurrent webhook pipeline executions.
-const webhookSemSize = 20
-
-// buildMux constructs the HTTP handler for the webhook server.
-// It returns the mux and a drain function that waits for all in-flight
-// enrichment jobs to complete. The caller should invoke drain after the
-// HTTP server has stopped accepting new requests.
-func buildMux(_ context.Context, p *pipeline.Pipeline, st store.Store, webhookSecret string, collector *monitoring.Collector) (*http.ServeMux, func()) {
-	mux := http.NewServeMux()
-	sem := make(chan struct{}, webhookSemSize)
-	var wg sync.WaitGroup
-
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if st != nil {
-			if err := st.Ping(r.Context()); err != nil {
-				w.WriteHeader(http.StatusServiceUnavailable)
-				_ = json.NewEncoder(w).Encode(map[string]string{"status": "unhealthy", "error": err.Error()})
-				return
-			}
-		}
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	})
-
-	mux.HandleFunc("POST /webhook/enrich", func(w http.ResponseWriter, r *http.Request) {
-		// Authenticate if a webhook secret is configured.
-		if webhookSecret != "" {
-			auth := r.Header.Get("Authorization")
-			if auth != "Bearer "+webhookSecret {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-				return
-			}
-		}
-
-		var req struct {
-			URL          string `json:"url"`
-			SalesforceID string `json:"salesforce_id"`
-			Name         string `json:"name"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
-			return
-		}
-
-		if req.URL == "" {
-			http.Error(w, `{"error":"url is required"}`, http.StatusBadRequest)
-			return
-		}
-
-		// Check semaphore capacity before accepting.
-		select {
-		case sem <- struct{}{}:
-			// Acquired slot
-		default:
-			http.Error(w, `{"error":"too many concurrent requests"}`, http.StatusServiceUnavailable)
-			return
-		}
-
-		company := model.Company{
-			URL:          req.URL,
-			SalesforceID: req.SalesforceID,
-			Name:         req.Name,
-		}
-
-		// Run enrichment asynchronously with a background context so
-		// in-flight jobs are not cancelled immediately on SIGINT.
-		wg.Add(1)
-		go func() {
-			defer func() { <-sem }()
-			defer wg.Done()
-			defer func() {
-				if r := recover(); r != nil {
-					zap.L().Error("webhook enrichment panicked",
-						zap.String("company", company.URL),
-						zap.Any("panic", r),
-						zap.Stack("stack"),
-					)
-				}
-			}()
-			if p == nil {
-				zap.L().Error("webhook enrichment skipped: pipeline not initialized",
-					zap.String("company", company.URL))
-				return
-			}
-			jobCtx, jobCancel := context.WithTimeout(context.Background(), 30*time.Minute)
-			defer jobCancel()
-			result, err := p.Run(jobCtx, company)
-			if err != nil {
-				zap.L().Error("webhook enrichment failed",
-					zap.String("company", company.URL),
-					zap.Error(err),
-				)
-				return
-			}
-			zap.L().Info("webhook enrichment complete",
-				zap.String("company", company.URL),
-				zap.Float64("score", result.Score),
-			)
-		}()
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"status":  "accepted",
-			"company": req.URL,
-		})
-	})
-
-	if collector != nil {
-		mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
-			lookback := cfg.Monitoring.LookbackWindowHours
-			if lookback <= 0 {
-				lookback = 24
-			}
-			snap, err := collector.Collect(r.Context(), lookback)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(snap)
-		})
-	}
-
-	drain := func() {
-		wg.Wait()
-	}
-	return mux, drain
-}
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -184,10 +48,11 @@ var serveCmd = &cobra.Command{
 			)
 		}
 
-		mux, drain := buildMux(ctx, env.Pipeline, env.Store, cfg.Server.WebhookSecret, collector)
+		h := api.NewHandlers(cfg, env.Store, env.Pipeline, collector)
+		router := api.Router(h)
 		port := resolvePort(servePort, cfg.Server.Port)
-		srvErr := startServer(ctx, mux, port)
-		drain() // wait for in-flight enrichment jobs after server shutdown
+		srvErr := startServer(ctx, router, port)
+		h.Drain() // wait for in-flight enrichment jobs after server shutdown
 		return srvErr
 	},
 }
