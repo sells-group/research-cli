@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-commit hook: runs go fmt, go vet, and golangci-lint on staged Go files.
+# Pre-commit hook: runs go fmt, go fix, go vet, and golangci-lint on staged Go files.
 # Install: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 #   — or — ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
 
@@ -26,14 +26,26 @@ if [ -n "$UNFORMATTED" ]; then
   exit 1
 fi
 
-# 2. go vet — run on affected packages.
+# 2. go fix — check if staged files need go fix rewrites.
+GO_VER=$(sed -n 's/^go \([0-9]*\.[0-9]*\).*/go\1/p' go.mod)
+echo "pre-commit: go fix..."
+FIXDIFF=$(go tool fix -diff -go "$GO_VER" $STAGED 2>&1 || true)
+if [ -n "$FIXDIFF" ]; then
+  echo "ERROR: the following files need go fix:"
+  echo "$FIXDIFF"
+  echo ""
+  echo "Run: go fix ./..."
+  exit 1
+fi
+
+# 3. go vet — run on affected packages.
 echo "pre-commit: go vet..."
 if ! go vet $PACKAGES 2>&1; then
   echo "ERROR: go vet failed"
   exit 1
 fi
 
-# 3. golangci-lint — run on affected packages (uses .golangci.yml config).
+# 4. golangci-lint — run on affected packages (uses .golangci.yml config).
 if command -v golangci-lint &>/dev/null; then
   LINTER=golangci-lint
 elif [ -x "$HOME/go/bin/golangci-lint" ]; then
