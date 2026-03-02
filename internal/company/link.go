@@ -60,6 +60,14 @@ func (l *Linker) LinkFedData(ctx context.Context, companyID int64) (int, error) 
 			}
 			matched += n
 		}
+		if id.System == SystemFDIC {
+			n, err := l.matchFDIC(ctx, companyID, id.Identifier)
+			if err != nil {
+				log.Warn("link: FDIC match failed", zap.Error(err))
+				continue
+			}
+			matched += n
+		}
 		if id.System == SystemEIN {
 			n, err := l.matchEIN(ctx, companyID, id.Identifier)
 			if err != nil {
@@ -98,6 +106,31 @@ func (l *Linker) LinkFedData(ctx context.Context, companyID int64) (int, error) 
 
 	log.Info("link: fed_data matching complete", zap.Int("matches", matched))
 	return matched, nil
+}
+
+func (l *Linker) matchFDIC(ctx context.Context, companyID int64, cert string) (int, error) {
+	var name string
+	err := l.pool.QueryRow(ctx,
+		`SELECT name FROM fed_data.fdic_institutions WHERE cert = $1`, cert).
+		Scan(&name)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 0, nil
+		}
+		return 0, eris.Wrap(err, "link: query fdic_institutions")
+	}
+
+	m := &Match{
+		CompanyID:     companyID,
+		MatchedSource: "fdic_institutions",
+		MatchedKey:    cert,
+		MatchType:     "direct_fdic_cert",
+		Confidence:    ptrFloat(1.0),
+	}
+	if err := l.store.UpsertMatch(ctx, m); err != nil {
+		return 0, err
+	}
+	return 1, nil
 }
 
 func (l *Linker) matchCRD(ctx context.Context, companyID int64, crd string) (int, error) {
