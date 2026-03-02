@@ -47,7 +47,8 @@ func TestUSAspending_ClassifyAwardType(t *testing.T) {
 		code     string
 		expected string
 	}{
-		{"A", "contract"}, {"B", "contract"}, {"C", "contract"}, {"D", "contract"}, {"IDV", "contract"},
+		{"A", "contract"}, {"B", "contract"}, {"C", "contract"}, {"D", "contract"},
+		{"IDV", "contract"}, {"IDV_A", "contract"}, {"IDV_B", "contract"}, {"IDV_B_A", "contract"}, {"IDV_E", "contract"},
 		{"02", "grant"}, {"03", "grant"}, {"04", "grant"}, {"05", "grant"},
 		{"06", "direct_payment"}, {"10", "direct_payment"},
 		{"07", "loan"}, {"08", "loan"},
