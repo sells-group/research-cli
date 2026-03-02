@@ -82,6 +82,22 @@ func (l *Linker) LinkFedData(ctx context.Context, companyID int64) (int, error) 
 				matched += n
 			}
 		}
+		if id.System == SystemUEI {
+			n, err := l.matchUEI(ctx, companyID, id.Identifier)
+			if err != nil {
+				log.Warn("link: UEI match failed", zap.Error(err))
+				continue
+			}
+			matched += n
+		}
+		if id.System == SystemDUNS {
+			n, err := l.matchUSAspendingDUNS(ctx, companyID, id.Identifier)
+			if err != nil {
+				log.Warn("link: DUNS match failed", zap.Error(err))
+				continue
+			}
+			matched += n
+		}
 	}
 
 	// Pass 2: Exact name+state match against EDGAR entities.
@@ -312,6 +328,56 @@ func (l *Linker) matchEOBMF(ctx context.Context, companyID int64, ein string) (i
 		MatchedSource: "eo_bmf",
 		MatchedKey:    ein,
 		MatchType:     "direct_ein",
+		Confidence:    ptrFloat(1.0),
+	}
+	if err := l.store.UpsertMatch(ctx, m); err != nil {
+		return 0, err
+	}
+	return 1, nil
+}
+
+func (l *Linker) matchUEI(ctx context.Context, companyID int64, uei string) (int, error) {
+	var recipientName string
+	err := l.pool.QueryRow(ctx,
+		`SELECT recipient_name FROM fed_data.usaspending_awards WHERE recipient_uei = $1 LIMIT 1`, uei).
+		Scan(&recipientName)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 0, nil
+		}
+		return 0, eris.Wrap(err, "link: query usaspending_awards by UEI")
+	}
+
+	m := &Match{
+		CompanyID:     companyID,
+		MatchedSource: "usaspending_awards",
+		MatchedKey:    uei,
+		MatchType:     "direct_uei",
+		Confidence:    ptrFloat(1.0),
+	}
+	if err := l.store.UpsertMatch(ctx, m); err != nil {
+		return 0, err
+	}
+	return 1, nil
+}
+
+func (l *Linker) matchUSAspendingDUNS(ctx context.Context, companyID int64, duns string) (int, error) {
+	var recipientName string
+	err := l.pool.QueryRow(ctx,
+		`SELECT recipient_name FROM fed_data.usaspending_awards WHERE recipient_duns = $1 AND recipient_uei IS NULL LIMIT 1`, duns).
+		Scan(&recipientName)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 0, nil
+		}
+		return 0, eris.Wrap(err, "link: query usaspending_awards by DUNS")
+	}
+
+	m := &Match{
+		CompanyID:     companyID,
+		MatchedSource: "usaspending_awards",
+		MatchedKey:    duns,
+		MatchType:     "direct_duns",
 		Confidence:    ptrFloat(1.0),
 	}
 	if err := l.store.UpsertMatch(ctx, m); err != nil {
