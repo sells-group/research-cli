@@ -87,13 +87,13 @@ type bulkDownloadResponse struct {
 }
 
 // bulkDownloadStatus is the response from the status polling endpoint.
+// Some fields come back as strings or nulls from the API, so we use json.Number
+// for numeric fields that vary in representation.
 type bulkDownloadStatus struct {
-	Status         string  `json:"status"`
-	TotalRows      int     `json:"total_rows"`
-	TotalSize      float64 `json:"total_size"`
-	FileURL        string  `json:"file_url"`
-	Message        string  `json:"message"`
-	SecondsElapsed float64 `json:"seconds_elapsed"`
+	Status    string `json:"status"`
+	TotalRows int    `json:"total_rows"`
+	FileURL   string `json:"file_url"`
+	Message   string `json:"message"`
 }
 
 // USAspending syncs federal awards from USAspending.gov bulk download API.
