@@ -49,6 +49,8 @@ graph TB
         OSHA[OSHA ITA]
         EPA[EPA ECHO]
         FRED[FRED<br/>Economic series]
+        IRS[IRS<br/>EO BMF]
+        FDIC[FDIC<br/>BankFind]
     end
 
     CSV --> Pipeline
@@ -75,6 +77,8 @@ graph TB
     Fedsync --> OSHA
     Fedsync --> EPA
     Fedsync --> FRED
+    Fedsync --> IRS
+    Fedsync --> FDIC
 ```
 
 ## Component Diagram
@@ -106,7 +110,7 @@ graph LR
     subgraph "internal/fedsync/"
         Engine[dataset/engine.go]
         Registry[dataset/registry.go]
-        Datasets["30 dataset impls"]
+        Datasets["33 dataset impls"]
         Migrate[migrate.go]
         SyncLog[synclog.go]
         Transform[transform/]
@@ -202,13 +206,15 @@ graph LR
 | Census Bureau | CBP, SUSB, ABS, NES, ASM, M3, EconCensus | `internal/fetcher` | API key | 20 req/s |
 | BLS | QCEW, OEWS, ECI, LAUS | `internal/fetcher` | API key | 20 req/s |
 | FRED | Economic time series | `internal/fetcher` | API key | 20 req/s |
+| IRS SOI | Exempt Org BMF (4 regional CSVs) | `internal/fetcher` | None | — |
+| FDIC | BankFind institution data | `internal/fetcher` | None | — |
 
 ## Data Stores
 
 | Store | Technology | Schema | Purpose |
 |---|---|---|---|
 | Neon Postgres | pgx driver | `public` | Enrichment runs, answers, field values, provenance |
-| Neon Postgres | pgx driver | `fed_data` | 30 federal dataset tables + sync log + migrations |
+| Neon Postgres | pgx driver | `fed_data` | 33 federal dataset tables + sync log + migrations |
 | Neon Postgres | pgx driver | `geo` | Geocoded locations, spatial indexes, MVT tiles |
 | SQLite | modernc.org/sqlite (no CGO) | — | Local development (implements same `Store` interface) |
 | Notion | REST API | — | Lead queue, question registry, field registry |
@@ -217,6 +223,6 @@ graph LR
 ## Related Docs
 
 - [Pipeline Data Flow](data-flow.md) — phase-by-phase enrichment detail
-- [Fedsync Dataset Catalog](fedsync-catalog.md) — all 30 federal datasets
+- [Fedsync Dataset Catalog](fedsync-catalog.md) — all 33 federal datasets
 - [API Cost Model](cost-model.md) — pricing, optimization strategies, config knobs
 - [Operational Runbook](runbook.md) — deployment, monitoring, troubleshooting

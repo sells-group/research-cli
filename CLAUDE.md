@@ -2,7 +2,7 @@
 
 Automated account enrichment pipeline + federal data sync in Go. Two subsystems:
 1. **Enrichment:** Crawls company websites, classifies pages, extracts structured data via tiered Claude models (Haiku → Sonnet → Opus), writes to Salesforce. Leads enter via CSV → Notion; registries (questions + fields) live in Notion.
-2. **Fedsync:** Incrementally syncs 30 federal datasets (Census, BLS, SEC EDGAR, FINRA, DOL, SBA, OSHA, EPA, FRED) into `fed_data.*` Postgres tables. Runs daily via Fly.io cron, exits in <1s when no new data is expected.
+2. **Fedsync:** Incrementally syncs 33 federal datasets (Census, BLS, SEC EDGAR, FINRA, DOL, SBA, OSHA, EPA, FRED, IRS, FDIC) into `fed_data.*` Postgres tables. Runs daily via Fly.io cron, exits in <1s when no new data is expected.
 
 ## Stack
 
@@ -50,6 +50,8 @@ go run ./cmd fedsync xref                                 # build entity cross-r
 go run ./cmd geo backfill --limit 100                    # geocode ungeocoded addresses
 go run ./cmd geo backfill-adv --limit 1000               # stub + geocode ADV firms
 go run ./cmd geo backfill-5500 --limit 10000             # stub + geocode Form 5500 sponsors
+go run ./cmd geo backfill-990 --limit 10000              # stub + geocode IRS EO BMF orgs
+go run ./cmd geo backfill-fdic --limit 10000             # stub + geocode FDIC institutions
 
 # Salesforce report enrichment
 go run ./cmd sfreport --report-id 00O... --limit 5       # enrich from SF report
@@ -88,8 +90,8 @@ internal/
   fedsync/                  # federal data sync subsystem
     migrate.go              # embed.FS migration runner → fed_data.schema_migrations
     synclog.go              # sync log tracking (start, complete, fail)
-    migrations/*.sql        # 96 SQL migration files (001-092)
-    dataset/                # 30 dataset implementations
+    migrations/*.sql        # 99 SQL migration files (001-093)
+    dataset/                # 33 dataset implementations
       interface.go          # Dataset interface, Phase, Cadence, SyncResult
       schedule.go           # ShouldRun helpers: Daily, Weekly, Monthly, Quarterly, Annual
       registry.go           # Registry: maps names → Dataset impls
@@ -103,6 +105,7 @@ internal/
       econ_census.go        # Census Economic Census (Phase 1, annual)
       ppp.go                # SBA PPP loans (Phase 1, one-time)
       form_5500.go          # DOL Form 5500 ERISA plans (Phase 1, annual)
+      eo_bmf.go             # IRS Exempt Org BMF (Phase 1, monthly)
       adv_part1.go          # SEC ADV Part 1A (Phase 1B, monthly)
       ia_compilation.go     # IARD daily XML (Phase 1B, daily)
       holdings_13f.go       # SEC 13F holdings (Phase 1B, quarterly)
@@ -118,6 +121,7 @@ internal/
       asm.go                # Census ASM (Phase 2, annual)
       eci.go                # BLS ECI (Phase 2, quarterly)
       sec_enforcement.go    # SEC enforcement actions (Phase 2, monthly)
+      fdic_bankfind.go      # FDIC BankFind institutions (Phase 2, weekly)
       adv_part3.go          # CRS PDFs → OCR (Phase 3, monthly)
       adv_enrichment.go     # ADV brochure structured extraction (Phase 3, monthly)
       adv_extract.go        # ADV advisor answers via LLM (Phase 3, monthly)
@@ -197,7 +201,7 @@ pkg/
 - T3 gating: `"always"` or `"ambiguity_only"` (config)
 
 ### Fedsync — Dataset interface
-- Each of 30 datasets implements `Dataset` in `internal/fedsync/dataset/`
+- Each of 33 datasets implements `Dataset` in `internal/fedsync/dataset/`
 - `ShouldRun(now, lastSync)` checks cadence (daily/weekly/monthly/quarterly/annual)
 - `Sync(ctx, pool, fetcher, tempDir)` returns `*SyncResult` with row count + metadata
 - Engine iterates registry, checks `ShouldRun()`, calls `Sync()`, records in `fed_data.sync_log`
@@ -233,7 +237,7 @@ For entity-level federal datasets with company/firm records and addresses, a sta
 6. **Associate MSAs** — nearest CBSAs by distance (`geo.Associator`)
 7. **Link** via `public.company_matches` (`matched_source`, `matched_key`, `match_type`, confidence)
 
-Implemented: `cmd/geo_backfill_adv.go` (CRD→adv_firms) and `cmd/geo_backfill_5500.go` (EIN→form_5500). Future entity datasets (FDIC, NCUA, IRS 990) should follow the same pattern.
+Implemented: `cmd/geo_backfill_adv.go` (CRD→adv_firms), `cmd/geo_backfill_5500.go` (EIN→form_5500), `cmd/geo_backfill_990.go` (EIN→eo_bmf), and `cmd/geo_backfill_fdic.go` (FDIC cert→fdic_institutions). Future entity datasets (NCUA, USAspending) should follow the same pattern.
 
 ## API Client Pattern (`pkg/`)
 

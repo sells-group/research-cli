@@ -62,8 +62,10 @@
 | 49 | `cps_laus` | Fedsync | BLS | BLS API | Monthly | `fed_data.laus_data` | Implemented | `internal/fedsync/dataset/cps_laus.go` | — |
 | 50 | `m3` | Fedsync | Census | Census API | Monthly | `fed_data.m3_data` | Implemented | `internal/fedsync/dataset/m3.go` | — |
 | 51 | `form_5500` | Fedsync | DOL | DOL EFAST2 FOIA bulk CSV/ZIP | Annual | `fed_data.form_5500` + 3 | Implemented | `internal/fedsync/dataset/form_5500.go` | — |
+| 52 | `eo_bmf` | Fedsync | IRS | IRS SOI Exempt Org BMF CSV | Monthly | `fed_data.eo_bmf` | Implemented | `internal/fedsync/dataset/eo_bmf.go` | SELDEV-737 |
+| 53 | `fdic_bankfind` | Fedsync | FDIC | FDIC BankFind REST API | Weekly | `fed_data.fdic_institutions` | Implemented | `internal/fedsync/dataset/fdic_bankfind.go` | SELDEV-736 |
 
-**Counts:** 9 enrichment + 7 geo (on main) + 4 geo (merged, other branch) + 31 fedsync = **51 implemented/merged**.
+**Counts:** 9 enrichment + 7 geo (on main) + 4 geo (merged, other branch) + 33 fedsync = **53 implemented/merged**.
 Planned scrapers are listed in [Planned Scrapers & Roadmap](#planned-scrapers--roadmap).
 
 ---
@@ -107,7 +109,7 @@ graph TB
         direction TB
         FS_CLI["CLI: fedsync sync"]
         FS_ENGINE["Engine (errgroup limit 5)"]
-        FS_REG["Registry → 31 datasets"]
+        FS_REG["Registry → 33 datasets"]
         FS_FETCH["Fetcher (HTTP/FTP/CSV/XML)"]
         FS_DB["fed_data.* tables"]
 
