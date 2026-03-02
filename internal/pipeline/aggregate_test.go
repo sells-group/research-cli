@@ -96,7 +96,7 @@ func TestMergeAnswers_MultipleFields(t *testing.T) {
 		{QuestionID: "q2", FieldKey: "revenue", Value: "$5M", Confidence: 0.6, Tier: 1},
 	}
 	t2 := []model.ExtractionAnswer{
-		{QuestionID: "q3", FieldKey: "employees", Value: 100, Confidence: 0.9, Tier: 2},
+		{QuestionID: "q3", FieldKey: "employee_count", Value: 100, Confidence: 0.9, Tier: 2},
 	}
 
 	merged := MergeAnswers(t1, t2, nil)
@@ -141,7 +141,7 @@ func TestValidateField_StringMaxLength(t *testing.T) {
 }
 
 func TestValidateField_NumberType(t *testing.T) {
-	field := &model.FieldMapping{Key: "employees", SFField: "NumberOfEmployees", DataType: "number"}
+	field := &model.FieldMapping{Key: "employee_count", SFField: "NumberOfEmployees", DataType: "number"}
 
 	tests := []struct {
 		name  string
@@ -158,7 +158,7 @@ func TestValidateField_NumberType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			answer := model.ExtractionAnswer{FieldKey: "employees", Value: tt.value}
+			answer := model.ExtractionAnswer{FieldKey: "employee_count", Value: tt.value}
 			fv := ValidateField(answer, field)
 			assert.NotNil(t, fv)
 			assert.Equal(t, tt.want, fv.Value)
@@ -167,7 +167,7 @@ func TestValidateField_NumberType(t *testing.T) {
 }
 
 func TestValidateField_IntegerType(t *testing.T) {
-	field := &model.FieldMapping{Key: "employees", SFField: "NumberOfEmployees", DataType: "integer"}
+	field := &model.FieldMapping{Key: "employee_count", SFField: "NumberOfEmployees", DataType: "integer"}
 
 	tests := []struct {
 		name  string
@@ -181,7 +181,7 @@ func TestValidateField_IntegerType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			answer := model.ExtractionAnswer{FieldKey: "employees", Value: tt.value}
+			answer := model.ExtractionAnswer{FieldKey: "employee_count", Value: tt.value}
 			fv := ValidateField(answer, field)
 			assert.NotNil(t, fv)
 			assert.Equal(t, tt.want, fv.Value)
@@ -190,8 +190,8 @@ func TestValidateField_IntegerType(t *testing.T) {
 }
 
 func TestValidateField_NumberType_Invalid(t *testing.T) {
-	field := &model.FieldMapping{Key: "employees", SFField: "NumberOfEmployees", DataType: "number"}
-	answer := model.ExtractionAnswer{FieldKey: "employees", Value: "not-a-number"}
+	field := &model.FieldMapping{Key: "employee_count", SFField: "NumberOfEmployees", DataType: "number"}
+	answer := model.ExtractionAnswer{FieldKey: "employee_count", Value: "not-a-number"}
 
 	fv := ValidateField(answer, field)
 	assert.Nil(t, fv)
@@ -292,13 +292,15 @@ func TestBuildFieldValues(t *testing.T) {
 
 	answers := []model.ExtractionAnswer{
 		{QuestionID: "q1", FieldKey: "industry", Value: "Tech", Confidence: 0.9, Tier: 1},
-		{QuestionID: "q2", FieldKey: "employees", Value: float64(100), Confidence: 0.8, Tier: 1},
+		// Uses legacy key "employee_count" — alias resolves to "employees".
+		{QuestionID: "q2", FieldKey: "employee_count", Value: float64(100), Confidence: 0.8, Tier: 1},
 		{QuestionID: "q3", FieldKey: "unknown_field", Value: "ignore", Confidence: 0.7, Tier: 1},
 	}
 
 	fvs := BuildFieldValues(answers, fields)
 	assert.Len(t, fvs, 2)
 	assert.Equal(t, "Tech", fvs["industry"].Value)
+	// Stored under canonical key "employees".
 	assert.Equal(t, 100, fvs["employees"].Value)
 }
 
@@ -339,7 +341,8 @@ func TestBuildFieldValues_PreSeededPrecisionUpgrade(t *testing.T) {
 
 	t.Run("does not upgrade when both are integers", func(t *testing.T) {
 		answers := []model.ExtractionAnswer{
-			{FieldKey: "employees", Value: float64(100), Confidence: 0.85, Tier: 1},
+			// Legacy key "employee_count" → alias resolves to "employees".
+			{FieldKey: "employee_count", Value: float64(100), Confidence: 0.85, Tier: 1},
 		}
 		company := model.Company{
 			PreSeeded: map[string]any{
@@ -353,7 +356,7 @@ func TestBuildFieldValues_PreSeededPrecisionUpgrade(t *testing.T) {
 
 	t.Run("gap-fills missing fields from pre-seeded", func(t *testing.T) {
 		answers := []model.ExtractionAnswer{
-			{FieldKey: "employees", Value: float64(100), Confidence: 0.85, Tier: 1},
+			{FieldKey: "employee_count", Value: float64(100), Confidence: 0.85, Tier: 1},
 		}
 		company := model.Company{
 			PreSeeded: map[string]any{
@@ -405,7 +408,7 @@ func TestEnrichFromPPP(t *testing.T) {
 			switch result[i].FieldKey {
 			case "revenue_estimate":
 				revAnswer = &result[i]
-			case "employees":
+			case "employee_count":
 				empAnswer = &result[i]
 			}
 		}
@@ -439,7 +442,7 @@ func TestEnrichFromPPP(t *testing.T) {
 
 		result := EnrichFromPPP(nil, matches)
 		assert.Len(t, result, 1) // only employees
-		assert.Equal(t, "employees", result[0].FieldKey)
+		assert.Equal(t, "employee_count", result[0].FieldKey)
 	})
 
 	t.Run("zero jobs skips employees", func(t *testing.T) {
@@ -476,7 +479,7 @@ func TestEnrichFromPPP(t *testing.T) {
 			switch a.FieldKey {
 			case "revenue_estimate":
 				assert.InDelta(t, 0.65*0.85, a.Confidence, 0.001)
-			case "employees":
+			case "employee_count":
 				assert.InDelta(t, 0.65*0.7, a.Confidence, 0.001)
 			}
 		}
@@ -780,10 +783,123 @@ func TestInjectPageMetadata(t *testing.T) {
 	})
 }
 
+func TestInjectLinkedInEmployeeEstimate(t *testing.T) {
+	t.Run("injects midpoint when employee_count is empty", func(t *testing.T) {
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "industry", Value: "Tech", Confidence: 0.9},
+		}
+		liData := &LinkedInData{EmployeeCount: "51-200"}
+		result := InjectLinkedInEmployeeEstimate(answers, liData)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "employee_count", result[1].FieldKey)
+		assert.Equal(t, 125, result[1].Value) // midpoint of 51-200
+		assert.Equal(t, 0.55, result[1].Confidence)
+		assert.Equal(t, "linkedin_range", result[1].Source)
+	})
+
+	t.Run("does not override existing employee_count", func(t *testing.T) {
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "employee_count", Value: 50, Confidence: 0.8},
+		}
+		liData := &LinkedInData{EmployeeCount: "201-500"}
+		result := InjectLinkedInEmployeeEstimate(answers, liData)
+		assert.Len(t, result, 1) // No new answer added.
+		assert.Equal(t, 50, result[0].Value)
+	})
+
+	t.Run("skips when employee_count is null/zero", func(t *testing.T) {
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "employee_count", Value: nil, Confidence: 0.0},
+		}
+		liData := &LinkedInData{EmployeeCount: "11-50"}
+		result := InjectLinkedInEmployeeEstimate(answers, liData)
+		assert.Len(t, result, 2)             // Injected because existing is nil.
+		assert.Equal(t, 30, result[1].Value) // midpoint of 11-50
+	})
+
+	t.Run("handles 10001+ range", func(t *testing.T) {
+		var answers []model.ExtractionAnswer
+		liData := &LinkedInData{EmployeeCount: "10,001+"}
+		result := InjectLinkedInEmployeeEstimate(answers, liData)
+		assert.Len(t, result, 1)
+		assert.Equal(t, 15001, result[0].Value) // midpoint of 10001 and 20002
+	})
+
+	t.Run("nil linkedin data is no-op", func(t *testing.T) {
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "industry", Value: "Tech"},
+		}
+		result := InjectLinkedInEmployeeEstimate(answers, nil)
+		assert.Len(t, result, 1)
+	})
+
+	t.Run("empty employee_count string is no-op", func(t *testing.T) {
+		var answers []model.ExtractionAnswer
+		liData := &LinkedInData{EmployeeCount: ""}
+		result := InjectLinkedInEmployeeEstimate(answers, liData)
+		assert.Len(t, result, 0)
+	})
+}
+
+func TestInjectLinkedInFounded(t *testing.T) {
+	t.Run("injects year when year_founded is empty", func(t *testing.T) {
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "industry", Value: "Tech"},
+		}
+		liData := &LinkedInData{Founded: "2015"}
+		result := InjectLinkedInFounded(answers, liData)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "year_founded", result[1].FieldKey)
+		assert.Equal(t, 2015, result[1].Value)
+		assert.Equal(t, 0.60, result[1].Confidence)
+		assert.Equal(t, "linkedin", result[1].Source)
+	})
+
+	t.Run("does not override existing year_founded", func(t *testing.T) {
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "year_founded", Value: 2010, Confidence: 0.8},
+		}
+		liData := &LinkedInData{Founded: "2015"}
+		result := InjectLinkedInFounded(answers, liData)
+		assert.Len(t, result, 1)
+		assert.Equal(t, 2010, result[0].Value)
+	})
+
+	t.Run("does not override existing year_established", func(t *testing.T) {
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "year_established", Value: "2008", Confidence: 0.7},
+		}
+		liData := &LinkedInData{Founded: "2015"}
+		result := InjectLinkedInFounded(answers, liData)
+		assert.Len(t, result, 1)
+	})
+
+	t.Run("nil linkedin data is no-op", func(t *testing.T) {
+		var answers []model.ExtractionAnswer
+		result := InjectLinkedInFounded(answers, nil)
+		assert.Len(t, result, 0)
+	})
+
+	t.Run("empty founded is no-op", func(t *testing.T) {
+		var answers []model.ExtractionAnswer
+		liData := &LinkedInData{Founded: ""}
+		result := InjectLinkedInFounded(answers, liData)
+		assert.Len(t, result, 0)
+	})
+
+	t.Run("handles date format like 2010-01-01", func(t *testing.T) {
+		var answers []model.ExtractionAnswer
+		liData := &LinkedInData{Founded: "2010-01-01"}
+		result := InjectLinkedInFounded(answers, liData)
+		assert.Len(t, result, 1)
+		assert.Equal(t, 2010, result[0].Value)
+	})
+}
+
 func TestCrossValidateEmployeeCount(t *testing.T) {
 	t.Run("boosts confidence when within LinkedIn range", func(t *testing.T) {
 		answers := []model.ExtractionAnswer{
-			{FieldKey: "employees", Value: 125, Confidence: 0.65, Source: "website"},
+			{FieldKey: "employee_count", Value: 125, Confidence: 0.65, Source: "website"},
 		}
 		liData := &LinkedInData{EmployeeCount: "51-200"}
 		result := CrossValidateEmployeeCount(answers, liData)
@@ -794,7 +910,7 @@ func TestCrossValidateEmployeeCount(t *testing.T) {
 
 	t.Run("no boost when outside LinkedIn range", func(t *testing.T) {
 		answers := []model.ExtractionAnswer{
-			{FieldKey: "employees", Value: 500, Confidence: 0.65, Source: "website"},
+			{FieldKey: "employee_count", Value: 500, Confidence: 0.65, Source: "website"},
 		}
 		liData := &LinkedInData{EmployeeCount: "51-200"}
 		result := CrossValidateEmployeeCount(answers, liData)
@@ -804,7 +920,7 @@ func TestCrossValidateEmployeeCount(t *testing.T) {
 
 	t.Run("no boost when confidence already high", func(t *testing.T) {
 		answers := []model.ExtractionAnswer{
-			{FieldKey: "employees", Value: 100, Confidence: 0.90, Source: "website"},
+			{FieldKey: "employee_count", Value: 100, Confidence: 0.90, Source: "website"},
 		}
 		liData := &LinkedInData{EmployeeCount: "51-200"}
 		result := CrossValidateEmployeeCount(answers, liData)
@@ -814,7 +930,7 @@ func TestCrossValidateEmployeeCount(t *testing.T) {
 
 	t.Run("nil linkedin data returns unchanged", func(t *testing.T) {
 		answers := []model.ExtractionAnswer{
-			{FieldKey: "employees", Value: 100, Confidence: 0.65},
+			{FieldKey: "employee_count", Value: 100, Confidence: 0.65},
 		}
 		result := CrossValidateEmployeeCount(answers, nil)
 		assert.Len(t, result, 1)
@@ -823,7 +939,7 @@ func TestCrossValidateEmployeeCount(t *testing.T) {
 
 	t.Run("handles 10001+ range", func(t *testing.T) {
 		answers := []model.ExtractionAnswer{
-			{FieldKey: "employees", Value: 15000, Confidence: 0.60, Source: "website"},
+			{FieldKey: "employee_count", Value: 15000, Confidence: 0.60, Source: "website"},
 		}
 		liData := &LinkedInData{EmployeeCount: "10,001+"}
 		result := CrossValidateEmployeeCount(answers, liData)

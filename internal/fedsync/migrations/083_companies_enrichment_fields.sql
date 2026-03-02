@@ -1,0 +1,22 @@
+-- Add enrichment detail columns to companies golden record.
+ALTER TABLE public.companies
+  ADD COLUMN IF NOT EXISTS services_list          TEXT,
+  ADD COLUMN IF NOT EXISTS service_area           VARCHAR(500),
+  ADD COLUMN IF NOT EXISTS licenses_text          TEXT,
+  ADD COLUMN IF NOT EXISTS owner_name             VARCHAR(255),
+  ADD COLUMN IF NOT EXISTS customer_types         VARCHAR(500),
+  ADD COLUMN IF NOT EXISTS differentiators        TEXT,
+  ADD COLUMN IF NOT EXISTS reputation_summary     TEXT,
+  ADD COLUMN IF NOT EXISTS acquisition_assessment TEXT,
+  ADD COLUMN IF NOT EXISTS key_people             TEXT,
+  ADD COLUMN IF NOT EXISTS exec_first_name        VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS exec_last_name         VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS exec_title             VARCHAR(200),
+  ADD COLUMN IF NOT EXISTS exec_linkedin          VARCHAR(500),
+  ADD COLUMN IF NOT EXISTS review_count           INTEGER,
+  ADD COLUMN IF NOT EXISTS review_rating          NUMERIC(3,2),
+  ADD COLUMN IF NOT EXISTS employees_linkedin     INTEGER,
+  ADD COLUMN IF NOT EXISTS location_count         INTEGER,
+  ADD COLUMN IF NOT EXISTS end_markets            VARCHAR(1000),
+  ADD COLUMN IF NOT EXISTS linkedin_url           VARCHAR(500),
+  ADD COLUMN IF NOT EXISTS enrichment_report      TEXT;

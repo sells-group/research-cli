@@ -39,6 +39,28 @@ type CompanyRecord struct { //nolint:revive // stutters but widely used across c
 	ZipCode string `json:"zip_code,omitempty" db:"zip_code"`
 	Country string `json:"country,omitempty" db:"country"`
 
+	// Enrichment detail
+	ServicesList          string   `json:"services_list,omitempty" db:"services_list"`
+	ServiceArea           string   `json:"service_area,omitempty" db:"service_area"`
+	LicensesText          string   `json:"licenses_text,omitempty" db:"licenses_text"`
+	OwnerName             string   `json:"owner_name,omitempty" db:"owner_name"`
+	CustomerTypes         string   `json:"customer_types,omitempty" db:"customer_types"`
+	Differentiators       string   `json:"differentiators,omitempty" db:"differentiators"`
+	ReputationSummary     string   `json:"reputation_summary,omitempty" db:"reputation_summary"`
+	AcquisitionAssessment string   `json:"acquisition_assessment,omitempty" db:"acquisition_assessment"`
+	KeyPeople             string   `json:"key_people,omitempty" db:"key_people"`
+	ExecFirstName         string   `json:"exec_first_name,omitempty" db:"exec_first_name"`
+	ExecLastName          string   `json:"exec_last_name,omitempty" db:"exec_last_name"`
+	ExecTitle             string   `json:"exec_title,omitempty" db:"exec_title"`
+	ExecLinkedIn          string   `json:"exec_linkedin,omitempty" db:"exec_linkedin"`
+	ReviewCount           *int     `json:"review_count,omitempty" db:"review_count"`
+	ReviewRating          *float64 `json:"review_rating,omitempty" db:"review_rating"`
+	EmployeesLinkedIn     *int     `json:"employees_linkedin,omitempty" db:"employees_linkedin"`
+	LocationCount         *int     `json:"location_count,omitempty" db:"location_count"`
+	EndMarkets            string   `json:"end_markets,omitempty" db:"end_markets"`
+	LinkedInURL           string   `json:"linkedin_url,omitempty" db:"linkedin_url"`
+	EnrichmentReport      string   `json:"enrichment_report,omitempty" db:"enrichment_report"`
+
 	// Enrichment metadata
 	EnrichmentScore *float64   `json:"enrichment_score,omitempty" db:"enrichment_score"`
 	LastEnrichedAt  *time.Time `json:"last_enriched_at,omitempty" db:"last_enriched_at"`

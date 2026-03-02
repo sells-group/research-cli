@@ -356,11 +356,11 @@ func TestCompareResults_MatchAndMismatch(t *testing.T) {
 			},
 			FieldValues: map[string]model.FieldValue{
 				"description":          {FieldKey: "description", Value: "A great company"},
-				"employees":            {FieldKey: "employees", Value: 50},
+				"employee_count":       {FieldKey: "employee_count", Value: 50},
 				"google_reviews_count": {FieldKey: "google_reviews_count", Value: 200}, // Mismatch
 				"naics_code":           {FieldKey: "naics_code", Value: "541512"},
 				"email":                {FieldKey: "email", Value: "info@example.com"},
-				"year_established":     {FieldKey: "year_established", Value: 2010},
+				"year_founded":         {FieldKey: "year_founded", Value: 2010},
 			},
 		},
 	}
@@ -639,7 +639,7 @@ func TestCompareResults_NumericProximity(t *testing.T) {
 		{
 			Company: model.Company{URL: "https://example.com"},
 			FieldValues: map[string]model.FieldValue{
-				"employees": {FieldKey: "employees", Value: 80, Confidence: 0.90},
+				"employee_count": {FieldKey: "employee_count", Value: 80, Confidence: 0.90},
 			},
 		},
 	}

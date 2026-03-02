@@ -105,6 +105,20 @@ var businessModelKeywords = map[string]BusinessModel{
 	"banking":           BMFinancialServices,
 	"fintech":           BMFinancialServices,
 	"financial":         BMFinancialServices,
+
+	// B2B variants (map to Services as default for generic B2B labels)
+	"b2b":                     BMServices,
+	"b2b service":             BMServices,
+	"b2b equipment":           BMDistributor,
+	"b2b solutions":           BMServices,
+	"equipment provider":      BMDistributor,
+	"equipment and solutions": BMDistributor,
+	"solutions provider":      BMServices,
+
+	// ISO (Independent Service/Sales Organization)
+	"independent service organization": BMServices,
+	"independent sales organization":   BMServices,
+	"iso":                              BMServices,
 }
 
 // NormalizeBusinessModel maps any business model string to its canonical form.

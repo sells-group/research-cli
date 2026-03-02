@@ -198,5 +198,45 @@
     "instructions": "Extract the employee count from LinkedIn company data. Return as an integer.",
     "output_format": "integer",
     "status": "Active"
+  },
+  {
+    "id": "q_hq_city",
+    "text": "What city is the company's headquarters or primary office located in?",
+    "tier": 1,
+    "field_key": "hq_city",
+    "page_types": ["contact", "about", "homepage"],
+    "instructions": "Extract the city where the company's headquarters or main office is located. Return only the city name.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_hq_state",
+    "text": "What US state is the company's headquarters located in?",
+    "tier": 1,
+    "field_key": "hq_state",
+    "page_types": ["contact", "about", "homepage"],
+    "instructions": "Extract the US state where the company's headquarters is located. Return the 2-letter state abbreviation (e.g. CA, TX, NY).",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_location_count",
+    "text": "How many office or branch locations does the company have?",
+    "tier": 2,
+    "field_key": "location_count",
+    "page_types": ["about", "homepage", "contact"],
+    "instructions": "Count the number of distinct office, branch, or facility locations the company operates. Return as an integer.",
+    "output_format": "integer",
+    "status": "Active"
+  },
+  {
+    "id": "q_end_markets",
+    "text": "What industries, markets, or sectors does this company primarily serve?",
+    "tier": 2,
+    "field_key": "end_markets",
+    "page_types": ["homepage", "about", "services"],
+    "instructions": "Identify the primary industries, markets, or sectors this company serves. Return as a comma-separated list (e.g. Healthcare, Manufacturing, Government).",
+    "output_format": "string",
+    "status": "Active"
   }
 ]

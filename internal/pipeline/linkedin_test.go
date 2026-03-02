@@ -18,22 +18,25 @@ import (
 	perplexitymocks "github.com/sells-group/research-cli/pkg/perplexity/mocks"
 )
 
-func TestLinkedInPhase_ChainSuccess(t *testing.T) {
+func TestLinkedInPhase_PerplexityFirst_Success(t *testing.T) {
+	// Perplexity is now tried first. Chain scrape should NOT be called.
 	ctx := context.Background()
 	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
 
 	s := scrapemocks.NewMockScraper(t)
 	s.On("Name").Return("mock").Maybe()
 	s.On("Supports", mock.Anything).Return(true).Maybe()
-	s.On("Scrape", mock.Anything, mock.Anything).Return(&scrape.Result{
-		Page: model.CrawledPage{
-			Markdown: "Acme Corp is a technology company headquartered in NYC with 200 employees. Founded in 2010. Industry: Technology.",
-		},
-		Source: "mock",
-	}, nil).Maybe()
+	// Chain scrape should not be called since Perplexity succeeds.
 	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
 
-	pplxClient := perplexitymocks.NewMockClient(t) // Should not be called
+	pplxClient := perplexitymocks.NewMockClient(t)
+	pplxClient.On("ChatCompletion", ctx, mock.AnythingOfType("perplexity.ChatCompletionRequest")).
+		Return(&perplexity.ChatCompletionResponse{
+			Choices: []perplexity.Choice{
+				{Message: perplexity.Message{Content: "Acme Corp is a technology company headquartered in NYC with 200 employees. Founded in 2010."}},
+			},
+			Usage: perplexity.Usage{PromptTokens: 100, CompletionTokens: 50},
+		}, nil)
 
 	aiClient := anthropicmocks.NewMockClient(t)
 	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
@@ -57,7 +60,50 @@ func TestLinkedInPhase_ChainSuccess(t *testing.T) {
 	assert.Equal(t, "Doe", data.ExecLastName)
 	assert.Equal(t, "CEO & Founder", data.ExecTitle)
 	assert.NotNil(t, usage)
-	pplxClient.AssertNotCalled(t, "ChatCompletion") // Perplexity not used
+	assert.Equal(t, 300, usage.InputTokens) // 100 from pplx + 200 from ai
+	s.AssertNotCalled(t, "Scrape")          // Chain scrape not needed
+	pplxClient.AssertExpectations(t)
+	aiClient.AssertExpectations(t)
+}
+
+func TestLinkedInPhase_PerplexityFails_FallsBackToChain(t *testing.T) {
+	// When Perplexity fails, chain scrape is used as fallback.
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
+
+	s := scrapemocks.NewMockScraper(t)
+	s.On("Name").Return("mock").Maybe()
+	s.On("Supports", mock.Anything).Return(true).Maybe()
+	s.On("Scrape", mock.Anything, mock.Anything).Return(&scrape.Result{
+		Page: model.CrawledPage{
+			Markdown: "Acme Corp is a technology company headquartered in NYC with 200 employees. Founded in 2010. Industry: Technology.",
+		},
+		Source: "mock",
+	}, nil).Maybe()
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil), s)
+
+	pplxClient := perplexitymocks.NewMockClient(t)
+	pplxClient.On("ChatCompletion", ctx, mock.AnythingOfType("perplexity.ChatCompletionRequest")).
+		Return(nil, errors.New("api error"))
+
+	aiClient := anthropicmocks.NewMockClient(t)
+	aiClient.On("CreateMessage", ctx, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(&anthropic.MessageResponse{
+			Content: []anthropic.ContentBlock{{
+				Text: `{"company_name": "Acme Corp", "description": "Technology company", "industry": "Technology", "employee_count": "200", "headquarters": "New York City", "founded": "2010", "specialties": "AI, ML", "website": "https://acme.com", "linkedin_url": "", "company_type": "Privately Held", "exec_first_name": "Jane", "exec_last_name": "Doe", "exec_title": "CEO & Founder"}`,
+			}},
+			Usage: anthropic.TokenUsage{InputTokens: 200, OutputTokens: 100},
+		}, nil)
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+
+	data, usage, err := LinkedInPhase(ctx, company, chain, pplxClient, aiClient, aiCfg, nil)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, data)
+	assert.Equal(t, "Acme Corp", data.CompanyName)
+	assert.NotNil(t, usage)
+	pplxClient.AssertExpectations(t)
 	aiClient.AssertExpectations(t)
 }
 
@@ -140,7 +186,7 @@ func TestLinkedInPhase_NilChain_FallsBackToPerplexity(t *testing.T) {
 	aiClient.AssertExpectations(t)
 }
 
-func TestLinkedInPhase_PerplexityError(t *testing.T) {
+func TestLinkedInPhase_BothSourcesFail(t *testing.T) {
 	ctx := context.Background()
 	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
 
@@ -151,12 +197,12 @@ func TestLinkedInPhase_PerplexityError(t *testing.T) {
 	aiClient := anthropicmocks.NewMockClient(t)
 	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
 
-	// nil chain → falls to perplexity which errors
+	// nil chain + perplexity error → both fail
 	data, _, err := LinkedInPhase(ctx, company, nil, pplxClient, aiClient, aiCfg, nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, data)
-	assert.Contains(t, err.Error(), "perplexity search")
+	assert.Contains(t, err.Error(), "empty response from both perplexity and chain scrape")
 }
 
 func TestLinkedInPhase_HaikuParseError(t *testing.T) {

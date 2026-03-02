@@ -102,6 +102,85 @@ func applyField(r *CompanyRecord, key string, fv model.FieldValue) {
 		if r.Website == "" || fv.Confidence > 0.8 {
 			r.Website = s
 		}
+
+	// Enrichment detail fields (raw + canonical aliases).
+	case "services_list", "service_mix":
+		if r.ServicesList == "" || fv.Confidence > 0.6 {
+			r.ServicesList = s
+		}
+	case "service_area":
+		if r.ServiceArea == "" || fv.Confidence > 0.6 {
+			r.ServiceArea = s
+		}
+	case "licenses":
+		if r.LicensesText == "" || fv.Confidence > 0.6 {
+			r.LicensesText = s
+		}
+	case "owner_name":
+		if r.OwnerName == "" || fv.Confidence > 0.7 {
+			r.OwnerName = s
+		}
+	case "customer_types":
+		if r.CustomerTypes == "" || fv.Confidence > 0.6 {
+			r.CustomerTypes = s
+		}
+	case "differentiators":
+		if r.Differentiators == "" || fv.Confidence > 0.6 {
+			r.Differentiators = s
+		}
+	case "reputation_summary":
+		if r.ReputationSummary == "" || fv.Confidence > 0.6 {
+			r.ReputationSummary = s
+		}
+	case "acquisition_assessment":
+		if r.AcquisitionAssessment == "" || fv.Confidence > 0.6 {
+			r.AcquisitionAssessment = s
+		}
+	case "key_people":
+		if r.KeyPeople == "" || fv.Confidence > 0.6 {
+			r.KeyPeople = s
+		}
+	case "exec_first_name":
+		if r.ExecFirstName == "" || fv.Confidence > 0.7 {
+			r.ExecFirstName = s
+		}
+	case "exec_last_name":
+		if r.ExecLastName == "" || fv.Confidence > 0.7 {
+			r.ExecLastName = s
+		}
+	case "exec_title":
+		if r.ExecTitle == "" || fv.Confidence > 0.6 {
+			r.ExecTitle = s
+		}
+	case "exec_linkedin":
+		if r.ExecLinkedIn == "" || fv.Confidence > 0.7 {
+			r.ExecLinkedIn = s
+		}
+	case "review_count":
+		if n := toInt(fv.Value); n > 0 {
+			r.ReviewCount = &n
+		}
+	case "review_rating":
+		if f := toFloat64(fv.Value); f > 0 {
+			r.ReviewRating = &f
+		}
+	case "employees_linkedin":
+		if n := toInt(fv.Value); n > 0 {
+			r.EmployeesLinkedIn = &n
+		}
+	case "location_count", "locations":
+		if n := toInt(fv.Value); n > 0 {
+			r.LocationCount = &n
+		}
+	case "end_markets":
+		if r.EndMarkets == "" || fv.Confidence > 0.6 {
+			r.EndMarkets = s
+		}
+	case "linkedin_url":
+		if r.LinkedInURL == "" || fv.Confidence > 0.7 {
+			r.LinkedInURL = s
+		}
+
 	default:
 		zap.L().Debug("merge: unmapped field key", zap.String("key", key))
 	}
