@@ -91,6 +91,8 @@ func TestClassifyByPrefix(t *testing.T) {
 		{"[google_maps] Acme Corp", model.PageTypeGoogleMaps, true},
 		{"[sos] Acme Corp Filing", model.PageTypeSoS, true},
 		{"[linkedin] Acme Corp", model.PageTypeLinkedIn, true},
+		{"[perplexity_intel] Acme Corp", model.PageTypePerplexityIntel, true},
+		{"[Perplexity_Intel] Mixed Case", model.PageTypePerplexityIntel, true},
 		{"[BBB] Case Insensitive", model.PageTypeBBB, true},
 		{"[Google_Maps] Mixed Case", model.PageTypeGoogleMaps, true},
 		{"About Us - Acme Corp", "", false},

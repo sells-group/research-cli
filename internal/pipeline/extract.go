@@ -186,7 +186,7 @@ func FormatPreSeededContext(preSeeded map[string]any) string {
 	}
 	var b strings.Builder
 	b.WriteString("--- Industry Data (verify against website) ---\n")
-	if v, ok := preSeeded["employees"]; ok {
+	if v, ok := preSeeded["employee_count"]; ok {
 		fmt.Fprintf(&b, "Employee Count (industry estimate): %v — use this as baseline unless website explicitly states a different current headcount\n", v)
 	}
 	if v, ok := preSeeded["naics_code"]; ok {
@@ -198,7 +198,7 @@ func FormatPreSeededContext(preSeeded map[string]any) string {
 	if v, ok := preSeeded["revenue_range"]; ok {
 		fmt.Fprintf(&b, "Revenue Estimate: %v\n", v)
 	}
-	if v, ok := preSeeded["year_established"]; ok {
+	if v, ok := preSeeded["year_founded"]; ok {
 		fmt.Fprintf(&b, "Year Founded: %v — use this unless website explicitly states a different founding year\n", v)
 	}
 	if v, ok := preSeeded["email"]; ok {
@@ -364,18 +364,10 @@ func ExtractTier2(ctx context.Context, routed []model.RoutedQuestion, t1Answers 
 	// signal a cache read and benefit from the primer's warm cache.
 	systemBlocks := anthropic.BuildCachedSystemBlocks(t2SystemText)
 
-	// Filter T1 answers to only include low-confidence ones for T2 context.
-	// High-confidence answers are already reliable and just add noise/cost.
-	const t2ConfidenceThreshold = 0.4
-	var lowConfT1 []model.ExtractionAnswer
-	for _, a := range t1Answers {
-		if a.Confidence < t2ConfidenceThreshold {
-			lowConfT1 = append(lowConfT1, a)
-		}
-	}
-
-	// Build context from low-confidence T1 answers.
-	t1Context := buildT1Context(lowConfT1)
+	// Pass ALL T1 answers as read-only context to T2 (not just low-confidence).
+	// This reduces contradictions: T2 can confirm or override T1 findings with
+	// evidence rather than re-extracting independently.
+	t1Context := buildT1ContextAnnotated(t1Answers)
 
 	// Build page context per question.
 	richSystemBlocks := anthropic.BuildCachedSystemBlocks(richSystemText)
@@ -1062,6 +1054,28 @@ func buildT1Context(answers []model.ExtractionAnswer) string {
 	var parts []string
 	for _, a := range answers {
 		parts = append(parts, fmt.Sprintf("- %s: %v (confidence: %.2f)", a.FieldKey, a.Value, a.Confidence))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// buildT1ContextAnnotated formats ALL T1 answers with confidence annotations.
+// High-confidence answers are marked as "confirmed" so T2 can validate rather
+// than re-extract independently, reducing contradiction noise.
+func buildT1ContextAnnotated(answers []model.ExtractionAnswer) string {
+	if len(answers) == 0 {
+		return "No previous findings."
+	}
+
+	var parts []string
+	parts = append(parts, "Tier 1 findings (confirm or override with evidence from source pages):")
+	for _, a := range answers {
+		tag := "unverified"
+		if a.Confidence >= 0.7 {
+			tag = "confirmed"
+		} else if a.Confidence >= 0.4 {
+			tag = "tentative"
+		}
+		parts = append(parts, fmt.Sprintf("- %s: %v (confidence: %.2f, %s)", a.FieldKey, a.Value, a.Confidence, tag))
 	}
 	return strings.Join(parts, "\n")
 }

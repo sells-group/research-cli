@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rotisserie/eris"
+	"golang.org/x/time/rate"
 )
 
 // Default base URL for the Firecrawl v2 API.
@@ -27,9 +28,8 @@ type Client interface {
 
 // CrawlRequest is the body for POST /crawl.
 type CrawlRequest struct {
-	URL      string `json:"url"`
-	MaxDepth int    `json:"maxDepth,omitempty"`
-	Limit    int    `json:"limit,omitempty"`
+	URL   string `json:"url"`
+	Limit int    `json:"limit,omitempty"`
 }
 
 // CrawlResponse is the response from POST /crawl.
@@ -111,11 +111,21 @@ func WithHTTPClient(hc *http.Client) Option {
 	}
 }
 
+// WithRateLimit sets a rate limiter for mutating API calls (crawl, scrape).
+// Firecrawl free tier allows 3 crawl req/min; use rate.Every(20*time.Second)
+// with burst=1 to stay under that limit.
+func WithRateLimit(limit rate.Limit, burst int) Option {
+	return func(c *httpClient) {
+		c.limiter = rate.NewLimiter(limit, burst)
+	}
+}
+
 // httpClient implements Client using net/http.
 type httpClient struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
+	limiter *rate.Limiter
 }
 
 // NewClient creates a new Firecrawl client.
@@ -178,6 +188,12 @@ func (c *httpClient) GetBatchScrapeStatus(ctx context.Context, id string) (*Batc
 }
 
 func (c *httpClient) post(ctx context.Context, path string, body any, out any) error {
+	if c.limiter != nil {
+		if err := c.limiter.Wait(ctx); err != nil {
+			return eris.Wrap(err, "rate limit wait")
+		}
+	}
+
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return eris.Wrap(err, "marshal request")

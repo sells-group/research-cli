@@ -212,7 +212,8 @@ func BuildFieldValues(answers []model.ExtractionAnswer, fields *model.FieldRegis
 	var failures int
 
 	for _, a := range answers {
-		field := fields.ByKey(a.FieldKey)
+		key := resolveFieldKey(a.FieldKey)
+		field := fields.ByKey(key)
 		if field == nil {
 			continue
 		}
@@ -222,7 +223,9 @@ func BuildFieldValues(answers []model.ExtractionAnswer, fields *model.FieldRegis
 			failures++
 			continue
 		}
-		result[a.FieldKey] = *fv
+		// Store under the canonical registry key.
+		fv.FieldKey = key
+		result[key] = *fv
 	}
 
 	if failures > 0 {
@@ -255,10 +258,11 @@ func BuildFieldValues(answers []model.ExtractionAnswer, fields *model.FieldRegis
 	// Also upgrade extracted values when pre-seeded data has more precision
 	// (e.g., decimal rating 4.6 vs extracted integer 4).
 	if len(company) > 0 && len(company[0].PreSeeded) > 0 {
-		for key, val := range company[0].PreSeeded {
+		for rawKey, val := range company[0].PreSeeded {
 			if val == nil || val == "" {
 				continue
 			}
+			key := resolveFieldKey(rawKey)
 
 			existing, alreadyExtracted := result[key]
 			if alreadyExtracted {
@@ -293,6 +297,26 @@ func BuildFieldValues(answers []model.ExtractionAnswer, fields *model.FieldRegis
 	}
 
 	return result
+}
+
+// fieldKeyAliases maps alternative/legacy field keys to canonical registry keys.
+// Extraction questions may use different keys than the Notion field registry.
+var fieldKeyAliases = map[string]string{
+	"employee_count":    "employees",
+	"employee_estimate": "employees",
+	"year_founded":      "year_established",
+	"location_count":    "locations",
+	"services_list":     "service_mix",
+	"legal_name":        "company_legal_name",
+}
+
+// resolveFieldKey returns the canonical registry key for a field key,
+// resolving aliases if the key has a known alternative name.
+func resolveFieldKey(key string) string {
+	if canonical, ok := fieldKeyAliases[key]; ok {
+		return canonical
+	}
+	return key
 }
 
 func toNumber(v any) (int, bool) {
@@ -577,7 +601,7 @@ func EnrichFromPPP(answers []model.ExtractionAnswer, matches []ppp.LoanMatch) []
 	if best.JobsReported > 0 {
 		dateApproved := best.DateApproved
 		answers = append(answers, model.ExtractionAnswer{
-			FieldKey:   "employees",
+			FieldKey:   "employee_count",
 			Value:      best.JobsReported,
 			Confidence: best.MatchScore * 0.7,
 			Source:     "ppp_database",
@@ -596,6 +620,95 @@ func EnrichFromPPP(answers []model.ExtractionAnswer, matches []ppp.LoanMatch) []
 	return answers
 }
 
+// InjectLinkedInEmployeeEstimate bridges LinkedIn's employee range into the
+// employee_count field when extraction and PPP both returned empty. Converts
+// the range (e.g. "51-200") to its midpoint as an integer estimate.
+func InjectLinkedInEmployeeEstimate(answers []model.ExtractionAnswer, linkedInData *LinkedInData) []model.ExtractionAnswer {
+	if linkedInData == nil || linkedInData.EmployeeCount == "" {
+		return answers
+	}
+
+	// Check if employees/employee_count already has a value.
+	for _, a := range answers {
+		if (a.FieldKey == "employee_count" || a.FieldKey == "employees" || a.FieldKey == "employee_estimate") && a.Value != nil {
+			if n, ok := toNumber(a.Value); ok && n > 0 {
+				return answers // Already populated, don't override.
+			}
+		}
+	}
+
+	lo, hi := parseLinkedInRange(linkedInData.EmployeeCount)
+	if lo == 0 && hi == 0 {
+		return answers
+	}
+
+	// Cap unbounded upper at a reasonable multiplier of lower bound.
+	if hi >= 1_000_000 {
+		hi = lo * 2
+	}
+
+	midpoint := (lo + hi) / 2
+
+	zap.L().Info("aggregate: injecting LinkedIn employee estimate",
+		zap.String("range", linkedInData.EmployeeCount),
+		zap.Int("midpoint", midpoint),
+	)
+
+	return append(answers, model.ExtractionAnswer{
+		FieldKey:   "employee_count",
+		Value:      midpoint,
+		Confidence: 0.55,
+		Source:     "linkedin_range",
+		Tier:       0,
+		Reasoning:  fmt.Sprintf("LinkedIn employee range %s → midpoint %d", linkedInData.EmployeeCount, midpoint),
+	})
+}
+
+// InjectLinkedInFounded bridges LinkedIn's founded year into the year_founded
+// field when extraction returned empty.
+func InjectLinkedInFounded(answers []model.ExtractionAnswer, linkedInData *LinkedInData) []model.ExtractionAnswer {
+	if linkedInData == nil || linkedInData.Founded == "" {
+		return answers
+	}
+
+	// Check if year_founded already has a value.
+	for _, a := range answers {
+		if (a.FieldKey == "year_founded" || a.FieldKey == "year_established") && a.Value != nil {
+			if s, ok := a.Value.(string); ok && s != "" {
+				return answers
+			}
+			if n, ok := toNumber(a.Value); ok && n > 0 {
+				return answers
+			}
+		}
+	}
+
+	// Parse the founded year (could be "2010" or "2010-01-01").
+	founded := strings.TrimSpace(linkedInData.Founded)
+	if len(founded) < 4 {
+		return answers
+	}
+	yearStr := founded[:4]
+	year, ok := toNumber(yearStr)
+	if !ok || year < 1800 || year > 2030 {
+		return answers
+	}
+
+	zap.L().Info("aggregate: injecting LinkedIn founded year",
+		zap.String("founded", linkedInData.Founded),
+		zap.Int("year", year),
+	)
+
+	return append(answers, model.ExtractionAnswer{
+		FieldKey:   "year_founded",
+		Value:      year,
+		Confidence: 0.60,
+		Source:     "linkedin",
+		Tier:       0,
+		Reasoning:  fmt.Sprintf("LinkedIn profile founded: %s", linkedInData.Founded),
+	})
+}
+
 // CrossValidateEmployeeCount checks if extracted employee count falls within
 // LinkedIn's reported range and boosts confidence if so.
 func CrossValidateEmployeeCount(answers []model.ExtractionAnswer, linkedInData *LinkedInData) []model.ExtractionAnswer {
@@ -607,7 +720,7 @@ func CrossValidateEmployeeCount(answers []model.ExtractionAnswer, linkedInData *
 		return answers
 	}
 	for i, a := range answers {
-		if a.FieldKey == "employees" {
+		if a.FieldKey == "employee_count" || a.FieldKey == "employees" || a.FieldKey == "employee_estimate" {
 			n, ok := toNumber(a.Value)
 			if ok && n >= lo && n <= hi && a.Confidence < 0.85 {
 				answers[i].Confidence = 0.85

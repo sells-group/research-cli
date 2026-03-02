@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
+	"github.com/sells-group/research-cli/internal/company"
 	"github.com/sells-group/research-cli/internal/estimate"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/pipeline"
@@ -64,7 +67,10 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 
 	notionClient := notion.NewClient(cfg.Notion.Token)
 	anthropicClient := anthropicpkg.NewClient(cfg.Anthropic.Key)
-	firecrawlClient := firecrawl.NewClient(cfg.Firecrawl.Key, firecrawl.WithBaseURL(cfg.Firecrawl.BaseURL))
+	firecrawlClient := firecrawl.NewClient(cfg.Firecrawl.Key,
+		firecrawl.WithBaseURL(cfg.Firecrawl.BaseURL),
+		firecrawl.WithRateLimit(rate.Every(5*time.Second), 3), // ~12 req/min, burst 3
+	)
 	jinaOpts := []jina.Option{jina.WithBaseURL(cfg.Jina.BaseURL)}
 	if cfg.Jina.SearchBaseURL != "" {
 		jinaOpts = append(jinaOpts, jina.WithSearchBaseURL(cfg.Jina.SearchBaseURL))
@@ -150,9 +156,15 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 		}
 	}
 
+	// Log field registry keys for debugging.
+	var fieldKeys []string
+	for _, f := range fields.Fields {
+		fieldKeys = append(fieldKeys, f.Key)
+	}
 	zap.L().Info("registries loaded",
 		zap.Int("questions", len(questions)),
 		zap.Int("fields", len(fields.Fields)),
+		zap.Strings("field_keys", fieldKeys),
 	)
 
 	// Build scrape chain: Local → Jina → Firecrawl.
@@ -185,6 +197,14 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 	}
 
 	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, googleClient, pppClient, revenueEstimator, waterfallExec, questions, fields)
+
+	// Wire company golden record importer when using Postgres.
+	if ps, ok := st.(*store.PostgresStore); ok {
+		companyStore := company.NewPostgresStore(ps.Pool())
+		importer := company.NewImporter(companyStore, ps.Pool())
+		p.SetCompanyImporter(importer)
+		zap.L().Info("company golden record importer enabled")
+	}
 
 	return &pipelineEnv{
 		Store:     st,

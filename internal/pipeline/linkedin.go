@@ -88,7 +88,8 @@ func extractDomain(companyURL string) string {
 	return strings.TrimPrefix(u.Host, "www.")
 }
 
-// LinkedInPhase implements Phase 1C: chain-first LinkedIn lookup with Perplexity fallback.
+// LinkedInPhase implements Phase 1C: Perplexity-first LinkedIn lookup with chain scrape fallback.
+// Perplexity is tried first because chain scrape hits a LinkedIn login wall >90% of the time.
 // Results are cached by domain with a 7-day TTL to avoid redundant API calls on re-runs.
 func LinkedInPhase(ctx context.Context, company model.Company, chain *scrape.Chain, pplxClient perplexity.Client, aiClient anthropic.Client, aiCfg config.AnthropicConfig, st store.Store) (*LinkedInData, *model.TokenUsage, error) {
 	if company.Name == "" {
@@ -114,49 +115,21 @@ func LinkedInPhase(ctx context.Context, company model.Company, chain *scrape.Cha
 		}
 	}
 
-	// Step 1: Try scrape chain for LinkedIn page.
 	linkedInURL := buildLinkedInURL(company.Name)
 	var rawData string
 
-	if chain != nil {
-		result, chainErr := chain.Scrape(ctx, linkedInURL)
-		if chainErr != nil {
-			log.Debug("linkedin: chain scrape failed, falling back to perplexity", zap.Error(chainErr))
-		} else if result != nil {
-			rawData = result.Page.Markdown
-		}
-	}
+	// Step 1: Try Perplexity first (primary) — search-augmented LLM can find
+	// LinkedIn data directly without hitting the login wall.
+	rawData, pplxUsage := tryPerplexityLinkedIn(ctx, company, pplxClient, log)
+	usage.Add(pplxUsage)
 
-	// Check if response is a login wall.
-	if rawData != "" && isLinkedInLoginWall(rawData) {
-		log.Debug("linkedin: scrape returned login wall, falling back to perplexity")
-		rawData = ""
-	}
-
-	// Step 2: Fallback to Perplexity if Jina failed or returned empty/login wall.
-	if rawData == "" {
-		pplxTemp := 0.2
-		pplxResp, err := pplxClient.ChatCompletion(ctx, perplexity.ChatCompletionRequest{
-			Messages: []perplexity.Message{
-				{Role: "user", Content: fmt.Sprintf(perplexityPrompt, company.Name, company.URL)},
-			},
-			Temperature: &pplxTemp,
-		})
-		if err != nil {
-			return nil, usage, eris.Wrap(err, "linkedin: perplexity search")
-		}
-
-		if len(pplxResp.Choices) == 0 {
-			return nil, usage, eris.New("linkedin: no perplexity results")
-		}
-
-		rawData = pplxResp.Choices[0].Message.Content
-		usage.InputTokens += pplxResp.Usage.PromptTokens
-		usage.OutputTokens += pplxResp.Usage.CompletionTokens
+	// Step 2: Chain scrape (fallback) — only if Perplexity failed.
+	if rawData == "" && chain != nil {
+		rawData = tryChainScrapeLinkedIn(ctx, linkedInURL, chain, log)
 	}
 
 	if strings.TrimSpace(rawData) == "" {
-		return nil, usage, eris.New("linkedin: empty response from both jina and perplexity")
+		return nil, usage, eris.New("linkedin: empty response from both perplexity and chain scrape")
 	}
 
 	// Step 3: Haiku JSON extraction.
@@ -213,6 +186,56 @@ func LinkedInPhase(ctx context.Context, company model.Company, chain *scrape.Cha
 	}
 
 	return &data, usage, nil
+}
+
+// tryPerplexityLinkedIn queries Perplexity for LinkedIn company data.
+// Returns the raw text response and token usage.
+func tryPerplexityLinkedIn(ctx context.Context, company model.Company, pplxClient perplexity.Client, log *zap.Logger) (string, model.TokenUsage) {
+	usage := model.TokenUsage{}
+	if pplxClient == nil {
+		return "", usage
+	}
+
+	pplxTemp := 0.2
+	pplxResp, err := pplxClient.ChatCompletion(ctx, perplexity.ChatCompletionRequest{
+		Messages: []perplexity.Message{
+			{Role: "user", Content: fmt.Sprintf(perplexityPrompt, company.Name, company.URL)},
+		},
+		Temperature: &pplxTemp,
+	})
+	if err != nil {
+		log.Debug("linkedin: perplexity failed", zap.Error(err))
+		return "", usage
+	}
+
+	if len(pplxResp.Choices) == 0 || strings.TrimSpace(pplxResp.Choices[0].Message.Content) == "" {
+		log.Debug("linkedin: perplexity returned empty")
+		return "", usage
+	}
+
+	usage.InputTokens = pplxResp.Usage.PromptTokens
+	usage.OutputTokens = pplxResp.Usage.CompletionTokens
+	return pplxResp.Choices[0].Message.Content, usage
+}
+
+// tryChainScrapeLinkedIn attempts to scrape the LinkedIn company page via the
+// scrape chain. Returns raw markdown or empty string if blocked/failed.
+func tryChainScrapeLinkedIn(ctx context.Context, linkedInURL string, chain *scrape.Chain, log *zap.Logger) string {
+	result, chainErr := chain.Scrape(ctx, linkedInURL)
+	if chainErr != nil {
+		log.Debug("linkedin: chain scrape failed", zap.Error(chainErr))
+		return ""
+	}
+	if result == nil {
+		return ""
+	}
+
+	rawData := result.Page.Markdown
+	if isLinkedInLoginWall(rawData) {
+		log.Debug("linkedin: scrape returned login wall")
+		return ""
+	}
+	return rawData
 }
 
 // buildLinkedInURL constructs a LinkedIn company page URL from the company name.

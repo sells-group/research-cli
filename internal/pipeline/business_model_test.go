@@ -126,6 +126,32 @@ func TestNormalizeBusinessModel_GrataLabels(t *testing.T) {
 	}
 }
 
+func TestNormalizeBusinessModel_B2BAndISO(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"B2B", "Services"},
+		{"B2B - Equipment and Solutions Provider", "Distributor"},
+		{"Independent Service Organization (ISO)", "Services"},
+		{"B2B Solutions Provider", "Services"},
+		{"B2B Equipment Distributor", "Distributor"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			t.Parallel()
+			result, ok := NormalizeBusinessModel(tc.input)
+			if !ok {
+				t.Errorf("NormalizeBusinessModel(%q) ok = false, want true", tc.input)
+			}
+			if result != tc.want {
+				t.Errorf("NormalizeBusinessModel(%q) = %q, want %q", tc.input, result, tc.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeBusinessModel_EmptyAndUnknown(t *testing.T) {
 	t.Parallel()
 

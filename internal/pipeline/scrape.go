@@ -37,6 +37,9 @@ type ExternalSource struct {
 	URLFunc         func(company model.Company) string
 	SearchQueryFunc func(company model.Company) (query string, siteFilter string)
 	ResultFilter    func(results []jina.SearchResult, company model.Company) *jina.SearchResult
+	// PerplexityFallbackFunc provides a Perplexity-based fallback when
+	// Jina Search fails or returns no results. Returns a synthetic page.
+	PerplexityFallbackFunc func(ctx context.Context, company model.Company, pplxClient perplexity.Client) *model.CrawledPage
 	// TimeoutSecs overrides cfg.SearchTimeoutSecs for this source. 0 = use default.
 	TimeoutSecs int
 	// MaxRetries overrides cfg.SearchRetries for this source.
@@ -73,7 +76,8 @@ func DefaultExternalSources() []ExternalSource {
 				}
 				return query, "bbb.org"
 			},
-			ResultFilter: filterBBBResult,
+			ResultFilter:           filterBBBResult,
+			PerplexityFallbackFunc: resolveBBBViaPerplexity,
 		},
 		{
 			Name: "sos",
@@ -84,9 +88,10 @@ func DefaultExternalSources() []ExternalSource {
 				}
 				return query, ""
 			},
-			ResultFilter: filterSoSResult,
-			TimeoutSecs:  20,
-			MaxRetries:   intPtr(1),
+			ResultFilter:           filterSoSResult,
+			PerplexityFallbackFunc: resolveSoSViaPerplexity,
+			TimeoutSecs:            20,
+			MaxRetries:             intPtr(1),
 		},
 	}
 }
@@ -252,6 +257,12 @@ func scrapeSource(ctx context.Context, src ExternalSource, company model.Company
 			}
 		}
 		if searchErr != nil {
+			// Perplexity fallback on search failure.
+			if src.PerplexityFallbackFunc != nil && pplxClient != nil {
+				if page := src.PerplexityFallbackFunc(ctx, company, pplxClient); page != nil {
+					return page, nil
+				}
+			}
 			return nil, fmt.Errorf("search failed: %w", searchErr)
 		}
 
@@ -259,6 +270,12 @@ func scrapeSource(ctx context.Context, src ExternalSource, company model.Company
 			zap.L().Debug("scrape: no search results",
 				zap.String("source", src.Name),
 			)
+			// Perplexity fallback on empty results.
+			if src.PerplexityFallbackFunc != nil && pplxClient != nil {
+				if page := src.PerplexityFallbackFunc(ctx, company, pplxClient); page != nil {
+					return page, nil
+				}
+			}
 			return nil, nil
 		}
 
@@ -275,6 +292,12 @@ func scrapeSource(ctx context.Context, src ExternalSource, company model.Company
 					zap.Int("candidates", len(searchResp.Data)),
 					zap.String("candidate_urls", strings.Join(urls, " | ")),
 				)
+				// Perplexity fallback when no result passes filter.
+				if src.PerplexityFallbackFunc != nil && pplxClient != nil {
+					if page := src.PerplexityFallbackFunc(ctx, company, pplxClient); page != nil {
+						return page, nil
+					}
+				}
 				return nil, nil
 			}
 			targetURL = best.URL
@@ -500,6 +523,76 @@ func resolveGoogleMapsViaAPI(ctx context.Context, company model.Company, googleC
 		Rating:      p.Rating,
 		ReviewCount: p.UserRatingCount,
 		Source:      "google_api",
+	}
+}
+
+// resolveBBBViaPerplexity asks Perplexity for BBB accreditation data and
+// returns a synthetic page. Used as fallback when Jina Search fails.
+func resolveBBBViaPerplexity(ctx context.Context, company model.Company, pplxClient perplexity.Client) *model.CrawledPage {
+	prompt := fmt.Sprintf(
+		"Is \"%s\" (%s) accredited by the Better Business Bureau? "+
+			"What is their BBB rating, any complaints, and years accredited? "+
+			"If you cannot find BBB information, say 'not found'.",
+		company.Name, company.URL,
+	)
+	temp := 0.2
+	resp, err := pplxClient.ChatCompletion(ctx, perplexity.ChatCompletionRequest{
+		Messages:    []perplexity.Message{{Role: "user", Content: prompt}},
+		Temperature: &temp,
+	})
+	if err != nil || len(resp.Choices) == 0 {
+		return nil
+	}
+
+	content := strings.TrimSpace(resp.Choices[0].Message.Content)
+	if content == "" || strings.EqualFold(content, "not found") {
+		return nil
+	}
+
+	zap.L().Debug("scrape: resolved BBB via Perplexity",
+		zap.String("company", company.Name),
+	)
+
+	return &model.CrawledPage{
+		URL:        fmt.Sprintf("perplexity://bbb/%s", company.Name),
+		Title:      "[bbb] " + company.Name,
+		Markdown:   content,
+		StatusCode: 200,
+	}
+}
+
+// resolveSoSViaPerplexity asks Perplexity for Secretary of State / incorporation
+// data and returns a synthetic page. Used as fallback when Jina Search fails.
+func resolveSoSViaPerplexity(ctx context.Context, company model.Company, pplxClient perplexity.Client) *model.CrawledPage {
+	prompt := fmt.Sprintf(
+		"When was \"%s\" (%s) incorporated or registered? "+
+			"What state? What is the entity type and registration status? "+
+			"If you cannot find incorporation information, say 'not found'.",
+		company.Name, company.URL,
+	)
+	temp := 0.2
+	resp, err := pplxClient.ChatCompletion(ctx, perplexity.ChatCompletionRequest{
+		Messages:    []perplexity.Message{{Role: "user", Content: prompt}},
+		Temperature: &temp,
+	})
+	if err != nil || len(resp.Choices) == 0 {
+		return nil
+	}
+
+	content := strings.TrimSpace(resp.Choices[0].Message.Content)
+	if content == "" || strings.EqualFold(content, "not found") {
+		return nil
+	}
+
+	zap.L().Debug("scrape: resolved SoS via Perplexity",
+		zap.String("company", company.Name),
+	)
+
+	return &model.CrawledPage{
+		URL:        fmt.Sprintf("perplexity://sos/%s", company.Name),
+		Title:      "[sos] " + company.Name,
+		Markdown:   content,
+		StatusCode: 200,
 	}
 }
 

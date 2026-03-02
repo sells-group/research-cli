@@ -241,9 +241,9 @@ func TestQualityGate_ContactCreation(t *testing.T) {
 
 func TestBuildSFFields(t *testing.T) {
 	fieldValues := map[string]model.FieldValue{
-		"industry":  {SFField: "Industry", Value: "Tech"},
-		"employees": {SFField: "NumberOfEmployees", Value: 200},
-		"no_sf":     {SFField: "", Value: "ignored"}, // No SF field name.
+		"industry":       {SFField: "Industry", Value: "Tech"},
+		"employee_count": {SFField: "NumberOfEmployees", Value: 200},
+		"no_sf":          {SFField: "", Value: "ignored"}, // No SF field name.
 	}
 
 	sfFields := buildSFFields(fieldValues)

@@ -28,7 +28,7 @@ func TestExtractTier1_DirectMode(t *testing.T) {
 			Pages:    []model.ClassifiedPage{{CrawledPage: model.CrawledPage{URL: "https://acme.com/about", Markdown: "Acme is a technology company."}}},
 		},
 		{
-			Question: model.Question{ID: "q2", Text: "How many employees?", FieldKey: "employees", OutputFormat: "number"},
+			Question: model.Question{ID: "q2", Text: "How many employees?", FieldKey: "employee_count", OutputFormat: "number"},
 			Pages:    []model.ClassifiedPage{{CrawledPage: model.CrawledPage{URL: "https://acme.com/about", Markdown: "We have 200 employees."}}},
 		},
 	}
@@ -280,7 +280,7 @@ func TestParseExtractionAnswer_InvalidJSON(t *testing.T) {
 }
 
 func TestParseExtractionAnswer_JSONWithCodeFence(t *testing.T) {
-	q := model.Question{ID: "q1", FieldKey: "employees"}
+	q := model.Question{ID: "q1", FieldKey: "employee_count"}
 	text := "```json\n{\"value\": 150, \"confidence\": 0.85, \"reasoning\": \"from page\", \"source_url\": \"https://acme.com\"}\n```"
 
 	answers := parseExtractionAnswer(text, q, 1)
@@ -547,6 +547,25 @@ func TestBuildT1Context_WithAnswers(t *testing.T) {
 	assert.Contains(t, result, "industry")
 	assert.Contains(t, result, "Tech")
 	assert.Contains(t, result, "0.90")
+}
+
+func TestBuildT1ContextAnnotated_Empty(t *testing.T) {
+	result := buildT1ContextAnnotated(nil)
+	assert.Equal(t, "No previous findings.", result)
+}
+
+func TestBuildT1ContextAnnotated_WithAnswers(t *testing.T) {
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "industry", Value: "Tech", Confidence: 0.9},
+		{FieldKey: "employee_count", Value: 50, Confidence: 0.5},
+		{FieldKey: "year_founded", Value: nil, Confidence: 0.1},
+	}
+	result := buildT1ContextAnnotated(answers)
+	assert.Contains(t, result, "Tier 1 findings")
+	assert.Contains(t, result, "industry: Tech")
+	assert.Contains(t, result, "confirmed")
+	assert.Contains(t, result, "tentative")
+	assert.Contains(t, result, "unverified")
 }
 
 // --- executeBatch batch-path tests ---
@@ -1138,7 +1157,7 @@ func TestExtractTier2_FiltersHighConfidenceT1(t *testing.T) {
 		{QuestionID: "q10", FieldKey: "industry", Value: "Tech", Confidence: 0.9, Tier: 1},
 		{QuestionID: "q11", FieldKey: "founded", Value: "2010", Confidence: 0.9, Tier: 1},
 		{QuestionID: "q12", FieldKey: "revenue", Value: "unknown", Confidence: 0.3, Tier: 1},
-		{QuestionID: "q13", FieldKey: "employees", Value: "~50", Confidence: 0.3, Tier: 1},
+		{QuestionID: "q13", FieldKey: "employee_count", Value: "~50", Confidence: 0.3, Tier: 1},
 	}
 
 	aiClient := anthropicmocks.NewMockClient(t)
@@ -1163,19 +1182,18 @@ func TestExtractTier2_FiltersHighConfidenceT1(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, result.Answers, 1)
 
-	// Low-confidence answers (revenue, employees) should be present in the prompt.
+	// All T1 answers should now be present in the prompt (annotated context).
 	assert.Contains(t, capturedPrompt, "revenue")
 	assert.Contains(t, capturedPrompt, "unknown")
-	assert.Contains(t, capturedPrompt, "0.30")
-	assert.Contains(t, capturedPrompt, "employees")
+	assert.Contains(t, capturedPrompt, "employee_count")
 	assert.Contains(t, capturedPrompt, "~50")
-
-	// High-confidence answers (industry, founded) should NOT be in the prompt.
-	assert.NotContains(t, capturedPrompt, "industry: Tech")
-	assert.NotContains(t, capturedPrompt, "founded: 2010")
+	// High-confidence answers are now included as "confirmed" context.
+	assert.Contains(t, capturedPrompt, "industry")
+	assert.Contains(t, capturedPrompt, "Tech")
+	assert.Contains(t, capturedPrompt, "confirmed")
 }
 
-func TestExtractTier2_AllHighConfidence_EmptyContext(t *testing.T) {
+func TestExtractTier2_AllHighConfidence_IncludedAsContext(t *testing.T) {
 	ctx := context.Background()
 
 	routed := []model.RoutedQuestion{
@@ -1187,7 +1205,7 @@ func TestExtractTier2_AllHighConfidence_EmptyContext(t *testing.T) {
 		},
 	}
 
-	// All T1 answers above 0.4 threshold — none should pass the filter.
+	// All T1 answers are now passed as annotated context (confirmed/tentative).
 	t1Answers := []model.ExtractionAnswer{
 		{QuestionID: "q10", FieldKey: "industry", Value: "Tech", Confidence: 0.9, Tier: 1},
 		{QuestionID: "q11", FieldKey: "founded", Value: "2010", Confidence: 0.85, Tier: 1},
@@ -1215,9 +1233,11 @@ func TestExtractTier2_AllHighConfidence_EmptyContext(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, result.Answers, 1)
 
-	// With all high-confidence answers filtered out, buildT1Context receives
-	// an empty slice and returns "No previous findings."
-	assert.Contains(t, capturedPrompt, "No previous findings.")
+	// All answers are included as annotated context with confidence tags.
+	assert.Contains(t, capturedPrompt, "Tier 1 findings")
+	assert.Contains(t, capturedPrompt, "industry")
+	assert.Contains(t, capturedPrompt, "confirmed")
+	assert.Contains(t, capturedPrompt, "tentative")
 }
 
 func TestExtractTier2_AllLowConfidence_FullContext(t *testing.T) {
@@ -1311,9 +1331,9 @@ func TestBuildT1Context_FilteredInput(t *testing.T) {
 		{
 			name: "numeric value formatted correctly",
 			answers: []model.ExtractionAnswer{
-				{FieldKey: "employees", Value: float64(150), Confidence: 0.25},
+				{FieldKey: "employee_count", Value: float64(150), Confidence: 0.25},
 			},
-			contains: []string{"- employees: 150 (confidence: 0.25)"},
+			contains: []string{"- employee_count: 150 (confidence: 0.25)"},
 		},
 		{
 			name: "answers joined by newlines",
@@ -1502,15 +1522,15 @@ func TestFormatPPPContext_PartialData(t *testing.T) {
 
 func TestFormatPreSeededContext_AllFields(t *testing.T) {
 	preSeeded := map[string]any{
-		"employees":        50,
-		"naics_code":       "541512",
-		"description":      "A great company",
-		"revenue_range":    "$5,000,000",
-		"year_established": "2010",
-		"email":            "info@example.com",
-		"exec_first_name":  "John",
-		"exec_last_name":   "Doe",
-		"exec_title":       "CEO",
+		"employee_count":  50,
+		"naics_code":      "541512",
+		"description":     "A great company",
+		"revenue_range":   "$5,000,000",
+		"year_founded":    "2010",
+		"email":           "info@example.com",
+		"exec_first_name": "John",
+		"exec_last_name":  "Doe",
+		"exec_title":      "CEO",
 	}
 
 	result := FormatPreSeededContext(preSeeded)
@@ -1535,7 +1555,7 @@ func TestFormatPreSeededContext_Empty(t *testing.T) {
 
 func TestFormatPreSeededContext_Partial(t *testing.T) {
 	preSeeded := map[string]any{
-		"employees": 25,
+		"employee_count": 25,
 	}
 
 	result := FormatPreSeededContext(preSeeded)

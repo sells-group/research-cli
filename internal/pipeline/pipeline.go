@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	companypkg "github.com/sells-group/research-cli/internal/company"
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/cost"
 	"github.com/sells-group/research-cli/internal/db"
@@ -59,6 +60,10 @@ type Pipeline struct {
 	deferSFWrites  bool
 	onWriteIntent  func(*SFWriteIntent)
 	forceReExtract bool
+
+	// Company golden record importer. When set, enrichment results are
+	// persisted to the companies table after Phase 9.
+	companyImporter *companypkg.Importer
 }
 
 // New creates a new Pipeline with all dependencies.
@@ -142,6 +147,11 @@ func (p *Pipeline) SetDeferredWrites(fn func(*SFWriteIntent)) {
 // SetForceReExtract disables answer reuse so all fields are re-extracted.
 func (p *Pipeline) SetForceReExtract(force bool) {
 	p.forceReExtract = force
+}
+
+// SetCompanyImporter enables golden record persistence after Phase 9.
+func (p *Pipeline) SetCompanyImporter(imp *companypkg.Importer) {
+	p.companyImporter = imp
 }
 
 // FlushDeferredWrites executes collected SF write intents in bulk using the
@@ -304,6 +314,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	var crawlResult *model.CrawlResult
 	var externalPages []model.CrawledPage
 	var linkedInData *LinkedInData
+	var pplxIntelPage *model.CrawledPage
 	var pppMatches []ppp.LoanMatch
 	var totalUsage model.TokenUsage
 
@@ -432,6 +443,44 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		})
 	}
 
+	// Phase 1E: Perplexity Company Intel — safety net for blocked/thin sites.
+	if hasName {
+		g.Go(func() error {
+			pr := trackPhase("1e_pplx_intel", func() (*model.PhaseResult, error) {
+				page, usage, pplxErr := PerplexityIntelPhase(gCtx, company, p.perplexity)
+				if pplxErr != nil {
+					return nil, pplxErr
+				}
+				if page != nil {
+					pplxIntelPage = page
+				}
+				if usage != nil {
+					totalUsage.Add(*usage)
+				}
+				return &model.PhaseResult{
+					TokenUsage: func() model.TokenUsage {
+						if usage != nil {
+							return *usage
+						}
+						return model.TokenUsage{}
+					}(),
+					Metadata: map[string]any{"has_page": page != nil},
+				}, nil
+			})
+			phase1Mu.Lock()
+			phase1Results["1e_pplx_intel"] = pr.Status == model.PhaseStatusComplete
+			phase1Mu.Unlock()
+			return nil
+		})
+	} else {
+		trackPhase("1e_pplx_intel", func() (*model.PhaseResult, error) {
+			return &model.PhaseResult{
+				Status:   model.PhaseStatusSkipped,
+				Metadata: map[string]any{"reason": "no_company_name"},
+			}, nil
+		})
+	}
+
 	_ = g.Wait()
 
 	// Post-Phase-1 name recovery: if Phase 0 failed (or was skipped) but crawl succeeded.
@@ -444,7 +493,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	}
 
 	// Categorize Phase 1 errors: count data-producing phases that succeeded.
-	dataPhases := []string{"1a_crawl", "1b_scrape", "1c_linkedin"}
+	dataPhases := []string{"1a_crawl", "1b_scrape", "1c_linkedin", "1e_pplx_intel"}
 	var succeeded, failed int
 	var failedNames []string
 	for _, name := range dataPhases {
@@ -482,6 +531,11 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 	// Add LinkedIn data as a synthetic page if available.
 	if linkedInData != nil {
 		allPages = append(allPages, linkedInToPage(linkedInData, company))
+	}
+
+	// Add Perplexity intel page if available.
+	if pplxIntelPage != nil {
+		allPages = append(allPages, *pplxIntelPage)
 	}
 
 	if len(allPages) == 0 {
@@ -889,6 +943,14 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		parsePhoneFromPages(allPages, pageIndex)
 		// Inject review metadata directly from scraped pages (bypasses LLM).
 		allAnswers = InjectPageMetadata(allAnswers, allPages, company.PreSeeded)
+		// Parse Perplexity intel page for year_founded and employee_count.
+		if pplxIntelPage != nil {
+			pplxAnswers := ParsePerplexityIntel(pplxIntelPage.Markdown, allAnswers)
+			allAnswers = append(allAnswers, pplxAnswers...)
+		}
+		// Bridge LinkedIn employee range and founded year into extraction answers.
+		allAnswers = InjectLinkedInEmployeeEstimate(allAnswers, linkedInData)
+		allAnswers = InjectLinkedInFounded(allAnswers, linkedInData)
 		// Cross-validate employee count against LinkedIn range.
 		allAnswers = CrossValidateEmployeeCount(allAnswers, linkedInData)
 		// Validate NAICS codes against reference data and cross-reference with SoS filings.
@@ -913,6 +975,18 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 
 	result.Answers = allAnswers
 	result.FieldValues = fieldValues
+
+	// Gap-fill company City/State from extraction if still empty.
+	if result.Company.City == "" {
+		if city := fieldStr(fieldValues, "hq_city"); city != "" {
+			result.Company.City = titleCase(city)
+		}
+	}
+	if result.Company.State == "" {
+		if state := fieldStr(fieldValues, "hq_state"); state != "" {
+			result.Company.State = stateAbbreviation(state)
+		}
+	}
 
 	// ===== Phase 7B: Waterfall Cascade =====
 	var waterfallRes *waterfall.WaterfallResult
@@ -1019,6 +1093,19 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 				},
 			}, nil
 		})
+	}
+
+	// Persist to company golden record (non-fatal).
+	if p.companyImporter != nil {
+		record, importErr := p.companyImporter.Import(ctx, company, result, fieldValues)
+		if importErr != nil {
+			log.Warn("pipeline: company import failed", zap.Error(importErr))
+		} else {
+			log.Info("pipeline: company golden record updated",
+				zap.Int64("company_id", record.ID),
+				zap.String("domain", record.Domain),
+			)
+		}
 	}
 
 	// Finalize: sum per-phase costs for accurate per-model pricing.

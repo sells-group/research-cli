@@ -59,8 +59,8 @@ func TestBuildProvenance_MultiTierAttempts(t *testing.T) {
 	t.Parallel()
 
 	fieldValues := map[string]model.FieldValue{
-		"employees": {
-			FieldKey:   "employees",
+		"employee_count": {
+			FieldKey:   "employee_count",
 			Value:      "150",
 			Confidence: 0.90,
 			Source:     "website",
@@ -69,7 +69,7 @@ func TestBuildProvenance_MultiTierAttempts(t *testing.T) {
 	}
 	allAnswers := []model.ExtractionAnswer{
 		{
-			FieldKey:   "employees",
+			FieldKey:   "employee_count",
 			Value:      "100",
 			Confidence: 0.35,
 			Source:     "website",
@@ -77,7 +77,7 @@ func TestBuildProvenance_MultiTierAttempts(t *testing.T) {
 			Reasoning:  "Rough estimate",
 		},
 		{
-			FieldKey:   "employees",
+			FieldKey:   "employee_count",
 			Value:      "150",
 			Confidence: 0.90,
 			Source:     "website",
@@ -87,7 +87,7 @@ func TestBuildProvenance_MultiTierAttempts(t *testing.T) {
 	}
 
 	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "employees", SFField: "NumberOfEmployees", DataType: "integer"},
+		{Key: "employee_count", SFField: "NumberOfEmployees", DataType: "integer"},
 	})
 
 	records := BuildProvenance("run-1", "https://acme.com", fieldValues, allAnswers, nil, nil, fields)
@@ -277,7 +277,7 @@ func TestCountChanged(t *testing.T) {
 
 	records := []model.FieldProvenance{
 		{FieldKey: "revenue", ValueChanged: true},
-		{FieldKey: "employees", ValueChanged: false},
+		{FieldKey: "employee_count", ValueChanged: false},
 		{FieldKey: "industry", ValueChanged: true},
 	}
 	assert.Equal(t, 2, CountChanged(records))

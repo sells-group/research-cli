@@ -667,6 +667,131 @@ func TestScrapeSource_GoogleMaps_FallbackOnScrapeFailure(t *testing.T) {
 	assert.Equal(t, "jina_search", page.Metadata.Source)
 }
 
+func TestResolveBBBViaPerplexity(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
+
+	pplxClient := &mockPerplexityClient{
+		response: "Acme Corp has an A+ BBB rating, accredited since 2015. 0 complaints.",
+	}
+
+	page := resolveBBBViaPerplexity(ctx, company, pplxClient)
+
+	assert.NotNil(t, page)
+	assert.Equal(t, "[bbb] Acme Corp", page.Title)
+	assert.Contains(t, page.Markdown, "A+ BBB rating")
+	assert.Equal(t, 200, page.StatusCode)
+}
+
+func TestResolveBBBViaPerplexity_NotFound(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Unknown Corp", URL: "https://unknown.com"}
+
+	pplxClient := &mockPerplexityClient{response: "not found"}
+
+	page := resolveBBBViaPerplexity(ctx, company, pplxClient)
+	assert.Nil(t, page)
+}
+
+func TestResolveBBBViaPerplexity_Error(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
+
+	pplxClient := &mockPerplexityClient{err: errors.New("api error")}
+
+	page := resolveBBBViaPerplexity(ctx, company, pplxClient)
+	assert.Nil(t, page)
+}
+
+func TestResolveSoSViaPerplexity(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
+
+	pplxClient := &mockPerplexityClient{
+		response: "Acme Corp was incorporated in Delaware in 2010 as a limited liability company. Status: Active.",
+	}
+
+	page := resolveSoSViaPerplexity(ctx, company, pplxClient)
+
+	assert.NotNil(t, page)
+	assert.Equal(t, "[sos] Acme Corp", page.Title)
+	assert.Contains(t, page.Markdown, "incorporated in Delaware")
+	assert.Equal(t, 200, page.StatusCode)
+}
+
+func TestResolveSoSViaPerplexity_NotFound(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Unknown Corp", URL: "https://unknown.com"}
+
+	pplxClient := &mockPerplexityClient{response: "not found"}
+
+	page := resolveSoSViaPerplexity(ctx, company, pplxClient)
+	assert.Nil(t, page)
+}
+
+func TestScrapeSource_BBB_PerplexityFallbackOnNoResults(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
+
+	// Jina returns no results → triggers Perplexity fallback.
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string"), mock.Anything).
+		Return(&jina.SearchResponse{Code: 200, Data: []jina.SearchResult{}}, nil).Maybe()
+
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil))
+
+	pplxClient := &mockPerplexityClient{
+		response: "Acme Corp has a B+ BBB rating.",
+	}
+
+	src := ExternalSource{
+		Name: "bbb",
+		SearchQueryFunc: func(c model.Company) (string, string) {
+			return c.Name, "bbb.org"
+		},
+		ResultFilter:           filterBBBResult,
+		PerplexityFallbackFunc: resolveBBBViaPerplexity,
+	}
+
+	page, err := scrapeSource(ctx, src, company, jinaClient, chain, pplxClient, nil, defaultScrapeConfig)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, page)
+	assert.Equal(t, "[bbb] Acme Corp", page.Title)
+	assert.Contains(t, page.Markdown, "B+ BBB rating")
+}
+
+func TestScrapeSource_BBB_PerplexityFallbackOnSearchError(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
+
+	// Jina search fails → triggers Perplexity fallback.
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string"), mock.Anything).
+		Return((*jina.SearchResponse)(nil), errors.New("timeout")).Maybe()
+
+	chain := scrape.NewChain(scrape.NewPathMatcher(nil))
+
+	pplxClient := &mockPerplexityClient{
+		response: "Acme Corp has an A+ BBB rating.",
+	}
+
+	src := ExternalSource{
+		Name: "bbb",
+		SearchQueryFunc: func(c model.Company) (string, string) {
+			return c.Name, "bbb.org"
+		},
+		ResultFilter:           filterBBBResult,
+		PerplexityFallbackFunc: resolveBBBViaPerplexity,
+	}
+
+	page, err := scrapeSource(ctx, src, company, jinaClient, chain, pplxClient, nil, defaultScrapeConfig)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, page)
+	assert.Equal(t, "[bbb] Acme Corp", page.Title)
+}
+
 // mockPerplexityClient is a simple mock for testing Perplexity fallback.
 type mockPerplexityClient struct {
 	response string
