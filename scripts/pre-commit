@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-commit hook: runs go fmt, go vet, and golangci-lint on staged Go files.
+# Pre-commit hook: runs go fmt, go vet, golangci-lint, and gosec on staged Go files.
 # Install: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 #   — or — ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
 
@@ -47,6 +47,24 @@ fi
 echo "pre-commit: golangci-lint..."
 if ! $LINTER run $PACKAGES 2>&1; then
   echo "ERROR: golangci-lint failed"
+  exit 1
+fi
+
+# 4. gosec — security scanner on affected packages.
+if command -v gosec &>/dev/null; then
+  GOSEC=gosec
+elif [ -x "$HOME/go/bin/gosec" ]; then
+  GOSEC="$HOME/go/bin/gosec"
+else
+  echo "pre-commit: gosec not found, skipping security check"
+  echo "  Install: go install github.com/securego/gosec/v2/cmd/gosec@latest"
+  echo "pre-commit: all other checks passed"
+  exit 0
+fi
+
+echo "pre-commit: gosec..."
+if ! $GOSEC -quiet $PACKAGES 2>&1; then
+  echo "ERROR: gosec found security issues"
   exit 1
 fi
 
