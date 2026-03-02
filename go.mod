@@ -4,6 +4,8 @@ go 1.25.6
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.22.1
+	github.com/go-chi/chi/v5 v5.2.5
+	github.com/go-chi/cors v1.2.2
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/jlaffaye/ftp v0.2.0

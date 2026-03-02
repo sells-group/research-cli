@@ -34,6 +34,13 @@ linters:
         - fieldalignment  # struct field alignment optimization — noise
         - shadow          # too many false positives with idiomatic Go error handling
 
+  exclusions:
+    rules:
+      # "api" is the standard package name for the HTTP API layer.
+      - path: internal/api/
+        linters: [revive]
+        text: "meaningless package"
+
 formatters:
   enable:
     - gofmt
