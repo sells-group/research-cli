@@ -848,7 +848,7 @@ func (s *SQLiteStore) ListStaleCompanies(ctx context.Context, filter StaleCompan
 		GROUP BY json_extract(company, '$.url')
 		HAVING created_at = MAX(created_at)
 		ORDER BY created_at ASC`
-	args := []any{filter.LastEnrichedBefore.Format(time.RFC3339)}
+	args := []any{filter.LastEnrichedBefore.UTC()}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
