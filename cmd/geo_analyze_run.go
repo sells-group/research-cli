@@ -52,8 +52,7 @@ Use --force to skip validation checks.`,
 		// Build engine dependencies.
 		alog := analysis.NewLog(pool)
 		reg := analysis.NewRegistry()
-		// Analyzer implementations will be registered here as they are added
-		// in future issues (SELDEV-715, 716, 717, etc.).
+		analysis.RegisterAll(reg)
 		engine := analysis.NewEngine(pool, alog, reg)
 
 		log.Info("starting analysis",
