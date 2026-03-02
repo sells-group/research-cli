@@ -154,6 +154,7 @@ type FedsyncConfig struct {
 	FREDKey        string    `yaml:"fred_api_key" mapstructure:"fred_api_key"`
 	BLSKey         string    `yaml:"bls_api_key" mapstructure:"bls_api_key"`
 	CensusKey      string    `yaml:"census_api_key" mapstructure:"census_api_key"`
+	FCCBDCKey      string    `yaml:"fcc_bdc_key" mapstructure:"fcc_bdc_key"`
 	EDGARUserAgent string    `yaml:"edgar_user_agent" mapstructure:"edgar_user_agent"`
 	N8NWebhook     string    `yaml:"n8n_webhook_url" mapstructure:"n8n_webhook_url"`
 	MistralKey     string    `yaml:"mistral_api_key" mapstructure:"mistral_api_key"`
