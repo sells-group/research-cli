@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/geoscraper"
 )
 
@@ -26,12 +27,24 @@ func TestRegisterAll(t *testing.T) {
 	RegisterAll(reg, nil)
 
 	names := reg.AllNames()
-	require.Len(t, names, 7) // 4 HIFLD + 1 FEMA + 1 EPA + 1 Census
+	require.Len(t, names, 14) // 4 HIFLD + 1 FEMA + 1 EPA + 1 Census + 2 FCC + 1 NWI + 1 NRCS + 2 TIGER + 1 OSM
 
 	// All should be National category.
 	for _, s := range reg.All() {
 		assert.Equal(t, geoscraper.National, s.Category())
 	}
+}
+
+func TestRegisterAll_WithConfig(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Fedsync.CensusKey = "test-census-key"
+	cfg.Fedsync.FCCBDCKey = "test-fcc-key"
+
+	reg := geoscraper.NewRegistry()
+	RegisterAll(reg, cfg)
+
+	names := reg.AllNames()
+	require.Len(t, names, 14)
 }
 
 func TestRegisterAll_NoDuplicates(t *testing.T) {
@@ -54,4 +67,11 @@ var (
 	_ geoscraper.GeoScraper = (*FEMAFloodZones)(nil)
 	_ geoscraper.GeoScraper = (*EPASites)(nil)
 	_ geoscraper.GeoScraper = (*CensusDemographics)(nil)
+	_ geoscraper.GeoScraper = (*FCCTowers)(nil)
+	_ geoscraper.GeoScraper = (*FCCBroadband)(nil)
+	_ geoscraper.GeoScraper = (*NWIWetlands)(nil)
+	_ geoscraper.GeoScraper = (*NRCSSoils)(nil)
+	_ geoscraper.GeoScraper = (*TIGERBoundaries)(nil)
+	_ geoscraper.GeoScraper = (*TIGERRoads)(nil)
+	_ geoscraper.GeoScraper = (*OSMPOI)(nil)
 )

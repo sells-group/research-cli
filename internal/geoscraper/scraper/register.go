@@ -32,10 +32,46 @@ func RegisterCensus(reg *geoscraper.Registry, cfg *config.Config) {
 	reg.Register(&CensusDemographics{apiKey: apiKey})
 }
 
+// RegisterFCC registers all FCC scrapers.
+func RegisterFCC(reg *geoscraper.Registry, cfg *config.Config) {
+	reg.Register(&FCCTowers{})
+	var bdcKey string
+	if cfg != nil {
+		bdcKey = cfg.Fedsync.FCCBDCKey
+	}
+	reg.Register(&FCCBroadband{apiKey: bdcKey})
+}
+
+// RegisterNWI registers all NWI scrapers.
+func RegisterNWI(reg *geoscraper.Registry) {
+	reg.Register(&NWIWetlands{})
+}
+
+// RegisterNRCS registers all NRCS scrapers.
+func RegisterNRCS(reg *geoscraper.Registry) {
+	reg.Register(&NRCSSoils{})
+}
+
+// RegisterTIGER registers all TIGER/Line scrapers.
+func RegisterTIGER(reg *geoscraper.Registry) {
+	reg.Register(&TIGERBoundaries{})
+	reg.Register(&TIGERRoads{})
+}
+
+// RegisterOSM registers all OpenStreetMap scrapers.
+func RegisterOSM(reg *geoscraper.Registry) {
+	reg.Register(&OSMPOI{})
+}
+
 // RegisterAll registers all geo scraper implementations.
 func RegisterAll(reg *geoscraper.Registry, cfg *config.Config) {
 	RegisterHIFLD(reg)
 	RegisterFEMA(reg)
 	RegisterEPA(reg)
 	RegisterCensus(reg, cfg)
+	RegisterFCC(reg, cfg)
+	RegisterNWI(reg)
+	RegisterNRCS(reg)
+	RegisterTIGER(reg)
+	RegisterOSM(reg)
 }
