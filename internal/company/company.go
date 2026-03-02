@@ -96,6 +96,7 @@ const (
 	SystemLinkedIn    = "linkedin"
 	SystemGrata       = "grata"
 	SystemGooglePlace = "google_place"
+	SystemFDIC        = "fdic"
 )
 
 // Address is a physical address for a company.
