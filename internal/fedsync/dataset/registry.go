@@ -27,6 +27,7 @@ func NewRegistry(cfg *config.Config) *Registry {
 	r.Register(&EconCensus{cfg: cfg})
 	r.Register(&PPP{})
 	r.Register(&Form5500{})
+	r.Register(&EOBMF{})
 
 	// Phase 1B: Buyer Intelligence (SEC/EDGAR)
 	r.Register(&ADVPart1{})
