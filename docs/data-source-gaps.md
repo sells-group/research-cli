@@ -8,7 +8,7 @@ Last updated: 2026-03-01
 
 ## 1. Current Coverage Summary
 
-### Fedsync Datasets (30 implementations)
+### Fedsync Datasets (33 implementations)
 
 | Phase | Dataset | Source | Cadence | Table |
 |-------|---------|--------|---------|-------|
@@ -19,6 +19,7 @@ Last updated: 2026-03-01
 | 1 | FPDS | SAM.gov Federal Procurement Data System | Daily | `fed_data.fpds_contracts` |
 | 1 | Econ Census | Census Economic Census | Annual | `fed_data.economic_census` |
 | 1 | PPP | SBA Paycheck Protection Program | One-time | `fed_data.ppp_loans` |
+| 1 | EO BMF | IRS Exempt Org Business Master File | Monthly | `fed_data.eo_bmf` |
 | 1B | ADV Part 1 | SEC ADV Part 1A (Investment Advisors) | Monthly | `fed_data.adv_firms` |
 | 1B | IA Compilation | IARD Daily XML Compilation | Daily | `fed_data.adv_firms` |
 | 1B | Holdings 13F | SEC 13F Institutional Holdings | Quarterly | `fed_data.f13_holdings` |
@@ -34,6 +35,7 @@ Last updated: 2026-03-01
 | 2 | ASM | Census Annual Survey of Manufactures | Annual | `fed_data.asm_data` |
 | 2 | ECI | BLS Employment Cost Index | Quarterly | `fed_data.eci_data` |
 | 2 | SEC Enforcement | SEC Enforcement Actions | Monthly | `fed_data.sec_enforcement_actions` |
+| 2 | FDIC BankFind | FDIC Institution Financial Data | Weekly | `fed_data.fdic_institutions` |
 | 3 | ADV Part 3 | SEC Form CRS (Client Relationship Summary) | Monthly | `fed_data.adv_crs` |
 | 3 | XBRL Facts | SEC EDGAR XBRL Financial Facts | Daily | `fed_data.xbrl_facts` |
 | 3 | FRED | Federal Reserve Economic Data | Monthly | `fed_data.fred_series` |
@@ -80,12 +82,13 @@ Last updated: 2026-03-01
 - **Linker:** `matchEIN` in `internal/company/link.go`
 - **Production:** 5.9M rows across 4 tables (2020–2025)
 
-#### FDIC BankFind
+#### FDIC BankFind — DONE
 
-- **Access:** REST API (`api.fdic.gov`) + bulk CSV. No API key required.
-- **Format:** JSON/CSV
-- **Cadence:** Weekly
-- **Relevance:** Bank branch locations, financials, deposits. Cross-references BDs/RIAs that are bank-affiliated. Identifies bank trust department assets (potential acquisition targets). Low implementation effort.
+- **Status:** Implemented in `internal/fedsync/dataset/fdic_bankfind.go`
+- **Table:** `fed_data.fdic_institutions`
+- **Entity Backfill:** `cmd/geo_backfill_fdic.go` — stub companies by FDIC cert, geocode, MSA-associate
+- **Linker:** `matchFDIC` in `internal/company/link.go`
+- **Production:** Bank branch locations, financials, deposits. Cross-references BDs/RIAs that are bank-affiliated.
 
 #### NCUA Credit Union 5300 Call Reports
 
@@ -101,12 +104,14 @@ Last updated: 2026-03-01
 - **Cadence:** Daily
 - **Relevance:** Federal contract and grant recipients. Complements existing FPDS (which covers procurement only) by adding grants, loans, direct payments. Identifies firms with government relationships.
 
-#### IRS Exempt Org BMF + Form 990
+#### IRS Exempt Org BMF — DONE
 
-- **Access:** Bulk download (IRS.gov) + ProPublica Nonprofit Explorer API
-- **Format:** CSV/XML
-- **Cadence:** Monthly
-- **Relevance:** Nonprofit and foundation assets, officer compensation, grants. Many RIAs manage endowment and foundation assets — identifies potential clients and existing advisory relationships. Form 990 discloses investment managers.
+- **Status:** Implemented in `internal/fedsync/dataset/eo_bmf.go`
+- **Table:** `fed_data.eo_bmf` (28 columns, ~1.94M rows)
+- **Entity Backfill:** `cmd/geo_backfill_990.go` — stub companies by EIN, geocode, MSA-associate
+- **Linker:** `matchEOBMF` in `internal/company/link.go`
+- **Production:** 1,935,635 rows (4 regional CSVs from IRS SOI)
+- **Remaining:** Form 990 financial extracts (~300K returns/year) — natural Phase 2 follow-up via ProPublica Nonprofit Explorer API
 
 #### USPTO Patent Assignments + Trademarks
 
@@ -436,14 +441,14 @@ New fedsync datasets using the existing `Dataset` interface in `internal/fedsync
 | # | Dataset | Effort | Value | Notes |
 |---|---------|--------|-------|-------|
 | 1 | **DOL Form 5500** | ~~Medium~~ | Very High | **DONE.** 4 tables, 512 columns, 5.9M rows. `form_5500.go` + `geo_backfill_5500.go` |
-| 2 | **FDIC BankFind** | Low | High | Free REST API, no key needed. Bank financials |
+| 2 | **FDIC BankFind** | ~~Low~~ | High | **DONE.** REST API. `fdic_bankfind.go` + `geo_backfill_fdic.go` |
 | 3 | **NCUA Call Reports** | Low | High | Bulk CSV. Credit union parallel to FDIC |
-| 4 | **IRS Exempt Org / Form 990** | Medium | High | Bulk + ProPublica API. Foundation/nonprofit assets |
+| 4 | **IRS Exempt Org BMF** | ~~Medium~~ | Very High | **DONE.** 1.94M rows. `eo_bmf.go` + `geo_backfill_990.go` (EIN→eo_bmf) |
 | 5 | **USAspending** | Medium | High | REST API + bulk download. Complements existing FPDS |
 | 6 | **Expanded XBRL taxonomy** | Low | High | Same source. Expand from 16 to 100+ facts. Minimal effort |
 | 7 | **SEC N-CEN / N-PORT** | Medium | Medium | EDGAR EFTS. Same access pattern as existing SEC datasets |
 
-> **Entity aggregation pattern:** Datasets #2-5 (FDIC, NCUA, IRS 990, USAspending) all contain entity-level records with addresses. Each should include a `geo backfill-<source>` command following `cmd/geo_backfill_5500.go`. See "Entity Aggregation Pipeline" in `docs/scraper-catalog.md`.
+> **Entity aggregation pattern:** Datasets #3 and #5 (NCUA, USAspending) contain entity-level records with addresses. Each should include a `geo backfill-<source>` command following the existing pattern in `cmd/geo_backfill_5500.go`, `cmd/geo_backfill_990.go`, and `cmd/geo_backfill_fdic.go`.
 
 ### Tier 2 — High Impact, More Effort
 
@@ -486,13 +491,13 @@ Per-state scraper implementations:
 |-------------------|-----------------|-------------|-----------------|
 | **Firm identification** | ADV, EDGAR, BrokerCheck, Form BD, SoS (Jina) | State-only RIAs (~15K firms not in SEC data) | State securities regulators |
 | **AUM / assets** | ADV Part 1, 13F, XBRL (16 facts), **Form 5500** | Expanded XBRL (100+ facts), N-PORT fund data | XBRL expansion |
-| **Revenue / fees** | XBRL (limited), ADV brochure OCR | Form 990 (nonprofits), expanded XBRL facts | IRS Exempt Org + XBRL expansion |
+| **Revenue / fees** | XBRL (limited), ADV brochure OCR, **EO BMF** (nonprofit assets/income) | Expanded XBRL facts, Form 990 detail | XBRL expansion + Form 990 |
 | **Compliance risk** | SEC enforcement, BrokerCheck, OSHA, EPA ECHO | CFPB complaints, state enforcement, FINRA expanded | CFPB complaint database |
 | **Entity relationships** | entity_xref (CRD↔CIK), ADV enrichment | Parent-subsidiary chains (no source) | D&B (commercial) |
 | **Geography** | 7 geo scrapers + Census ACS + CBP | Property records, county-level economic data | ATTOM Data (commercial) |
 | **M&A signals** | Form D (offerings), FPDS (contracts), PPP | USAspending (grants), news monitoring, job postings | USAspending API |
 | **Insurance sector** | None | NAIC data, state insurance producer licenses | NIPR (commercial) or state scraping |
-| **Banking sector** | None | FDIC institutions, NCUA credit unions | FDIC BankFind API |
+| **Banking sector** | FDIC BankFind | NCUA credit unions | NCUA Call Reports |
 | **Advisory personnel** | LinkedIn (Perplexity), BrokerCheck reps | CFP Board directory, FPA/NAPFA membership | CFP Board scrape |
 | **Debt / capital structure** | PPP, SBA (historical), **Form 5500** (Schedule H plan loans) | SBA 7(a)/504, UCC filings | SBA loan data |
 | **IP / innovation** | None | Patent assignments, trademark filings | USPTO API |
