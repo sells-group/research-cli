@@ -102,7 +102,7 @@ func (d *EDGARSubmissions) Sync(ctx context.Context, pool db.Pool, f fetcher.Fet
 
 	// Extract all JSON files from the ZIP.
 	extractDir := filepath.Join(tempDir, "submissions")
-	if err := os.MkdirAll(extractDir, 0o755); err != nil {
+	if err := os.MkdirAll(extractDir, 0o750); err != nil {
 		return nil, eris.Wrap(err, "edgar_submissions: create extract dir")
 	}
 	defer os.RemoveAll(extractDir) //nolint:errcheck
@@ -260,7 +260,7 @@ func (d *EDGARSubmissions) Sync(ctx context.Context, pool db.Pool, f fetcher.Fet
 }
 
 func (d *EDGARSubmissions) parseSubmissionFile(path string) (*submissionJSON, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- path constructed from extracted ZIP in trusted temp directory
 	if err != nil {
 		return nil, eris.Wrap(err, "open submission file")
 	}

@@ -114,7 +114,7 @@ func (f *FTPFetcher) DownloadToFile(ctx context.Context, ftpURL string, path str
 	}
 	defer rc.Close() //nolint:errcheck
 
-	file, err := os.Create(path)
+	file, err := os.Create(path) // #nosec G304 -- path from function parameter in internal package
 	if err != nil {
 		return 0, eris.Wrap(err, "create file")
 	}

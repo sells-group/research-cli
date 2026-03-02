@@ -10,6 +10,9 @@ import (
 	"github.com/rotisserie/eris"
 )
 
+// maxDecompressSize is the maximum allowed size for a single decompressed ZIP entry (10 GB).
+const maxDecompressSize = 10 << 30
+
 // ExtractZIP extracts all files from a ZIP archive to the destination directory.
 // Returns the list of extracted file paths.
 func ExtractZIP(zipPath, destDir string) ([]string, error) {
@@ -77,21 +80,22 @@ func ExtractZIPSingle(zipPath, destDir string) (string, error) {
 // extractZIPEntry extracts a single zip.File to the destination directory.
 // Returns the extracted file path, or empty string for directories.
 func extractZIPEntry(f *zip.File, destDir string) (string, error) {
-	// Sanitize against zip slip
-	destPath := filepath.Join(destDir, f.Name)
-	if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(destDir)+string(os.PathSeparator)) {
+	// Clean the path and ensure it doesn't escape the target directory.
+	destPath := filepath.Join(destDir, f.Name) // #nosec G305 -- validated by HasPrefix check below
+	cleanDest := filepath.Clean(destPath)
+	if !strings.HasPrefix(cleanDest, filepath.Clean(destDir)+string(os.PathSeparator)) {
 		return "", eris.Errorf("zip: illegal path %q (zip slip attempt)", f.Name)
 	}
 
 	if f.FileInfo().IsDir() {
-		if err := os.MkdirAll(destPath, 0o755); err != nil {
+		if err := os.MkdirAll(cleanDest, 0o750); err != nil {
 			return "", eris.Wrap(err, "zip: create directory")
 		}
 		return "", nil
 	}
 
 	// Ensure parent directory exists
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cleanDest), 0o750); err != nil {
 		return "", eris.Wrap(err, "zip: create parent directory")
 	}
 
@@ -101,15 +105,15 @@ func extractZIPEntry(f *zip.File, destDir string) (string, error) {
 	}
 	defer rc.Close() //nolint:errcheck
 
-	out, err := os.Create(destPath)
+	out, err := os.Create(cleanDest) // #nosec G304 -- path is validated against destDir above
 	if err != nil {
 		return "", eris.Wrap(err, "zip: create file")
 	}
 	defer out.Close() //nolint:errcheck
 
-	if _, err := io.Copy(out, rc); err != nil {
+	if _, err := io.Copy(out, io.LimitReader(rc, maxDecompressSize)); err != nil {
 		return "", eris.Wrap(err, "zip: write file")
 	}
 
-	return destPath, nil
+	return cleanDest, nil
 }

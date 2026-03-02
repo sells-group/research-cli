@@ -32,7 +32,7 @@ var sfReportColumns = []string{
 
 // ExportSFReportCSV writes enrichment results as a SF report-format CSV file.
 func ExportSFReportCSV(results []*model.EnrichmentResult, originals []SFReportCompany, outputPath string) error {
-	f, err := os.Create(outputPath)
+	f, err := os.Create(outputPath) // #nosec G304 -- path from CLI flag
 	if err != nil {
 		return eris.Wrap(err, "sf-report export: create file")
 	}

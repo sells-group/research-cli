@@ -122,7 +122,7 @@ func serveTile(w http.ResponseWriter, r *http.Request, pool db.Pool, layers map[
 	if cached := cache.Get(layerName, z, x, y); cached != nil {
 		w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
 		w.Header().Set("X-Cache", "hit")
-		_, _ = w.Write(cached)
+		_, _ = w.Write(cached) // #nosec G705 -- cached is binary MVT tile data from internal cache, not user-controlled HTML
 		return
 	}
 

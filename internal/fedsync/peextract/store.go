@@ -415,7 +415,7 @@ func jsonValue(v any) json.RawMessage {
 
 func itoa(n int) string {
 	if n < 10 {
-		return string(rune('0' + n))
+		return string(rune('0' + n)) // #nosec G115 -- n is 0-9, result fits in rune
 	}
-	return string(rune('0'+n/10)) + string(rune('0'+n%10))
+	return string(rune('0'+n/10)) + string(rune('0'+n%10)) // #nosec G115 -- n is 10-99 (two-digit), both digits fit in rune
 }

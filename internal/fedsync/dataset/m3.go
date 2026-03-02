@@ -107,8 +107,8 @@ func (d *M3) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _ string
 		r := []any{
 			catCode,
 			dataType,
-			int16(year),
-			int16(month),
+			int16(year),  // #nosec G115 -- year is a calendar year (e.g. 2000-2030), fits in int16
+			int16(month), // #nosec G115 -- month is 1-12, fits in int16
 			parseInt64Or(cellValue, 0),
 		}
 

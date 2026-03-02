@@ -57,7 +57,7 @@ func polyLineToMultiLineString(pl *shp.PolyLine) geom.T {
 		if i+1 < pl.NumParts {
 			end = pl.Parts[i+1]
 		} else {
-			end = int32(len(pl.Points))
+			end = int32(len(pl.Points)) // #nosec G115 -- shapefile point count bounded by Census TIGER data, well within int32 range
 		}
 
 		coords := make([]geom.Coord, 0, end-start)
@@ -92,7 +92,7 @@ func polygonToMultiPolygon(p *shp.Polygon) geom.T {
 		if i+1 < p.NumParts {
 			end = p.Parts[i+1]
 		} else {
-			end = int32(len(p.Points))
+			end = int32(len(p.Points)) // #nosec G115 -- shapefile point count bounded by Census TIGER data, well within int32 range
 		}
 
 		coords := make([]geom.Coord, 0, end-start)

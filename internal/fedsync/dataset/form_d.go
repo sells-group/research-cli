@@ -150,7 +150,7 @@ func (d *FormD) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempD
 			continue
 		}
 
-		xmlFile, err := os.Open(xmlPath)
+		xmlFile, err := os.Open(xmlPath) // #nosec G304 -- path constructed from downloaded EDGAR filing in trusted temp directory
 		if err != nil {
 			_ = os.Remove(xmlPath)
 			continue

@@ -119,5 +119,5 @@ func (d *BrokerCheck) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher,
 }
 
 func openFileForRead(path string) (*os.File, error) {
-	return os.Open(path)
+	return os.Open(path) // #nosec G304 -- path from function parameter in internal package, used for trusted downloaded files
 }

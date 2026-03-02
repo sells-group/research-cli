@@ -188,7 +188,7 @@ func (d *CBP) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int)
 		fipsCounty := transform.NormalizeFIPSCounty(trimQuotes(getCol(record, colIdx, "fipscty")))
 
 		row := []any{
-			int16(year),
+			int16(year), // #nosec G115 -- year is a calendar year (e.g. 2000-2030), fits in int16
 			fipsState,
 			fipsCounty,
 			naics,

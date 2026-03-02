@@ -139,7 +139,7 @@ func (c *httpClient) retryDo(ctx context.Context, req *http.Request) ([]byte, in
 		// Clone request for retry (body is nil for GET requests).
 		retryReq := req.Clone(ctx)
 
-		resp, err := c.http.Do(retryReq)
+		resp, err := c.http.Do(retryReq) // #nosec G704 -- URL constructed from configured Jina API base URL
 		if err != nil {
 			lastErr = err
 			if attempt < maxAttempts {

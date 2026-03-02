@@ -183,7 +183,7 @@ func (f *HTTPFetcher) doWithRetry(ctx context.Context, req *http.Request) (*http
 		}
 
 		cloned := req.Clone(ctx)
-		resp, err := f.client.Do(cloned)
+		resp, err := f.client.Do(cloned) // #nosec G704 -- URL constructed from configured API base URL
 		if err != nil {
 			lastErr = err
 			zap.L().Warn("http request failed, retrying",
@@ -240,7 +240,7 @@ func (f *HTTPFetcher) backoff(ctx context.Context, attempt int) {
 	if d > maxBackoff {
 		d = maxBackoff
 	}
-	jitter := time.Duration(rand.Int64N(int64(d) / 2))
+	jitter := time.Duration(rand.Int64N(int64(d) / 2)) // #nosec G404 -- used for non-security jitter/backoff
 	d = d + jitter
 
 	t := time.NewTimer(d)
@@ -280,7 +280,7 @@ func (f *HTTPFetcher) DownloadToFile(ctx context.Context, rawURL string, path st
 	}
 	defer body.Close() //nolint:errcheck
 
-	file, err := os.Create(path)
+	file, err := os.Create(path) // #nosec G304 -- path from function parameter in internal package
 	if err != nil {
 		return 0, eris.Wrap(err, "create file")
 	}
