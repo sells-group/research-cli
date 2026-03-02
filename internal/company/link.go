@@ -64,9 +64,15 @@ func (l *Linker) LinkFedData(ctx context.Context, companyID int64) (int, error) 
 			n, err := l.matchEIN(ctx, companyID, id.Identifier)
 			if err != nil {
 				log.Warn("link: EIN match failed", zap.Error(err))
-				continue
+			} else {
+				matched += n
 			}
-			matched += n
+			n, err = l.matchEOBMF(ctx, companyID, id.Identifier)
+			if err != nil {
+				log.Warn("link: EO BMF match failed", zap.Error(err))
+			} else {
+				matched += n
+			}
 		}
 	}
 
@@ -249,6 +255,31 @@ func (l *Linker) matchFuzzyName(ctx context.Context, companyID int64, name, stat
 		MatchedKey:    cik,
 		MatchType:     "fuzzy_name",
 		Confidence:    ptrFloat(sim),
+	}
+	if err := l.store.UpsertMatch(ctx, m); err != nil {
+		return 0, err
+	}
+	return 1, nil
+}
+
+func (l *Linker) matchEOBMF(ctx context.Context, companyID int64, ein string) (int, error) {
+	var orgName string
+	err := l.pool.QueryRow(ctx,
+		`SELECT name FROM fed_data.eo_bmf WHERE ein = $1 LIMIT 1`, ein).
+		Scan(&orgName)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 0, nil
+		}
+		return 0, eris.Wrap(err, "link: query eo_bmf")
+	}
+
+	m := &Match{
+		CompanyID:     companyID,
+		MatchedSource: "eo_bmf",
+		MatchedKey:    ein,
+		MatchType:     "direct_ein",
+		Confidence:    ptrFloat(1.0),
 	}
 	if err := l.store.UpsertMatch(ctx, m); err != nil {
 		return 0, err
