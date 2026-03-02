@@ -319,8 +319,9 @@ type BatchConfig struct {
 
 // ServerConfig configures the webhook server.
 type ServerConfig struct {
-	Port          int    `yaml:"port" mapstructure:"port"`
-	WebhookSecret string `yaml:"webhook_secret" mapstructure:"webhook_secret"`
+	Port          int      `yaml:"port" mapstructure:"port"`
+	WebhookSecret string   `yaml:"webhook_secret" mapstructure:"webhook_secret"`
+	CORSOrigins   []string `yaml:"cors_origins" mapstructure:"cors_origins"`
 }
 
 // LogConfig configures logging.
@@ -429,6 +430,7 @@ func Load() (*Config, error) {
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "json")
 	v.SetDefault("server.port", 8080)
+	v.SetDefault("server.cors_origins", []string{"https://*.sellsadvisors.com"})
 	v.SetDefault("batch.max_concurrent_companies", 15)
 	v.SetDefault("crawl.max_pages", 50)
 	v.SetDefault("crawl.max_depth", 2)
