@@ -114,15 +114,9 @@ func crawlViaFirecrawl(ctx context.Context, companyURL string, cfg config.CrawlC
 	if maxPages == 0 {
 		maxPages = 50
 	}
-	maxDepth := cfg.MaxDepth
-	if maxDepth == 0 {
-		maxDepth = 2
-	}
-
 	crawlResp, err := client.Crawl(ctx, firecrawl.CrawlRequest{
-		URL:      companyURL,
-		MaxDepth: maxDepth,
-		Limit:    maxPages,
+		URL:   companyURL,
+		Limit: maxPages,
 	})
 	if err != nil {
 		return nil, eris.Wrap(err, "crawl: firecrawl start")

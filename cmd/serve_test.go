@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,56 +12,25 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sells-group/research-cli/internal/api"
+	"github.com/sells-group/research-cli/internal/config"
 )
 
-// buildServeMux builds the same mux as serve.go's handler for testing.
-// We replicate the handler setup here because the serve command couples
-// handler registration with server lifecycle (initPipeline, ListenAndServe).
-func buildTestMux() *http.ServeMux {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	})
-
-	mux.HandleFunc("POST /webhook/enrich", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			URL          string `json:"url"`
-			SalesforceID string `json:"salesforce_id"`
-			Name         string `json:"name"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
-			return
-		}
-
-		if req.URL == "" {
-			http.Error(w, `{"error":"url is required"}`, http.StatusBadRequest)
-			return
-		}
-
-		// In the real handler, enrichment runs asynchronously.
-		// For testing we just verify the response format.
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"status":  "accepted",
-			"company": req.URL,
-		})
-	})
-
-	return mux
+func testRouter() http.Handler {
+	return api.Router(api.NewHandlers(
+		&config.Config{Server: config.ServerConfig{Port: 8080}},
+		nil, nil, nil,
+	))
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	mux := buildTestMux()
+	router := testRouter()
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
 
-	mux.ServeHTTP(rr, req)
+	router.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Header().Get("Content-Type"), "application/json")
@@ -74,7 +42,7 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestWebhookEnrich_Valid(t *testing.T) {
-	mux := buildTestMux()
+	router := testRouter()
 
 	payload := map[string]string{
 		"url":           "https://acme.com",
@@ -87,7 +55,7 @@ func TestWebhookEnrich_Valid(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	mux.ServeHTTP(rr, req)
+	router.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusAccepted, rr.Code)
 	assert.Contains(t, rr.Header().Get("Content-Type"), "application/json")
@@ -100,7 +68,7 @@ func TestWebhookEnrich_Valid(t *testing.T) {
 }
 
 func TestWebhookEnrich_MissingURL(t *testing.T) {
-	mux := buildTestMux()
+	router := testRouter()
 
 	payload := map[string]string{
 		"salesforce_id": "001ABC",
@@ -112,40 +80,40 @@ func TestWebhookEnrich_MissingURL(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	mux.ServeHTTP(rr, req)
+	router.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 	assert.Contains(t, rr.Body.String(), "url is required")
 }
 
 func TestWebhookEnrich_InvalidJSON(t *testing.T) {
-	mux := buildTestMux()
+	router := testRouter()
 
 	req := httptest.NewRequest(http.MethodPost, "/webhook/enrich", bytes.NewReader([]byte("not json")))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	mux.ServeHTTP(rr, req)
+	router.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 	assert.Contains(t, rr.Body.String(), "invalid request body")
 }
 
 func TestWebhookEnrich_EmptyBody(t *testing.T) {
-	mux := buildTestMux()
+	router := testRouter()
 
 	req := httptest.NewRequest(http.MethodPost, "/webhook/enrich", bytes.NewReader([]byte("{}")))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	mux.ServeHTTP(rr, req)
+	router.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 	assert.Contains(t, rr.Body.String(), "url is required")
 }
 
 func TestWebhookEnrich_URLOnlyMinimal(t *testing.T) {
-	mux := buildTestMux()
+	router := testRouter()
 
 	// Only URL provided, no salesforce_id or name.
 	payload := map[string]string{
@@ -157,7 +125,7 @@ func TestWebhookEnrich_URLOnlyMinimal(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	mux.ServeHTTP(rr, req)
+	router.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusAccepted, rr.Code)
 
@@ -201,7 +169,7 @@ func TestBatchCmd_Metadata(t *testing.T) {
 
 func TestWebhookSemSize_Value(t *testing.T) {
 	// The semaphore constant must be 20 to match Fly.io concurrency expectations.
-	assert.Equal(t, 20, webhookSemSize)
+	assert.Equal(t, 20, api.WebhookSemSize)
 }
 
 func TestWebhookEnrich_SemaphoreFull(t *testing.T) {
@@ -270,16 +238,16 @@ func TestWebhookEnrich_SemaphoreFull(t *testing.T) {
 }
 
 func TestWebhookEnrich_AcceptsUnderCapacity(t *testing.T) {
-	// Use the real buildMux (with the production semaphore of size 20) to
-	// verify that a single request is accepted when far under capacity.
-	ctx := context.Background()
-	mux, _ := buildMux(ctx, nil, nil, "", nil)
+	// Use the api.Router with a nil pipeline — the goroutine releases the
+	// semaphore immediately, so every request should be accepted.
+	router := api.Router(api.NewHandlers(
+		&config.Config{Server: config.ServerConfig{Port: 8080}},
+		nil, nil, nil,
+	))
 
-	ts := httptest.NewServer(mux)
+	ts := httptest.NewServer(router)
 	defer ts.Close()
 
-	// Send several requests sequentially. With nil pipeline the goroutine
-	// releases the semaphore immediately, so every request should be accepted.
 	var accepted atomic.Int32
 	var wg sync.WaitGroup
 	const numRequests = 5

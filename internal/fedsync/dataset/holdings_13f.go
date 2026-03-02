@@ -209,7 +209,7 @@ func (d *Holdings13F) downloadAndParseHoldings(
 	}
 	defer os.Remove(xmlPath) //nolint:errcheck
 
-	file, err := os.Open(xmlPath)
+	file, err := os.Open(xmlPath) // #nosec G304 -- path constructed from downloaded EDGAR filing in trusted temp directory
 	if err != nil {
 		return nil, eris.Wrap(err, "open 13F XML")
 	}

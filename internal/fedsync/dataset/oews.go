@@ -157,7 +157,8 @@ func (d *OEWS) parseXLSX(ctx context.Context, pool db.Pool, zf *zip.File, year i
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath) //nolint:errcheck
 
-	if _, err := io.Copy(tmpFile, rc); err != nil {
+	const maxXLSXSize = 500 << 20 // 500 MB cap for decompressed OEWS XLSX
+	if _, err := io.Copy(tmpFile, io.LimitReader(rc, maxXLSXSize)); err != nil {
 		_ = tmpFile.Close()
 		_ = rc.Close()
 		return 0, eris.Wrap(err, "oews: extract xlsx")
@@ -229,7 +230,7 @@ func (d *OEWS) parseXLSX(ctx context.Context, pool db.Pool, zf *zip.File, year i
 			areaType,
 			naics,
 			occCode,
-			int16(year),
+			int16(year), // #nosec G115 -- year is a calendar year (e.g. 2020-2030), fits in int16
 			parseIntOr(trimQuotes(getCol(record, colIdx, "tot_emp")), 0),
 			parseFloat64Or(trimQuotes(getCol(record, colIdx, "h_mean")), 0),
 			parseIntOr(trimQuotes(getCol(record, colIdx, "a_mean")), 0),
@@ -326,7 +327,7 @@ func (d *OEWS) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int
 			areaType,
 			naics,
 			occCode,
-			int16(year),
+			int16(year), // #nosec G115 -- year is a calendar year (e.g. 2020-2030), fits in int16
 			parseIntOr(trimQuotes(getCol(record, colIdx, "tot_emp")), 0),
 			parseFloat64Or(trimQuotes(getCol(record, colIdx, "h_mean")), 0),
 			parseIntOr(trimQuotes(getCol(record, colIdx, "a_mean")), 0),

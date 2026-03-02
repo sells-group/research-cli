@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/rotisserie/eris"
 )
@@ -23,7 +24,8 @@ func NewPdfToText(binPath string) *PdfToText {
 
 // ExtractText runs pdftotext -layout on the given PDF and returns stdout.
 func (p *PdfToText) ExtractText(ctx context.Context, pdfPath string) (string, error) {
-	cmd := exec.CommandContext(ctx, p.binPath, "-layout", pdfPath, "-")
+	pdfPath = filepath.Clean(pdfPath)
+	cmd := exec.CommandContext(ctx, p.binPath, "-layout", pdfPath, "-") // #nosec G204 -- pdfPath from internal OCR pipeline, not user input; binPath is pdftotext binary
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

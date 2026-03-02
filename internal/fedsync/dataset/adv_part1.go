@@ -153,7 +153,7 @@ func syncFOIAMonth(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir
 
 	// Extract ZIP to temp dir.
 	extractDir := filepath.Join(tempDir, "adv_filing_extract")
-	if err := os.MkdirAll(extractDir, 0o755); err != nil {
+	if err := os.MkdirAll(extractDir, 0o750); err != nil {
 		return 0, 0, eris.Wrap(err, "adv_part1: create extract dir")
 	}
 	defer os.RemoveAll(extractDir) //nolint:errcheck
@@ -479,7 +479,7 @@ func (d *ADVPart1) SyncFull(ctx context.Context, pool db.Pool, f fetcher.Fetcher
 
 			// Use a per-month temp subdirectory to avoid file collisions.
 			monthDir := filepath.Join(tempDir, fmt.Sprintf("foia_month_%d", i))
-			if err := os.MkdirAll(monthDir, 0o755); err != nil {
+			if err := os.MkdirAll(monthDir, 0o750); err != nil {
 				return nil, eris.Wrapf(err, "adv_part1: create month dir %d", i)
 			}
 
@@ -516,10 +516,10 @@ func (d *ADVPart1) SyncFull(ctx context.Context, pool db.Pool, f fetcher.Fetcher
 func (d *ADVPart1) syncHistorical(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string, log *zap.Logger) (firms, owners, funds int64, err error) {
 	part1Dir := filepath.Join(tempDir, "adv_part1")
 	part2Dir := filepath.Join(tempDir, "adv_part2")
-	if err := os.MkdirAll(part1Dir, 0o755); err != nil {
+	if err := os.MkdirAll(part1Dir, 0o750); err != nil {
 		return 0, 0, 0, eris.Wrap(err, "adv_part1: create part1 dir")
 	}
-	if err := os.MkdirAll(part2Dir, 0o755); err != nil {
+	if err := os.MkdirAll(part2Dir, 0o750); err != nil {
 		return 0, 0, 0, eris.Wrap(err, "adv_part1: create part2 dir")
 	}
 
@@ -850,7 +850,7 @@ func parseDate(s string) *time.Time {
 // buildLatestFilingMap scans a base CSV to find the max FilingID per CRD.
 // Expects columns: FilingID (or Filing_ID), 1E1 (CRD number).
 func buildLatestFilingMap(path string, out map[string]int64) error {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path constructed from extracted ZIP in trusted temp directory
 	if err != nil {
 		return eris.Wrap(err, "open base file")
 	}
@@ -900,7 +900,7 @@ func buildLatestFilingMap(path string, out map[string]int64) error {
 
 // buildWebsiteMap scans Schedule D 1I to find the first website per FilingID.
 func buildWebsiteMap(path string, out map[int64]string, latestFiling map[string]int64) error {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path constructed from extracted ZIP in trusted temp directory
 	if err != nil {
 		return eris.Wrap(err, "open schedule_d_1i")
 	}
@@ -960,7 +960,7 @@ func buildWebsiteMap(path string, out map[int64]string, latestFiling map[string]
 // Base_B contains Item 2 data (SEC registration, exempt reporting, state registration)
 // keyed only by FilingID (no CRD column). This data is merged into filing rows at upsert time.
 func buildBaseBMap(path string) (map[int64]map[string]string, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path constructed from extracted ZIP in trusted temp directory
 	if err != nil {
 		return nil, eris.Wrap(err, "open base_b file")
 	}
@@ -1010,7 +1010,7 @@ func buildBaseBMap(path string) (map[int64]map[string]string, error) {
 // Firm identity rows (adv_firms) always use latest-filing filtering regardless.
 func streamBaseFile(ctx context.Context, pool db.Pool, path string, latestFiling map[string]int64, websiteMap map[int64]string, baseBMap map[int64]map[string]string, log *zap.Logger, retainAllFilings ...bool) (firmCount, filingCount int64, err error) {
 	retainAll := len(retainAllFilings) > 0 && retainAllFilings[0]
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path constructed from extracted ZIP in trusted temp directory
 	if err != nil {
 		return 0, 0, eris.Wrap(err, "open base file")
 	}
@@ -1166,7 +1166,7 @@ func streamBaseFile(ctx context.Context, pool db.Pool, path string, latestFiling
 
 // streamOwnerFile streams a Schedule A/B CSV, filters to latest filings, upserts owners.
 func streamOwnerFile(ctx context.Context, pool db.Pool, path string, latestFiling map[string]int64, cols, conflictKeys []string, log *zap.Logger) (int64, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path constructed from extracted ZIP in trusted temp directory
 	if err != nil {
 		return 0, eris.Wrap(err, "open owner file")
 	}
@@ -1262,7 +1262,7 @@ func streamOwnerFile(ctx context.Context, pool db.Pool, path string, latestFilin
 // streamFundFile streams a Schedule D 7B1 CSV, filters to latest filings, upserts funds.
 // Also writes to adv_fund_filings for historical fund AUM tracking.
 func streamFundFile(ctx context.Context, pool db.Pool, path string, latestFiling map[string]int64, cols, conflictKeys []string, log *zap.Logger) (int64, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path constructed from extracted ZIP in trusted temp directory
 	if err != nil {
 		return 0, eris.Wrap(err, "open fund file")
 	}

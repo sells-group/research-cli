@@ -1,0 +1,158 @@
+package pipeline
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestDetectCSVFormat_SFReport(t *testing.T) {
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "report.csv")
+	content := "Account Name,Account ID,Website,Ownership,Year Founded\nAcme Corp,001xx,acme.com,Private,2010\n"
+	if err := os.WriteFile(csvPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	format, err := DetectCSVFormat(csvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format != CSVFormatSFReport {
+		t.Errorf("got format %q, want %q", format, CSVFormatSFReport)
+	}
+}
+
+func TestDetectCSVFormat_Grata(t *testing.T) {
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "grata.csv")
+	content := "Domain,Name,City,State\nacme.com,Acme,NYC,NY\n"
+	if err := os.WriteFile(csvPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	format, err := DetectCSVFormat(csvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format != CSVFormatGrata {
+		t.Errorf("got format %q, want %q", format, CSVFormatGrata)
+	}
+}
+
+func TestDetectCSVFormat_Unknown(t *testing.T) {
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "unknown.csv")
+	content := "Foo,Bar,Baz\n1,2,3\n"
+	if err := os.WriteFile(csvPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	format, err := DetectCSVFormat(csvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format != CSVFormatUnknown {
+		t.Errorf("got format %q, want %q", format, CSVFormatUnknown)
+	}
+}
+
+func TestParseSFReportCSV(t *testing.T) {
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "report.csv")
+	content := `Account Name,Account ID,Website,Ownership,Year Founded
+Acme Medical,001ABC,acme-medical.com,Private,2015
+Beta Health,002DEF,betahealth.com,Public,2008
+,003GHI,,Private,
+`
+	if err := os.WriteFile(csvPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	companies, err := ParseSFReportCSV(csvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Third row has no Account ID after trim, but has website empty — should be skipped.
+	if len(companies) != 2 {
+		t.Fatalf("got %d companies, want 2", len(companies))
+	}
+
+	// First company.
+	c := companies[0]
+	if c.Name != "Acme Medical" {
+		t.Errorf("company[0].Name = %q, want %q", c.Name, "Acme Medical")
+	}
+	if c.AccountID != "001ABC" {
+		t.Errorf("company[0].AccountID = %q, want %q", c.AccountID, "001ABC")
+	}
+	if c.URL != "https://acme-medical.com" {
+		t.Errorf("company[0].URL = %q, want %q", c.URL, "https://acme-medical.com")
+	}
+	if c.SalesforceID != "001ABC" {
+		t.Errorf("company[0].SalesforceID = %q, want %q", c.SalesforceID, "001ABC")
+	}
+	if c.Ownership != "Private" {
+		t.Errorf("company[0].Ownership = %q, want %q", c.Ownership, "Private")
+	}
+}
+
+func TestParseSFReportCSV_Dedup(t *testing.T) {
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "report.csv")
+	content := `Account Name,Account ID,Website,Ownership
+Acme One,001A,acme.com,Private
+Acme Two,002B,ACME.COM,Public
+`
+	if err := os.WriteFile(csvPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	companies, err := ParseSFReportCSV(csvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(companies) != 1 {
+		t.Fatalf("got %d companies, want 1 (dedup by URL)", len(companies))
+	}
+}
+
+func TestCompaniesFromSFReport(t *testing.T) {
+	reports := []SFReportCompany{
+		{Ownership: "Private", AccountID: "001"},
+		{Ownership: "Public", AccountID: "002"},
+	}
+	reports[0].Name = "Acme"
+	reports[0].URL = "https://acme.com"
+	reports[1].Name = "Beta"
+	reports[1].URL = "https://beta.com"
+
+	companies := CompaniesFromSFReport(reports)
+	if len(companies) != 2 {
+		t.Fatalf("got %d companies, want 2", len(companies))
+	}
+	if companies[0].Name != "Acme" {
+		t.Errorf("companies[0].Name = %q, want %q", companies[0].Name, "Acme")
+	}
+}
+
+func TestNormalizeWebsite(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"acme.com", "https://acme.com"},
+		{"https://acme.com", "https://acme.com"},
+		{"http://acme.com", "http://acme.com"},
+		{"  acme.com  ", "https://acme.com"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		got := normalizeWebsite(tt.input)
+		if got != tt.want {
+			t.Errorf("normalizeWebsite(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

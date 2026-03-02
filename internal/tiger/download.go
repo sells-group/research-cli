@@ -14,6 +14,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// maxTigerDecompressSize is the maximum allowed size for a single decompressed TIGER file entry (10 GB).
+const maxTigerDecompressSize = 10 << 30
+
 // Download fetches a TIGER/Line ZIP file from Census Bureau and extracts shapefiles.
 // Returns the path to the extracted .shp file.
 func Download(ctx context.Context, url, destDir string) (string, error) {
@@ -22,7 +25,7 @@ func Download(ctx context.Context, url, destDir string) (string, error) {
 		zap.String("url", url),
 	)
 
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
+	if err := os.MkdirAll(destDir, 0o750); err != nil {
 		return "", eris.Wrap(err, "tiger: create dest dir")
 	}
 
@@ -43,7 +46,7 @@ func Download(ctx context.Context, url, destDir string) (string, error) {
 
 	// Extract ZIP.
 	extractDir := filepath.Join(destDir, strings.TrimSuffix(zipName, ".zip"))
-	if err := os.MkdirAll(extractDir, 0o755); err != nil {
+	if err := os.MkdirAll(extractDir, 0o750); err != nil {
 		return "", eris.Wrap(err, "tiger: create extract dir")
 	}
 
@@ -79,7 +82,7 @@ func downloadFile(ctx context.Context, url, dest string) error {
 		return eris.Errorf("download returned status %d", resp.StatusCode)
 	}
 
-	f, err := os.Create(dest)
+	f, err := os.Create(dest) // #nosec G304 -- path from function parameter in internal package
 	if err != nil {
 		return eris.Wrap(err, "create file")
 	}
@@ -113,13 +116,13 @@ func extractZIP(zipPath, destDir string) error {
 			return eris.Wrapf(err, "open zip entry %s", f.Name)
 		}
 
-		outFile, err := os.Create(destPath)
+		outFile, err := os.Create(destPath) // #nosec G304 -- destPath derived from filepath.Base of zip entry within known destDir
 		if err != nil {
 			_ = rc.Close()
 			return eris.Wrapf(err, "create %s", destPath)
 		}
 
-		if _, err := io.Copy(outFile, rc); err != nil {
+		if _, err := io.Copy(outFile, io.LimitReader(rc, maxTigerDecompressSize)); err != nil {
 			_ = outFile.Close()
 			_ = rc.Close()
 			return eris.Wrapf(err, "extract %s", f.Name)

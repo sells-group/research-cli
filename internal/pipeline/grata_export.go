@@ -39,7 +39,7 @@ var grataColumns = []string{
 
 // ExportGrataCSV writes enrichment results as a Grata-format CSV file.
 func ExportGrataCSV(results []*model.EnrichmentResult, outputPath string) error {
-	f, err := os.Create(outputPath)
+	f, err := os.Create(outputPath) // #nosec G304 -- path from CLI flag
 	if err != nil {
 		return eris.Wrap(err, "grata export: create file")
 	}
@@ -71,7 +71,7 @@ func buildGrataRow(r *model.EnrichmentResult) []string {
 		r.Company.Name,                  // Name
 		fieldStr(fv, "description"),     // Description
 		formatRevenue(fv),               // Revenue Estimate
-		fieldStr(fv, "employees"),       // Employee Estimate
+		fieldStr(fv, "employee_count"),  // Employee Estimate
 		fieldStr(fv, "review_count"),    // Total Review Count
 		fieldStr(fv, "review_rating"),   // Aggregate Rating
 		fieldStr(fv, "naics_code"),      // NAICS 6
@@ -147,7 +147,7 @@ func formatDollars(n float64) string {
 		if i > 0 && (len(s)-i)%3 == 0 {
 			result = append(result, ',')
 		}
-		result = append(result, byte(c))
+		result = append(result, byte(c)) // #nosec G115 -- c is always an ASCII digit from fmt.Sprintf("%d"), fits in byte
 	}
 
 	prefix := "$"

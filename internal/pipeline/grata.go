@@ -17,7 +17,7 @@ import (
 // ParseGrataCSV reads a Grata-exported CSV and returns parsed companies.
 // It maps Grata columns (Domain, Name, City, State) to model.Company fields.
 func ParseGrataCSV(csvPath string) ([]model.Company, error) {
-	f, err := os.Open(csvPath)
+	f, err := os.Open(csvPath) // #nosec G304 -- path from CLI flag or function parameter
 	if err != nil {
 		return nil, eris.Wrap(err, "grata: open csv")
 	}
@@ -95,7 +95,7 @@ func ParseGrataCSV(csvPath string) ([]model.Company, error) {
 		}
 		if emp := getCol(row, colIdx, "Employee Estimate"); emp != "" {
 			if n, err := strconv.Atoi(strings.ReplaceAll(emp, ",", "")); err == nil && n > 0 {
-				preSeeded["employees"] = n
+				preSeeded["employee_count"] = n
 			}
 		}
 		if rev := getCol(row, colIdx, "Revenue Estimate"); rev != "" {
@@ -108,7 +108,7 @@ func ParseGrataCSV(csvPath string) ([]model.Company, error) {
 			preSeeded["naics_code"] = naics
 		}
 		if yr := getCol(row, colIdx, "Year Founded"); yr != "" {
-			preSeeded["year_established"] = yr
+			preSeeded["year_founded"] = yr
 		}
 		if desc := getCol(row, colIdx, "Description"); desc != "" {
 			preSeeded["description"] = desc
@@ -287,7 +287,7 @@ type GrataCompany struct {
 
 // ParseGrataCSVFull reads ALL Grata CSV columns into GrataCompany structs.
 func ParseGrataCSVFull(csvPath string) ([]GrataCompany, error) {
-	f, err := os.Open(csvPath)
+	f, err := os.Open(csvPath) // #nosec G304 -- path from CLI flag or function parameter
 	if err != nil {
 		return nil, eris.Wrap(err, "grata: open csv")
 	}
@@ -865,7 +865,7 @@ func CompareResults(grataCompanies []GrataCompany, results []*model.EnrichmentRe
 		}{
 			{"description", gc.Description, fieldStr(r.FieldValues, "description"), "description"},
 			{"revenue_estimate", gc.RevenueEstimate, fieldStr(r.FieldValues, "revenue_range"), "revenue_range"},
-			{"employee_count", intStr(gc.EmployeeEstimate), fieldStr(r.FieldValues, "employees"), "employees"},
+			{"employee_count", intStr(gc.EmployeeEstimate), fieldStr(r.FieldValues, "employee_count"), "employee_count"},
 			{"review_count", intStr(gc.ReviewCount), fieldStr(r.FieldValues, "google_reviews_count"), "google_reviews_count"},
 			{"review_rating", floatStr(gc.Rating), fieldStr(r.FieldValues, "google_reviews_rating"), "google_reviews_rating"},
 			{"naics_code", gc.NAICS6, fieldStr(r.FieldValues, "naics_code"), "naics_code"},
@@ -875,7 +875,7 @@ func CompareResults(grataCompanies []GrataCompany, results []*model.EnrichmentRe
 			{"exec_first_name", gc.ExecFirstName, fieldStr(r.FieldValues, "owner_first_name"), "owner_first_name"},
 			{"exec_last_name", gc.ExecLastName, fieldStr(r.FieldValues, "owner_last_name"), "owner_last_name"},
 			{"exec_title", gc.ExecTitle, fieldStr(r.FieldValues, "owner_title"), "owner_title"},
-			{"year_founded", gc.YearFounded, fieldStr(r.FieldValues, "year_established"), "year_established"},
+			{"year_founded", gc.YearFounded, fieldStr(r.FieldValues, "year_founded"), "year_founded"},
 			{"city", gc.City, r.Company.City, ""},
 			{"state", gc.State, r.Company.State, ""},
 		}

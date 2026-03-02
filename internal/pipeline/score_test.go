@@ -13,11 +13,11 @@ func TestScoreConfidence_WeightedAvg(t *testing.T) {
 	scoreable := []model.FieldMapping{
 		{Key: "industry", Required: true},
 		{Key: "revenue", Required: false},
-		{Key: "employees", Required: true},
+		{Key: "employee_count", Required: true},
 	}
 	fv := map[string]model.FieldValue{
-		"industry":  {FieldKey: "industry", Confidence: 0.9},
-		"employees": {FieldKey: "employees", Confidence: 0.8},
+		"industry":       {FieldKey: "industry", Confidence: 0.9},
+		"employee_count": {FieldKey: "employee_count", Confidence: 0.8},
 	}
 	// (2*0.9 + 0 + 2*0.8) / (2+1+2) = 3.4/5 = 0.68
 	assert.InDelta(t, 0.68, scoreConfidence(fv, scoreable), 0.01)

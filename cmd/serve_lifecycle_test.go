@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/sells-group/research-cli/internal/api"
 	"github.com/sells-group/research-cli/internal/config"
 )
 
@@ -29,15 +30,15 @@ func getFreePort(t *testing.T) int {
 
 func TestBuildMux_ServerLifecycle(t *testing.T) {
 	// Test the full server start + request + graceful shutdown cycle.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	mux, _ := buildMux(ctx, nil, nil, "", nil)
+	router := api.Router(api.NewHandlers(
+		&config.Config{Server: config.ServerConfig{Port: 8080}},
+		nil, nil, nil,
+	))
 
 	port := getFreePort(t)
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
-		Handler: mux,
+		Handler: router,
 	}
 
 	// Start server in background.

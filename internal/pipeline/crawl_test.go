@@ -113,9 +113,8 @@ func TestCrawlViaFirecrawl_Success(t *testing.T) {
 	cfg := config.CrawlConfig{MaxPages: 10, MaxDepth: 1, CacheTTLHours: 12}
 
 	fcClient.On("Crawl", ctx, firecrawl.CrawlRequest{
-		URL:      "https://acme.com",
-		MaxDepth: 1,
-		Limit:    10,
+		URL:   "https://acme.com",
+		Limit: 10,
 	}).Return(&firecrawl.CrawlResponse{ID: "crawl-1"}, nil)
 
 	// PollCrawl wraps ctx with a timeout, so use mock.Anything for context.
@@ -191,9 +190,8 @@ func TestCrawlViaFirecrawl_CacheWriteError(t *testing.T) {
 	cfg := config.CrawlConfig{MaxPages: 10, MaxDepth: 1}
 
 	fcClient.On("Crawl", ctx, firecrawl.CrawlRequest{
-		URL:      "https://acme.com",
-		MaxDepth: 1,
-		Limit:    10,
+		URL:   "https://acme.com",
+		Limit: 10,
 	}).Return(&firecrawl.CrawlResponse{ID: "crawl-1"}, nil)
 
 	// PollCrawl wraps ctx with a timeout, so use mock.Anything for context.
@@ -223,13 +221,12 @@ func TestCrawlViaFirecrawl_DefaultsZero(t *testing.T) {
 
 	fcClient := firecrawlmocks.NewMockClient(t)
 	st := storemocks.NewMockStore(t)
-	// Zero values: should default to MaxPages=50, MaxDepth=2.
-	cfg := config.CrawlConfig{MaxPages: 0, MaxDepth: 0}
+	// Zero values: should default to MaxPages=50.
+	cfg := config.CrawlConfig{MaxPages: 0}
 
 	fcClient.On("Crawl", ctx, firecrawl.CrawlRequest{
-		URL:      "https://acme.com",
-		MaxDepth: 2,
-		Limit:    50,
+		URL:   "https://acme.com",
+		Limit: 50,
 	}).Return(&firecrawl.CrawlResponse{ID: "crawl-1"}, nil)
 
 	// PollCrawl wraps ctx with a timeout, so use mock.Anything for context.

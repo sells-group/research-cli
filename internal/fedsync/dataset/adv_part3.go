@@ -76,7 +76,7 @@ func (d *ADVPart3) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, te
 
 	// Extract ZIP to temp dir.
 	extractDir := filepath.Join(tempDir, "adv_crs_extract")
-	if err := os.MkdirAll(extractDir, 0o755); err != nil {
+	if err := os.MkdirAll(extractDir, 0o750); err != nil {
 		return nil, eris.Wrap(err, "adv_part3: create extract dir")
 	}
 	defer os.RemoveAll(extractDir) //nolint:errcheck
@@ -185,7 +185,7 @@ type crsMapping struct {
 
 // parseCRSMapping reads the mapping CSV from the CRS ZIP.
 func parseCRSMapping(path string) ([]crsMapping, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path constructed from extracted ZIP in trusted temp directory
 	if err != nil {
 		return nil, eris.Wrap(err, "open CRS mapping CSV")
 	}

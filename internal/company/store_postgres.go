@@ -28,6 +28,11 @@ func (s *PostgresStore) CreateCompany(ctx context.Context, c *CompanyRecord) err
 			phone, email,
 			employee_count, employee_estimate, revenue_estimate, revenue_range, revenue_confidence,
 			street, city, state, zip_code, country,
+			services_list, service_area, licenses_text, owner_name, customer_types,
+			differentiators, reputation_summary, acquisition_assessment, key_people,
+			exec_first_name, exec_last_name, exec_title, exec_linkedin,
+			review_count, review_rating, employees_linkedin, location_count,
+			end_markets, linkedin_url, enrichment_report,
 			enrichment_score, last_enriched_at, last_run_id
 		) VALUES (
 			$1, $2, $3, $4, $5,
@@ -35,13 +40,23 @@ func (s *PostgresStore) CreateCompany(ctx context.Context, c *CompanyRecord) err
 			$11, $12,
 			$13, $14, $15, $16, $17,
 			$18, $19, $20, $21, $22,
-			$23, $24, $25
+			$23, $24, $25, $26, $27,
+			$28, $29, $30, $31,
+			$32, $33, $34, $35,
+			$36, $37, $38, $39,
+			$40, $41, $42,
+			$43, $44, $45
 		) RETURNING id, created_at, updated_at`,
 		c.Name, c.LegalName, c.Domain, c.Website, c.Description,
 		c.NAICSCode, c.SICCode, c.BusinessModel, nilIfZero(c.YearFounded), c.OwnershipType,
 		c.Phone, c.Email,
 		c.EmployeeCount, c.EmployeeEstimate, c.RevenueEstimate, c.RevenueRange, c.RevenueConfidence,
 		c.Street, c.City, c.State, c.ZipCode, c.Country,
+		c.ServicesList, c.ServiceArea, c.LicensesText, c.OwnerName, c.CustomerTypes,
+		c.Differentiators, c.ReputationSummary, c.AcquisitionAssessment, c.KeyPeople,
+		c.ExecFirstName, c.ExecLastName, c.ExecTitle, c.ExecLinkedIn,
+		c.ReviewCount, c.ReviewRating, c.EmployeesLinkedIn, c.LocationCount,
+		c.EndMarkets, c.LinkedInURL, c.EnrichmentReport,
 		c.EnrichmentScore, c.LastEnrichedAt, c.LastRunID,
 	).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
@@ -60,7 +75,12 @@ func (s *PostgresStore) UpdateCompany(ctx context.Context, c *CompanyRecord) err
 			phone=$12, email=$13,
 			employee_count=$14, employee_estimate=$15, revenue_estimate=$16, revenue_range=$17, revenue_confidence=$18,
 			street=$19, city=$20, state=$21, zip_code=$22, country=$23,
-			enrichment_score=$24, last_enriched_at=$25, last_run_id=$26,
+			services_list=$24, service_area=$25, licenses_text=$26, owner_name=$27, customer_types=$28,
+			differentiators=$29, reputation_summary=$30, acquisition_assessment=$31, key_people=$32,
+			exec_first_name=$33, exec_last_name=$34, exec_title=$35, exec_linkedin=$36,
+			review_count=$37, review_rating=$38, employees_linkedin=$39, location_count=$40,
+			end_markets=$41, linkedin_url=$42, enrichment_report=$43,
+			enrichment_score=$44, last_enriched_at=$45, last_run_id=$46,
 			updated_at=now()
 		WHERE id=$1`,
 		c.ID,
@@ -69,6 +89,11 @@ func (s *PostgresStore) UpdateCompany(ctx context.Context, c *CompanyRecord) err
 		c.Phone, c.Email,
 		c.EmployeeCount, c.EmployeeEstimate, c.RevenueEstimate, c.RevenueRange, c.RevenueConfidence,
 		c.Street, c.City, c.State, c.ZipCode, c.Country,
+		c.ServicesList, c.ServiceArea, c.LicensesText, c.OwnerName, c.CustomerTypes,
+		c.Differentiators, c.ReputationSummary, c.AcquisitionAssessment, c.KeyPeople,
+		c.ExecFirstName, c.ExecLastName, c.ExecTitle, c.ExecLinkedIn,
+		c.ReviewCount, c.ReviewRating, c.EmployeesLinkedIn, c.LocationCount,
+		c.EndMarkets, c.LinkedInURL, c.EnrichmentReport,
 		c.EnrichmentScore, c.LastEnrichedAt, c.LastRunID,
 	)
 	if err != nil {
@@ -679,6 +704,11 @@ const companyColumns = `c.id, c.name, c.legal_name, c.domain, c.website, c.descr
 	c.phone, c.email,
 	c.employee_count, c.employee_estimate, c.revenue_estimate, c.revenue_range, c.revenue_confidence,
 	c.street, c.city, c.state, c.zip_code, c.country,
+	c.services_list, c.service_area, c.licenses_text, c.owner_name, c.customer_types,
+	c.differentiators, c.reputation_summary, c.acquisition_assessment, c.key_people,
+	c.exec_first_name, c.exec_last_name, c.exec_title, c.exec_linkedin,
+	c.review_count, c.review_rating, c.employees_linkedin, c.location_count,
+	c.end_markets, c.linkedin_url, c.enrichment_report,
 	c.enrichment_score, c.last_enriched_at, c.last_run_id,
 	c.created_at, c.updated_at`
 
@@ -690,6 +720,11 @@ func companyDests(c *CompanyRecord) []any {
 		&c.Phone, &c.Email,
 		&c.EmployeeCount, &c.EmployeeEstimate, &c.RevenueEstimate, &c.RevenueRange, &c.RevenueConfidence,
 		&c.Street, &c.City, &c.State, &c.ZipCode, &c.Country,
+		&c.ServicesList, &c.ServiceArea, &c.LicensesText, &c.OwnerName, &c.CustomerTypes,
+		&c.Differentiators, &c.ReputationSummary, &c.AcquisitionAssessment, &c.KeyPeople,
+		&c.ExecFirstName, &c.ExecLastName, &c.ExecTitle, &c.ExecLinkedIn,
+		&c.ReviewCount, &c.ReviewRating, &c.EmployeesLinkedIn, &c.LocationCount,
+		&c.EndMarkets, &c.LinkedInURL, &c.EnrichmentReport,
 		&c.EnrichmentScore, &c.LastEnrichedAt, &c.LastRunID,
 		&c.CreatedAt, &c.UpdatedAt,
 	}

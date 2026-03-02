@@ -173,7 +173,7 @@ func computeBackoff(attempt int, cfg RetryConfig) time.Duration {
 	// Apply jitter: ±JitterFraction of delay.
 	if cfg.JitterFraction > 0 {
 		jitterRange := delay * cfg.JitterFraction
-		jitter := (rand.Float64()*2 - 1) * jitterRange // [-jitterRange, +jitterRange]
+		jitter := (rand.Float64()*2 - 1) * jitterRange // #nosec G404 -- used for non-security jitter/backoff
 		delay += jitter
 	}
 

@@ -39,12 +39,12 @@ func TestPipeline_Run_FullFlow(t *testing.T) {
 
 	questions := []model.Question{
 		{ID: "q1", Text: "What industry?", Tier: 1, FieldKey: "industry", PageTypes: []model.PageType{model.PageTypeAbout}, OutputFormat: "string"},
-		{ID: "q2", Text: "How many employees?", Tier: 1, FieldKey: "employees", PageTypes: []model.PageType{model.PageTypeAbout}, OutputFormat: "number"},
+		{ID: "q2", Text: "How many employees?", Tier: 1, FieldKey: "employee_count", PageTypes: []model.PageType{model.PageTypeAbout}, OutputFormat: "number"},
 	}
 
 	fields := model.NewFieldRegistry([]model.FieldMapping{
 		{Key: "industry", SFField: "Industry", DataType: "string", Required: true},
-		{Key: "employees", SFField: "NumberOfEmployees", DataType: "number"},
+		{Key: "employee_count", SFField: "NumberOfEmployees", DataType: "number"},
 	})
 
 	cfg := &config.Config{
@@ -217,7 +217,7 @@ func TestFilterRoutedQuestions(t *testing.T) {
 	routed := []model.RoutedQuestion{
 		{Question: model.Question{ID: "q1", FieldKey: "industry"}},
 		{Question: model.Question{ID: "q2", FieldKey: "revenue"}},
-		{Question: model.Question{ID: "q3", FieldKey: "employees"}},
+		{Question: model.Question{ID: "q3", FieldKey: "employee_count"}},
 	}
 	existingKeys := map[string]bool{
 		"revenue": true,
@@ -278,12 +278,12 @@ func TestPipeline_ExistingAnswerLookup_SkipsQuestions(t *testing.T) {
 
 	questions := []model.Question{
 		{ID: "q1", Text: "What industry?", Tier: 1, FieldKey: "industry", PageTypes: []model.PageType{model.PageTypeAbout}, OutputFormat: "string"},
-		{ID: "q2", Text: "How many employees?", Tier: 1, FieldKey: "employees", PageTypes: []model.PageType{model.PageTypeAbout}, OutputFormat: "number"},
+		{ID: "q2", Text: "How many employees?", Tier: 1, FieldKey: "employee_count", PageTypes: []model.PageType{model.PageTypeAbout}, OutputFormat: "number"},
 	}
 
 	fields := model.NewFieldRegistry([]model.FieldMapping{
 		{Key: "industry", SFField: "Industry", DataType: "string", Required: true},
-		{Key: "employees", SFField: "NumberOfEmployees", DataType: "number"},
+		{Key: "employee_count", SFField: "NumberOfEmployees", DataType: "number"},
 	})
 
 	cfg := &config.Config{
@@ -558,12 +558,12 @@ func TestPipeline_WithWaterfall(t *testing.T) {
 
 	questions := []model.Question{
 		{ID: "q1", Text: "What industry?", Tier: 1, FieldKey: "industry", PageTypes: []model.PageType{model.PageTypeAbout}, OutputFormat: "string"},
-		{ID: "q2", Text: "How many employees?", Tier: 1, FieldKey: "employees", PageTypes: []model.PageType{model.PageTypeAbout}, OutputFormat: "number"},
+		{ID: "q2", Text: "How many employees?", Tier: 1, FieldKey: "employee_count", PageTypes: []model.PageType{model.PageTypeAbout}, OutputFormat: "number"},
 	}
 
 	fields := model.NewFieldRegistry([]model.FieldMapping{
 		{Key: "industry", SFField: "Industry", DataType: "string", Required: true},
-		{Key: "employees", SFField: "NumberOfEmployees", DataType: "number"},
+		{Key: "employee_count", SFField: "NumberOfEmployees", DataType: "number"},
 	})
 
 	cfg := &config.Config{
@@ -593,7 +593,7 @@ func TestPipeline_WithWaterfall(t *testing.T) {
 			MaxPremiumCostUSD:   5.0,
 		},
 		Fields: map[string]waterfall.FieldConfig{
-			"employees": {
+			"employee_count": {
 				ConfidenceThreshold: 0.65,
 				TimeDecay:           &waterfall.DecayConfig{HalfLifeDays: 180, Floor: 0.15},
 				Sources: []waterfall.SourceConfig{
@@ -606,11 +606,11 @@ func TestPipeline_WithWaterfall(t *testing.T) {
 
 	wfMock := &waterfallMockProvider{
 		name:            "testprovider",
-		supportedFields: []string{"employees"},
+		supportedFields: []string{"employee_count"},
 		costPerQuery:    0.25,
 		queryResult: &provider.QueryResult{
 			Provider: "testprovider",
-			Fields:   []provider.FieldResult{{FieldKey: "employees", Value: 500, Confidence: 0.95, DataAsOf: &now}},
+			Fields:   []provider.FieldResult{{FieldKey: "employee_count", Value: 500, Confidence: 0.95, DataAsOf: &now}},
 			CostUSD:  0.25,
 		},
 	}

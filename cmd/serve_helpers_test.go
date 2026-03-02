@@ -13,6 +13,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sells-group/research-cli/internal/api"
+	"github.com/sells-group/research-cli/internal/config"
 )
 
 func TestResolvePort_FlagSet(t *testing.T) {
@@ -30,7 +33,10 @@ func TestResolvePort_BothZero(t *testing.T) {
 func TestStartServer_GracefulShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	mux, _ := buildMux(ctx, nil, nil, "", nil)
+	router := api.Router(api.NewHandlers(
+		&config.Config{Server: config.ServerConfig{Port: 8080}},
+		nil, nil, nil,
+	))
 
 	// Find a free port.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -40,7 +46,7 @@ func TestStartServer_GracefulShutdown(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- startServer(ctx, mux, port)
+		errCh <- startServer(ctx, router, port)
 	}()
 
 	// Wait for server to be ready.

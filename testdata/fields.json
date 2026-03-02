@@ -216,5 +216,44 @@
     "data_type": "integer",
     "required": false,
     "status": "Active"
+  },
+  {
+    "id": "f_hq_city",
+    "key": "hq_city",
+    "sf_field": "ShippingCity",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 255,
+    "status": "Active"
+  },
+  {
+    "id": "f_hq_state",
+    "key": "hq_state",
+    "sf_field": "ShippingState",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 2,
+    "status": "Active"
+  },
+  {
+    "id": "f_location_count",
+    "key": "location_count",
+    "sf_field": "Location_Count__c",
+    "sf_object": "Account",
+    "data_type": "integer",
+    "required": false,
+    "status": "Active"
+  },
+  {
+    "id": "f_end_markets",
+    "key": "end_markets",
+    "sf_field": "End_Markets__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 1000,
+    "status": "Active"
   }
 ]

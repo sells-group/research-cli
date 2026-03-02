@@ -59,12 +59,12 @@ func TestComputeScore(t *testing.T) {
 	fields := model.NewFieldRegistry([]model.FieldMapping{
 		{Key: "industry", Required: true},
 		{Key: "revenue", Required: false},
-		{Key: "employees", Required: true},
+		{Key: "employee_count", Required: true},
 	})
 
 	fieldValues := map[string]model.FieldValue{
-		"industry":  {FieldKey: "industry", Confidence: 0.9},
-		"employees": {FieldKey: "employees", Confidence: 0.8},
+		"industry":       {FieldKey: "industry", Confidence: 0.9},
+		"employee_count": {FieldKey: "employee_count", Confidence: 0.8},
 	}
 
 	breakdown := ComputeScore(fieldValues, fields, nil, nil, config.QualityWeights{Confidence: 1.0})

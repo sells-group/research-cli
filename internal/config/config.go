@@ -154,6 +154,7 @@ type FedsyncConfig struct {
 	FREDKey        string    `yaml:"fred_api_key" mapstructure:"fred_api_key"`
 	BLSKey         string    `yaml:"bls_api_key" mapstructure:"bls_api_key"`
 	CensusKey      string    `yaml:"census_api_key" mapstructure:"census_api_key"`
+	FCCBDCKey      string    `yaml:"fcc_bdc_key" mapstructure:"fcc_bdc_key"`
 	EDGARUserAgent string    `yaml:"edgar_user_agent" mapstructure:"edgar_user_agent"`
 	N8NWebhook     string    `yaml:"n8n_webhook_url" mapstructure:"n8n_webhook_url"`
 	MistralKey     string    `yaml:"mistral_api_key" mapstructure:"mistral_api_key"`
@@ -337,8 +338,9 @@ type BatchConfig struct {
 
 // ServerConfig configures the webhook server.
 type ServerConfig struct {
-	Port          int    `yaml:"port" mapstructure:"port"`
-	WebhookSecret string `yaml:"webhook_secret" mapstructure:"webhook_secret"`
+	Port          int      `yaml:"port" mapstructure:"port"`
+	WebhookSecret string   `yaml:"webhook_secret" mapstructure:"webhook_secret"`
+	CORSOrigins   []string `yaml:"cors_origins" mapstructure:"cors_origins"`
 }
 
 // LogConfig configures logging.
@@ -447,6 +449,7 @@ func Load() (*Config, error) {
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "json")
 	v.SetDefault("server.port", 8080)
+	v.SetDefault("server.cors_origins", []string{"https://*.sellsadvisors.com"})
 	v.SetDefault("batch.max_concurrent_companies", 15)
 	v.SetDefault("crawl.max_pages", 50)
 	v.SetDefault("crawl.max_depth", 2)

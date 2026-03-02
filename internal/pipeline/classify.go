@@ -28,10 +28,11 @@ Page content (first 2000 chars):
 // externalPrefixToPageType maps title prefixes from scrape.go to page types.
 // Pages with these prefixes are auto-classified without an LLM call.
 var externalPrefixToPageType = map[string]model.PageType{
-	"[bbb] ":         model.PageTypeBBB,
-	"[google_maps] ": model.PageTypeGoogleMaps,
-	"[sos] ":         model.PageTypeSoS,
-	"[linkedin] ":    model.PageTypeLinkedIn,
+	"[bbb] ":              model.PageTypeBBB,
+	"[google_maps] ":      model.PageTypeGoogleMaps,
+	"[sos] ":              model.PageTypeSoS,
+	"[linkedin] ":         model.PageTypeLinkedIn,
+	"[perplexity_intel] ": model.PageTypePerplexityIntel,
 }
 
 // classifyByPrefix checks if a page has a known external source prefix

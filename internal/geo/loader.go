@@ -19,6 +19,9 @@ import (
 
 const cbsaShapefileURL = "https://www2.census.gov/geo/tiger/TIGER2024/CBSA/tl_2024_us_cbsa.zip"
 
+// maxGeoDecompressSize is the maximum allowed size for a single decompressed geo file entry (10 GB).
+const maxGeoDecompressSize = 10 << 30
+
 // ImportCBSA downloads Census Bureau CBSA shapefiles and loads into public.cbsa_areas.
 func ImportCBSA(ctx context.Context, pool db.Pool, httpClient *http.Client, tempDir string) error {
 	if httpClient == nil {
@@ -37,7 +40,7 @@ func ImportCBSA(ctx context.Context, pool db.Pool, httpClient *http.Client, temp
 
 	// Extract ZIP.
 	extractDir := filepath.Join(tempDir, "cbsa")
-	if err := os.MkdirAll(extractDir, 0o755); err != nil {
+	if err := os.MkdirAll(extractDir, 0o750); err != nil {
 		return eris.Wrap(err, "geo: create extract dir")
 	}
 	if err := extractZIP(zipPath, extractDir); err != nil {
@@ -150,7 +153,7 @@ func downloadFile(ctx context.Context, client *http.Client, url, dest string) er
 		return eris.Errorf("download returned status %d", resp.StatusCode)
 	}
 
-	f, err := os.Create(dest)
+	f, err := os.Create(dest) // #nosec G304 -- path from function parameter in internal package
 	if err != nil {
 		return eris.Wrap(err, "create file")
 	}
@@ -184,13 +187,13 @@ func extractZIP(zipPath, destDir string) error {
 			return eris.Wrapf(err, "open zip entry %s", f.Name)
 		}
 
-		outFile, err := os.Create(destPath)
+		outFile, err := os.Create(destPath) // #nosec G304 -- destPath derived from filepath.Base of zip entry within known destDir
 		if err != nil {
 			_ = rc.Close()
 			return eris.Wrapf(err, "create %s", destPath)
 		}
 
-		if _, err := io.Copy(outFile, rc); err != nil {
+		if _, err := io.Copy(outFile, io.LimitReader(rc, maxGeoDecompressSize)); err != nil {
 			_ = outFile.Close()
 			_ = rc.Close()
 			return eris.Wrapf(err, "extract %s", f.Name)
@@ -260,7 +263,7 @@ func polygonToWKT(p *shp.Polygon) string {
 		if i+1 < p.NumParts {
 			end = parts[i+1]
 		} else {
-			end = int32(len(p.Points))
+			end = int32(len(p.Points)) // #nosec G115 -- shapefile point count bounded by Census Bureau data, well within int32 range
 		}
 
 		for j := start; j < end; j++ {

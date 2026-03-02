@@ -35,8 +35,12 @@ var (
 
 var csvrunCmd = &cobra.Command{
 	Use:   "csvrun",
-	Short: "Run enrichment pipeline on a Grata-exported CSV",
-	Long: `Reads a Grata CSV directly into the enrichment pipeline.
+	Short: "Run enrichment pipeline on a CSV file (Grata or SF Report)",
+	Long: `Reads a CSV file directly into the enrichment pipeline.
+
+Auto-detects CSV format:
+  - Grata export: requires "Domain" column
+  - SF Report: requires "Account Name" + "Account ID" columns
 
 Supports two modes:
   - Real API mode (default): uses real Anthropic/Jina/Firecrawl APIs
@@ -50,20 +54,51 @@ Examples:
   research-cli csvrun --csv companies.csv --offline --limit 1
 
   # Real APIs, single company
-  research-cli csvrun --csv companies.csv --limit 1 --output results.json`,
+  research-cli csvrun --csv companies.csv --limit 1 --output results.json
+
+  # SF Report enrichment
+  research-cli csvrun --csv report.csv --limit 1 --output enriched.csv`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 
-		// Parse CSV.
-		companies, err := pipeline.ParseGrataCSV(csvrunCSV)
+		// Detect CSV format.
+		csvFormat, err := pipeline.DetectCSVFormat(csvrunCSV)
 		if err != nil {
-			return eris.Wrap(err, "csvrun: parse csv")
+			return eris.Wrap(err, "csvrun: detect csv format")
+		}
+		zap.L().Info("csvrun: detected format", zap.String("format", string(csvFormat)))
+
+		// Parse CSV based on detected format.
+		var companies []model.Company
+		var sfReportCompanies []pipeline.SFReportCompany
+
+		switch csvFormat {
+		case pipeline.CSVFormatSFReport:
+			sfReportCompanies, err = pipeline.ParseSFReportCSV(csvrunCSV)
+			if err != nil {
+				return eris.Wrap(err, "csvrun: parse sf-report csv")
+			}
+			companies = pipeline.CompaniesFromSFReport(sfReportCompanies)
+			// Auto-set output format for SF reports.
+			if csvrunFormat == "json" {
+				csvrunFormat = "sf-report-csv"
+			}
+		case pipeline.CSVFormatGrata:
+			companies, err = pipeline.ParseGrataCSV(csvrunCSV)
+			if err != nil {
+				return eris.Wrap(err, "csvrun: parse grata csv")
+			}
+		default:
+			return eris.Errorf("csvrun: unrecognized csv format (expected Grata or SF Report headers)")
 		}
 		zap.L().Info("parsed csv", zap.Int("companies", len(companies)))
 
 		// Apply limit.
 		if csvrunLimit > 0 && csvrunLimit < len(companies) {
 			companies = companies[:csvrunLimit]
+			if sfReportCompanies != nil && csvrunLimit < len(sfReportCompanies) {
+				sfReportCompanies = sfReportCompanies[:csvrunLimit]
+			}
 		}
 
 		// Dry run: print parsed companies and exit.
@@ -131,7 +166,17 @@ Examples:
 		)
 
 		// Write results.
-		if csvrunFormat == "grata-csv" {
+		switch csvrunFormat {
+		case "sf-report-csv":
+			outPath := csvrunOutput
+			if outPath == "" {
+				outPath = "enrichment-sfreport.csv"
+			}
+			if err := pipeline.ExportSFReportCSV(results, sfReportCompanies, outPath); err != nil {
+				return err
+			}
+			zap.L().Info("csvrun: sf-report csv written", zap.String("path", outPath))
+		case "grata-csv":
 			outPath := csvrunOutput
 			if outPath == "" {
 				outPath = "enrichment-grata.csv"
@@ -139,7 +184,7 @@ Examples:
 			if err := pipeline.ExportGrataCSV(results, outPath); err != nil {
 				return err
 			}
-		} else {
+		default:
 			if err := writeResults(results); err != nil {
 				return err
 			}
@@ -154,7 +199,7 @@ Examples:
 				comps := pipeline.CompareResults(grataFull, results)
 				report := pipeline.FormatComparisonReport(comps)
 				if csvrunCompareOutput != "" {
-					if writeErr := os.WriteFile(csvrunCompareOutput, []byte(report), 0o644); writeErr != nil {
+					if writeErr := os.WriteFile(csvrunCompareOutput, []byte(report), 0o600); writeErr != nil {
 						zap.L().Error("csvrun: write comparison report", zap.Error(writeErr))
 					} else {
 						zap.L().Info("csvrun: comparison report written", zap.String("path", csvrunCompareOutput))
@@ -170,13 +215,13 @@ Examples:
 }
 
 func init() {
-	csvrunCmd.Flags().StringVar(&csvrunCSV, "csv", "", "path to Grata CSV file (required)")
+	csvrunCmd.Flags().StringVar(&csvrunCSV, "csv", "", "path to CSV file (required)")
 	csvrunCmd.Flags().IntVar(&csvrunLimit, "limit", 0, "max companies to process (0 = all)")
 	csvrunCmd.Flags().IntVar(&csvrunConcurrency, "concurrency", 3, "max companies to process concurrently")
 	csvrunCmd.Flags().BoolVar(&csvrunDryRun, "dry-run", false, "parse CSV and print companies, skip pipeline")
 	csvrunCmd.Flags().BoolVar(&csvrunOffline, "offline", false, "use stub clients (no API keys needed)")
-	csvrunCmd.Flags().StringVar(&csvrunOutput, "output", "", "write results JSON to file (default: stdout)")
-	csvrunCmd.Flags().StringVar(&csvrunFormat, "format", "json", "output format: json (default) or grata-csv")
+	csvrunCmd.Flags().StringVar(&csvrunOutput, "output", "", "write results to file (default: stdout for JSON, auto-named for CSV)")
+	csvrunCmd.Flags().StringVar(&csvrunFormat, "format", "json", "output format: json, grata-csv, or sf-report-csv (auto-detected for SF reports)")
 	csvrunCmd.Flags().BoolVar(&csvrunCompare, "compare", false, "compare results against Grata ground truth from CSV")
 	csvrunCmd.Flags().StringVar(&csvrunCompareOutput, "compare-output", "", "write comparison report to file (default: stderr)")
 	_ = csvrunCmd.MarkFlagRequired("csv")
@@ -308,7 +353,7 @@ func validateAPIKeys() error {
 func writeResults(results []*model.EnrichmentResult) error {
 	var w *os.File
 	if csvrunOutput != "" {
-		f, err := os.Create(csvrunOutput)
+		f, err := os.Create(csvrunOutput) // #nosec G304 -- path from CLI flag
 		if err != nil {
 			return eris.Wrap(err, "csvrun: create output file")
 		}
