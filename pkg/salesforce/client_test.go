@@ -18,6 +18,7 @@ type mockClient struct {
 	updateOneFn        func(ctx context.Context, sObjectName string, id string, fields map[string]any) error
 	updateCollectionFn func(ctx context.Context, sObjectName string, records []CollectionRecord) ([]CollectionResult, error)
 	describeSObjectFn  func(ctx context.Context, name string) (*SObjectDescription, error)
+	runReportFn        func(ctx context.Context, reportID string) (*ReportResult, error)
 }
 
 func (m *mockClient) Query(ctx context.Context, soql string, out any) error {
@@ -68,6 +69,13 @@ func (m *mockClient) DescribeSObject(ctx context.Context, name string) (*SObject
 		return m.describeSObjectFn(ctx, name)
 	}
 	return &SObjectDescription{Name: name, Label: name}, nil
+}
+
+func (m *mockClient) RunReport(ctx context.Context, reportID string) (*ReportResult, error) {
+	if m.runReportFn != nil {
+		return m.runReportFn(ctx, reportID)
+	}
+	return &ReportResult{}, nil
 }
 
 func TestMockClientImplementsInterface(t *testing.T) {

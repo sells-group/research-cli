@@ -27,6 +27,7 @@ import (
 	"github.com/sells-group/research-cli/pkg/notion"
 	"github.com/sells-group/research-cli/pkg/perplexity"
 	"github.com/sells-group/research-cli/pkg/ppp"
+	sfpkg "github.com/sells-group/research-cli/pkg/salesforce"
 )
 
 // pipelineEnv holds all initialized clients, registries, and the pipeline
@@ -34,7 +35,8 @@ import (
 type pipelineEnv struct {
 	Store     store.Store
 	Pipeline  *pipeline.Pipeline
-	PPP       ppp.Querier // may be nil
+	SF        sfpkg.Client // Salesforce API client
+	PPP       ppp.Querier  // may be nil
 	Questions []model.Question
 	Fields    *model.FieldRegistry
 	Notion    notion.Client
@@ -227,6 +229,7 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 	return &pipelineEnv{
 		Store:     st,
 		Pipeline:  p,
+		SF:        sfClient,
 		PPP:       pppClient,
 		Questions: questions,
 		Fields:    fields,
