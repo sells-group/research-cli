@@ -2,6 +2,7 @@ package dataset
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -204,6 +205,118 @@ func TestEOBMF_ParseCSV_FinalBatchUpsertError(t *testing.T) {
 	_, err = ds.parseCSV(context.Background(), pool, strings.NewReader(csvContent))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "eo_bmf: bulk upsert final batch")
+}
+
+func TestEOBMF_ParseCSV_MalformedRow(t *testing.T) {
+	// Row with wrong number of fields — csv.Reader returns an error, should be skipped.
+	csvContent := eoBMFCSVHeader +
+		"too,few,fields\n" +
+		"123456789,VALID ORG,,456 OAK AVE,DALLAS,TX,75201,0000,03,3,1000,200001,1,15,0,1,01,202209,5,5,01,00,12,500000,100000,100000,B11,\n"
+
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	expectBulkUpsert(pool, "fed_data.eo_bmf", eoBMFColumns, 1)
+
+	ds := &EOBMF{}
+	rows, err := ds.parseCSV(context.Background(), pool, strings.NewReader(csvContent))
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), rows)
+	assert.NoError(t, pool.ExpectationsWereMet())
+}
+
+func TestEOBMF_Sync_OpenError(t *testing.T) {
+	dir := t.TempDir()
+
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	f := fetchermocks.NewMockFetcher(t)
+	// Download succeeds but writes to a path, then we remove it before syncRegion calls os.Open.
+	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, _ string, destPath string) {
+			// Write then immediately delete so os.Open fails.
+			_ = os.WriteFile(destPath, []byte("data"), 0644)
+			_ = os.Remove(destPath)
+		}).
+		Return(int64(4), nil)
+
+	ds := &EOBMF{}
+	_, err = ds.Sync(context.Background(), pool, f, dir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "eo_bmf: open")
+}
+
+func TestEOBMF_Sync_ParseError(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write an invalid CSV file (no EIN column) that will cause parseCSV to error.
+	badCSV := "BOGUS,COLUMNS\n1,2\n"
+
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	f := fetchermocks.NewMockFetcher(t)
+	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, _ string, destPath string) {
+			if err := os.WriteFile(destPath, []byte(badCSV), 0644); err != nil {
+				panic("test: write CSV: " + err.Error())
+			}
+		}).
+		Return(int64(len(badCSV)), nil)
+
+	ds := &EOBMF{}
+	_, err = ds.Sync(context.Background(), pool, f, dir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "EIN column not found")
+}
+
+func TestEOBMF_ParseCSV_MidBatchUpsert(t *testing.T) {
+	// Generate enough rows to trigger the mid-batch upsert path (batch >= 10000).
+	var sb strings.Builder
+	sb.WriteString(strings.TrimSuffix(eoBMFCSVHeader, "\n") + "\n")
+	for i := range 10002 {
+		fmt.Fprintf(&sb, "%09d,ORG %d,,100 MAIN,CITY,TX,75201,0000,03,3,1000,200001,1,15,0,1,01,202209,3,3,01,00,12,100000,50000,50000,B11,\n", 100000000+i, i)
+	}
+
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	// First batch of 10000 rows.
+	expectBulkUpsert(pool, "fed_data.eo_bmf", eoBMFColumns, 10000)
+	// Final batch of remaining 2 rows.
+	expectBulkUpsert(pool, "fed_data.eo_bmf", eoBMFColumns, 2)
+
+	ds := &EOBMF{}
+	rows, err := ds.parseCSV(context.Background(), pool, strings.NewReader(sb.String()))
+	require.NoError(t, err)
+	assert.Equal(t, int64(10002), rows)
+	assert.NoError(t, pool.ExpectationsWereMet())
+}
+
+func TestEOBMF_ParseCSV_MidBatchUpsertError(t *testing.T) {
+	// Generate enough rows to trigger the mid-batch upsert, then fail it.
+	var sb strings.Builder
+	sb.WriteString(strings.TrimSuffix(eoBMFCSVHeader, "\n") + "\n")
+	for i := range 10001 {
+		fmt.Fprintf(&sb, "%09d,ORG %d,,100 MAIN,CITY,TX,75201,0000,03,3,1000,200001,1,15,0,1,01,202209,3,3,01,00,12,100000,50000,50000,B11,\n", 100000000+i, i)
+	}
+
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	// Mid-batch upsert fails.
+	pool.ExpectBegin().WillReturnError(assert.AnError)
+
+	ds := &EOBMF{}
+	_, err = ds.parseCSV(context.Background(), pool, strings.NewReader(sb.String()))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "eo_bmf: bulk upsert")
 }
 
 func TestEOBMF_Sync_DownloadError(t *testing.T) {
