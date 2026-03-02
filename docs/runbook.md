@@ -273,8 +273,8 @@ flowchart TD
 | Frequency | Datasets | When |
 |---|---|---|
 | Daily | `fpds`, `ia_compilation`, `form_d`, `xbrl_facts` | Every day |
-| Weekly | `edgar_submissions` | Every 7 days |
-| Monthly | `adv_part1`, `adv_part2`, `adv_part3`, `adv_enrichment`, `adv_extract`, `brokercheck`, `sec_enforcement`, `form_bd`, `epa_echo`, `entity_xref`, `fred`, `cps_laus`, `m3` | Every 30 days |
+| Weekly | `edgar_submissions`, `fdic_bankfind` | Every 7 days |
+| Monthly | `adv_part1`, `adv_part2`, `adv_part3`, `adv_enrichment`, `adv_extract`, `brokercheck`, `sec_enforcement`, `form_bd`, `epa_echo`, `entity_xref`, `fred`, `cps_laus`, `m3`, `eo_bmf` | Every 30 days |
 | Quarterly | `qcew` (5-mo lag), `holdings_13f` (45-day delay), `eci` (2-mo lag) | Per-dataset schedule |
 | Annual | `cbp`, `susb`, `oews`, `osha_ita`, `nes`, `asm`, `abs`, `econ_census` | After March/April |
 | One-time | `ppp` | Only if never synced |

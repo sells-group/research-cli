@@ -249,13 +249,13 @@ research-cli/
 │   ├── fedsync/             # federal data sync subsystem
 │   │   ├── migrate.go       # embed.FS migration runner → fed_data.schema_migrations
 │   │   ├── synclog.go       # sync log tracking (start, complete, fail)
-│   │   ├── migrations/      # 40+ SQL migration files (001-040)
-│   │   ├── dataset/         # 26 dataset implementations
+│   │   ├── migrations/      # 99 SQL migration files (001-093)
+│   │   ├── dataset/         # 33 dataset implementations
 │   │   │   ├── interface.go # Dataset interface, Phase, Cadence, SyncResult
 │   │   │   ├── engine.go    # Engine: Run() orchestration loop
 │   │   │   ├── registry.go  # Registry: maps names → Dataset impls
 │   │   │   ├── schedule.go  # ShouldRun helpers: Daily, Weekly, Monthly, Quarterly, Annual
-│   │   │   └── *.go         # 26 dataset files (cbp, qcew, fpds, adv_part1, form_d, etc.)
+│   │   │   └── *.go         # 33 dataset files (cbp, qcew, fpds, adv_part1, form_d, eo_bmf, etc.)
 │   │   ├── transform/       # NAICS, FIPS, SIC normalization
 │   │   ├── resolve/         # entity resolution (CRD↔CIK fuzzy matching)
 │   │   └── xbrl/            # XBRL JSON-LD fact parser
@@ -1330,11 +1330,11 @@ pricing:
 
 ## Fedsync — Federal Data Sync
 
-The fedsync subsystem incrementally syncs 26 federal datasets into `fed_data.*` Postgres tables. Runs daily via Fly.io cron; exits in <1s when no new data is expected.
+The fedsync subsystem incrementally syncs 33 federal datasets into `fed_data.*` Postgres tables. Runs daily via Fly.io cron; exits in <1s when no new data is expected.
 
 ### Dataset Interface
 
-Each of 26 datasets implements the `Dataset` interface in `internal/fedsync/dataset/`:
+Each of 33 datasets implements the `Dataset` interface in `internal/fedsync/dataset/`:
 
 ```go
 type Dataset interface {
@@ -1353,9 +1353,9 @@ The `Engine` iterates the registry, checks `ShouldRun()` for each dataset, calls
 
 | Phase | Category | Datasets | Cadence |
 |---|---|---|---|
-| **1** | Market Intelligence | Census CBP, SUSB · BLS QCEW, OEWS · SAM.gov FPDS · Census Economic Census | Annual–Daily |
+| **1** | Market Intelligence | Census CBP, SUSB · BLS QCEW, OEWS · SAM.gov FPDS · Census Economic Census · DOL Form 5500 · SBA PPP · IRS EO BMF | Annual–Monthly |
 | **1B** | Buyer Intelligence (SEC/EDGAR) | ADV Part 1A · IARD daily XML · 13F Holdings · Form D · EDGAR Submissions · Entity Cross-ref | Daily–Quarterly |
-| **2** | Extended Intelligence | ADV Part 2 (OCR) · FINRA BrokerCheck · Form BD · OSHA ITA · EPA ECHO · Census NES, ASM · BLS ECI | Monthly–Annual |
+| **2** | Extended Intelligence | ADV Part 2 (OCR) · FINRA BrokerCheck · SEC Enforcement · Form BD · OSHA ITA · EPA ECHO · Census NES, ASM · BLS ECI · FDIC BankFind | Weekly–Annual |
 | **3** | On-Demand | ADV Part 3/CRS (OCR) · XBRL Facts · FRED Series · Census ABS · BLS CPS/LAUS · Census M3 | Daily–Annual |
 
 ### Streaming Pattern (Large Datasets)
