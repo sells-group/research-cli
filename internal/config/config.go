@@ -217,11 +217,30 @@ type AnthropicConfig struct {
 
 // SalesforceConfig holds Salesforce JWT auth settings.
 type SalesforceConfig struct {
-	ClientID  string  `yaml:"client_id" mapstructure:"client_id"`
-	Username  string  `yaml:"username" mapstructure:"username"`
-	KeyPath   string  `yaml:"key_path" mapstructure:"key_path"`
-	LoginURL  string  `yaml:"login_url" mapstructure:"login_url"`
-	RateLimit float64 `yaml:"rate_limit" mapstructure:"rate_limit"`
+	ClientID        string  `yaml:"client_id" mapstructure:"client_id"`
+	Username        string  `yaml:"username" mapstructure:"username"`
+	KeyPath         string  `yaml:"key_path" mapstructure:"key_path"`
+	LoginURL        string  `yaml:"login_url" mapstructure:"login_url"`
+	RateLimit       float64 `yaml:"rate_limit" mapstructure:"rate_limit"`
+	SandboxClientID string  `yaml:"sandbox_client_id" mapstructure:"sandbox_client_id"`
+	SandboxUsername string  `yaml:"sandbox_username" mapstructure:"sandbox_username"`
+	SandboxLoginURL string  `yaml:"sandbox_login_url" mapstructure:"sandbox_login_url"`
+}
+
+// UseSandbox swaps the active credentials to the sandbox values.
+// Fields that are empty in the sandbox config fall back to their production values.
+func (sc *SalesforceConfig) UseSandbox() {
+	if sc.SandboxClientID != "" {
+		sc.ClientID = sc.SandboxClientID
+	}
+	if sc.SandboxUsername != "" {
+		sc.Username = sc.SandboxUsername
+	}
+	if sc.SandboxLoginURL != "" {
+		sc.LoginURL = sc.SandboxLoginURL
+	} else {
+		sc.LoginURL = "https://test.salesforce.com"
+	}
 }
 
 // ToolJetConfig holds ToolJet webhook settings.

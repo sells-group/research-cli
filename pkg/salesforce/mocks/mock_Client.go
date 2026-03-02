@@ -356,6 +356,65 @@ func (_c *MockClient_UpdateOne_Call) RunAndReturn(run func(context.Context, stri
 	return _c
 }
 
+// RunReport provides a mock function with given fields: ctx, reportID
+func (_m *MockClient) RunReport(ctx context.Context, reportID string) (*salesforce.ReportResult, error) {
+	ret := _m.Called(ctx, reportID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RunReport")
+	}
+
+	var r0 *salesforce.ReportResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*salesforce.ReportResult, error)); ok {
+		return rf(ctx, reportID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *salesforce.ReportResult); ok {
+		r0 = rf(ctx, reportID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*salesforce.ReportResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, reportID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClient_RunReport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RunReport'
+type MockClient_RunReport_Call struct {
+	*mock.Call
+}
+
+// RunReport is a helper method to define mock.On call
+//   - ctx context.Context
+//   - reportID string
+func (_e *MockClient_Expecter) RunReport(ctx interface{}, reportID interface{}) *MockClient_RunReport_Call {
+	return &MockClient_RunReport_Call{Call: _e.mock.On("RunReport", ctx, reportID)}
+}
+
+func (_c *MockClient_RunReport_Call) Run(run func(ctx context.Context, reportID string)) *MockClient_RunReport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockClient_RunReport_Call) Return(_a0 *salesforce.ReportResult, _a1 error) *MockClient_RunReport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClient_RunReport_Call) RunAndReturn(run func(context.Context, string) (*salesforce.ReportResult, error)) *MockClient_RunReport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockClient creates a new instance of MockClient. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockClient(t interface {

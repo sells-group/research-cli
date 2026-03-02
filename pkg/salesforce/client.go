@@ -18,6 +18,7 @@ type Client interface {
 	UpdateOne(ctx context.Context, sObjectName string, id string, fields map[string]any) error
 	UpdateCollection(ctx context.Context, sObjectName string, records []CollectionRecord) ([]CollectionResult, error)
 	DescribeSObject(ctx context.Context, name string) (*SObjectDescription, error)
+	RunReport(ctx context.Context, reportID string) (*ReportResult, error)
 }
 
 // QueryResult holds the decoded records from a SOQL query.
