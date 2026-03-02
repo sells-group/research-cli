@@ -738,3 +738,81 @@ func TestLinkedInToPage(t *testing.T) {
 	assert.Contains(t, page.Markdown, "200")
 	assert.Equal(t, 200, page.StatusCode)
 }
+
+func TestParsePhoneFromPages_ModeSelection(t *testing.T) {
+	t.Parallel()
+
+	t.Run("picks most frequent phone across pages", func(t *testing.T) {
+		t.Parallel()
+		pages := []model.CrawledPage{
+			{URL: "https://acme.com/", Markdown: "Call us: (555) 111-2222"},
+			{URL: "https://acme.com/contact", Markdown: "Phone: (555) 333-4444"},
+			{URL: "https://acme.com/about", Markdown: "Reach us at (555) 333-4444"},
+		}
+		pageIndex := model.PageIndex{
+			model.PageTypeHomepage: {model.ClassifiedPage{CrawledPage: pages[0]}},
+			model.PageTypeContact:  {model.ClassifiedPage{CrawledPage: pages[1]}},
+			model.PageTypeAbout:    {model.ClassifiedPage{CrawledPage: pages[2]}},
+		}
+		parsePhoneFromPages(pages, pageIndex)
+
+		// (555) 333-4444 appears on 2 pages, should win.
+		found := false
+		for _, p := range pages {
+			if p.Metadata != nil && p.Metadata.Phone != "" {
+				assert.Equal(t, "5553334444", p.Metadata.Phone)
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "expected a phone to be set")
+	})
+
+	t.Run("single page still works", func(t *testing.T) {
+		t.Parallel()
+		pages := []model.CrawledPage{
+			{URL: "https://acme.com/", Markdown: "Call us: (555) 111-2222"},
+		}
+		pageIndex := model.PageIndex{
+			model.PageTypeHomepage: {model.ClassifiedPage{CrawledPage: pages[0]}},
+		}
+		parsePhoneFromPages(pages, pageIndex)
+
+		assert.NotNil(t, pages[0].Metadata)
+		assert.Equal(t, "5551112222", pages[0].Metadata.Phone)
+	})
+
+	t.Run("no phones found", func(t *testing.T) {
+		t.Parallel()
+		pages := []model.CrawledPage{
+			{URL: "https://acme.com/", Markdown: "Welcome to Acme Corp"},
+		}
+		pageIndex := model.PageIndex{
+			model.PageTypeHomepage: {model.ClassifiedPage{CrawledPage: pages[0]}},
+		}
+		parsePhoneFromPages(pages, pageIndex)
+
+		assert.Nil(t, pages[0].Metadata)
+	})
+}
+
+func TestPhoneMode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		candidates []string
+		want       string
+	}{
+		{"empty", nil, ""},
+		{"single", []string{"5551112222"}, "5551112222"},
+		{"mode wins", []string{"5551112222", "5553334444", "5553334444"}, "5553334444"},
+		{"tie goes to first", []string{"5551112222", "5553334444"}, "5551112222"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := phoneMode(tc.candidates)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

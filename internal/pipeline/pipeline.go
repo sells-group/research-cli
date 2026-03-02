@@ -17,6 +17,7 @@ import (
 	"github.com/sells-group/research-cli/internal/cost"
 	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/estimate"
+	"github.com/sells-group/research-cli/internal/geo"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/resilience"
 	"github.com/sells-group/research-cli/internal/scrape"
@@ -24,6 +25,7 @@ import (
 	"github.com/sells-group/research-cli/internal/waterfall"
 	"github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
+	"github.com/sells-group/research-cli/pkg/geocode"
 	"github.com/sells-group/research-cli/pkg/google"
 	"github.com/sells-group/research-cli/pkg/jina"
 	"github.com/sells-group/research-cli/pkg/notion"
@@ -53,6 +55,10 @@ type Pipeline struct {
 	breakers      *resilience.ServiceBreakers
 	retryCfg      resilience.RetryConfig
 	fedsyncPool   db.Pool // optional: enables ADV pre-fill when set
+
+	// Geocoding (Phase 7D) — set via SetGeocoder / SetGeoAssociator.
+	geocoder geocode.Client
+	geoAssoc *geo.Associator
 
 	// Deferred SF write mode: when set, Phase 9 builds write intents
 	// via PrepareGate instead of executing SF writes via QualityGate.
@@ -544,6 +550,39 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		return result, noPagesErr
 	}
 
+	// Post-Phase-1: extract structured address from BBB/SoS pages if missing.
+	if company.Street == "" || company.City == "" {
+		for _, page := range externalPages {
+			street, city, state, zip, extracted := ExtractStructuredAddress(page.Markdown, page.Title)
+			if extracted {
+				if company.Street == "" {
+					company.Street = street
+				}
+				if company.City == "" {
+					company.City = city
+				}
+				if company.State == "" {
+					company.State = state
+				}
+				if company.ZipCode == "" {
+					company.ZipCode = zip
+				}
+				if company.Location == "" && city != "" && state != "" {
+					company.Location = city + ", " + state
+				}
+				result.Company = company
+				log.Info("pipeline: extracted address from external page",
+					zap.String("source", page.Title),
+					zap.String("street", street),
+					zap.String("city", city),
+					zap.String("state", state),
+					zap.String("zip", zip),
+				)
+				break
+			}
+		}
+	}
+
 	// ===== Phase 2: Classification =====
 	setStatus(model.RunStatusClassifying)
 	var pageIndex model.PageIndex
@@ -954,7 +993,7 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		// Cross-validate employee count against LinkedIn range.
 		allAnswers = CrossValidateEmployeeCount(allAnswers, linkedInData)
 		// Validate NAICS codes against reference data and cross-reference with SoS filings.
-		allAnswers = ValidateAndCrossReferenceNAICS(allAnswers, allPages)
+		allAnswers = ValidateAndCrossReferenceNAICS(allAnswers, allPages, company.PreSeeded)
 		// Normalize business model to canonical taxonomy.
 		allAnswers = NormalizeBusinessModelAnswer(allAnswers)
 		// Enrich with CBP-based revenue estimate if available.
@@ -1037,6 +1076,17 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 			},
 		}, nil
 	})
+
+	// ===== Phase 7D: Geocode =====
+	if p.cfg.Geo.Enabled && p.geocoder != nil {
+		trackPhase("7d_geocode", func() (*model.PhaseResult, error) {
+			phaseRes, phaseErr := p.Phase7DGeocode(ctx, company, run.ID)
+			if phaseErr == nil && phaseRes != nil {
+				result.GeoData = p.collectGeoData(ctx, company)
+			}
+			return phaseRes, phaseErr
+		})
+	}
 
 	// ===== Phase 8: Report =====
 	// Set totalUsage.Cost from per-phase costs so the report shows the correct total.
@@ -1247,7 +1297,9 @@ func filterRoutedQuestions(routed []model.RoutedQuestion, existingKeys map[strin
 }
 
 // parsePhoneFromPages extracts phone numbers from homepage/contact pages
-// and attaches them as metadata for deterministic injection.
+// and attaches the most common (mode) number as metadata for deterministic
+// injection. Collecting from all target pages avoids locking on a fax or
+// secondary number that happens to appear on the first scanned page.
 func parsePhoneFromPages(pages []model.CrawledPage, pageIndex model.PageIndex) {
 	// Build a set of URLs classified as homepage, contact, about, or services.
 	// Phone numbers commonly appear on all of these page types.
@@ -1263,20 +1315,58 @@ func parsePhoneFromPages(pages []model.CrawledPage, pageIndex model.PageIndex) {
 		}
 	}
 
+	// Collect phone candidates from all target pages.
+	var candidates []string
 	for i := range pages {
 		if !targetURLs[pages[i].URL] {
 			continue
 		}
 		phone := ParsePhoneFromMarkdown(pages[i].Markdown)
-		if phone == "" {
+		if phone != "" {
+			candidates = append(candidates, phone)
+		}
+	}
+
+	best := phoneMode(candidates)
+	if best == "" {
+		return
+	}
+
+	// Attach the winning number to the first target page that yielded it.
+	for i := range pages {
+		if !targetURLs[pages[i].URL] {
 			continue
 		}
-		if pages[i].Metadata == nil {
-			pages[i].Metadata = &model.PageMetadata{}
+		phone := ParsePhoneFromMarkdown(pages[i].Markdown)
+		if phone == best {
+			if pages[i].Metadata == nil {
+				pages[i].Metadata = &model.PageMetadata{}
+			}
+			pages[i].Metadata.Phone = best
+			return
 		}
-		pages[i].Metadata.Phone = phone
-		return // Use first phone found
 	}
+}
+
+// phoneMode returns the most frequent phone number from candidates.
+// Returns "" if candidates is empty.
+func phoneMode(candidates []string) string {
+	if len(candidates) == 0 {
+		return ""
+	}
+	freq := make(map[string]int, len(candidates))
+	for _, c := range candidates {
+		freq[c]++
+	}
+	best := candidates[0]
+	bestCount := freq[best]
+	for phone, count := range freq {
+		if count > bestCount {
+			best = phone
+			bestCount = count
+		}
+	}
+	return best
 }
 
 // linkedInToPage converts LinkedIn data into a synthetic CrawledPage.

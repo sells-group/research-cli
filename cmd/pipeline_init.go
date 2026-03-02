@@ -11,6 +11,7 @@ import (
 
 	"github.com/sells-group/research-cli/internal/company"
 	"github.com/sells-group/research-cli/internal/estimate"
+	"github.com/sells-group/research-cli/internal/geo"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/pipeline"
 	"github.com/sells-group/research-cli/internal/registry"
@@ -20,6 +21,7 @@ import (
 	"github.com/sells-group/research-cli/internal/waterfall/provider"
 	anthropicpkg "github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
+	"github.com/sells-group/research-cli/pkg/geocode"
 	"github.com/sells-group/research-cli/pkg/google"
 	"github.com/sells-group/research-cli/pkg/jina"
 	"github.com/sells-group/research-cli/pkg/notion"
@@ -204,6 +206,22 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 		importer := company.NewImporter(companyStore, ps.Pool())
 		p.SetCompanyImporter(importer)
 		zap.L().Info("company golden record importer enabled")
+	}
+
+	// Wire up geocoder for Phase 7D (MSA association) if enabled.
+	if cfg.Geo.Enabled {
+		if ps, ok := st.(*store.PostgresStore); ok {
+			gc := geocode.NewClient(ps.Pool(),
+				geocode.WithCacheEnabled(cfg.Geo.CacheEnabled),
+				geocode.WithMaxRating(cfg.Geo.MaxRating),
+			)
+			p.SetGeocoder(gc)
+
+			cStore := company.NewPostgresStore(ps.Pool())
+			assoc := geo.NewAssociator(ps.Pool(), cStore)
+			p.SetGeoAssociator(assoc)
+			zap.L().Info("geocoding + MSA association enabled")
+		}
 	}
 
 	return &pipelineEnv{

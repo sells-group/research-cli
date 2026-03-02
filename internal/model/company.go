@@ -121,6 +121,18 @@ type PhaseResult struct {
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
+// GeoData holds geographic enrichment data from Phase 7D for Salesforce write.
+type GeoData struct {
+	Latitude       float64 `json:"latitude,omitempty"`
+	Longitude      float64 `json:"longitude,omitempty"`
+	MSAName        string  `json:"msa_name,omitempty"`
+	CBSACode       string  `json:"cbsa_code,omitempty"`
+	Classification string  `json:"classification,omitempty"` // urban_core, suburban, exurban, rural
+	CentroidKM     float64 `json:"centroid_km,omitempty"`
+	EdgeKM         float64 `json:"edge_km,omitempty"`
+	CountyFIPS     string  `json:"county_fips,omitempty"`
+}
+
 // EnrichmentResult is the final output of the pipeline.
 type EnrichmentResult struct {
 	Company     Company               `json:"company"`
@@ -129,6 +141,7 @@ type EnrichmentResult struct {
 	Answers     []ExtractionAnswer    `json:"answers"`
 	FieldValues map[string]FieldValue `json:"field_values"`
 	PPPMatches  []ppp.LoanMatch       `json:"ppp_matches,omitempty"`
+	GeoData     *GeoData              `json:"geo_data,omitempty"`
 	Report      string                `json:"report"`
 	Phases      []PhaseResult         `json:"phases"`
 	TotalTokens int                   `json:"total_tokens"`

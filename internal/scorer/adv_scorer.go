@@ -2,6 +2,7 @@ package scorer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -34,6 +35,14 @@ type ScoreFilters struct {
 	States   []string `json:"states,omitempty"`
 	MinScore float64  `json:"min_score,omitempty"`
 	Limit    int      `json:"limit,omitempty"`
+}
+
+// msaEntry represents a single MSA association for a firm (from address_msa).
+type msaEntry struct {
+	CBSACode       string  `json:"cbsa_code"`
+	CentroidKM     float64 `json:"centroid_km"`
+	EdgeKM         float64 `json:"edge_km"`
+	Classification string  `json:"classification"`
 }
 
 // scoringRow holds the raw database data used for scoring a single firm.
@@ -79,12 +88,33 @@ type scoringRow struct {
 	// Document text for keyword search.
 	BrochureText string
 	CRSText      string
+
+	// Geo fields (nullable — from LEFT JOIN v_firm_msa).
+	Latitude       *float64
+	Longitude      *float64
+	CBSACode       *string
+	MSAName        *string
+	IsWithin       *bool
+	CentroidKM     *float64
+	EdgeKM         *float64
+	Classification *string
+
+	// AllMSAs holds all MSA associations (from JSONB aggregate).
+	AllMSAs []msaEntry
+}
+
+// msaCentroid holds the centroid lat/lon for an MSA (used for proximity scoring).
+type msaCentroid struct {
+	CBSACode  string
+	Latitude  float64
+	Longitude float64
 }
 
 // ADVScorer scores firms based on ADV filing data.
 type ADVScorer struct {
-	pool *pgxpool.Pool
-	cfg  config.ScorerConfig
+	pool              *pgxpool.Pool
+	cfg               config.ScorerConfig
+	acquirerCentroids []msaCentroid // loaded lazily on first score call
 }
 
 // NewADVScorer creates an ADVScorer with the given connection pool and config.
@@ -94,6 +124,8 @@ func NewADVScorer(pool *pgxpool.Pool, cfg config.ScorerConfig) *ADVScorer {
 
 // Score performs bulk scoring of firms matching the given filters.
 func (s *ADVScorer) Score(ctx context.Context, filters *ScoreFilters) ([]FirmScore, error) {
+	s.loadAcquirerCentroids(ctx)
+
 	rows, err := s.queryFirms(ctx, filters)
 	if err != nil {
 		return nil, eris.Wrap(err, "scorer: query firms")
@@ -106,7 +138,7 @@ func (s *ADVScorer) Score(ctx context.Context, filters *ScoreFilters) ([]FirmSco
 	}
 
 	for _, row := range rows {
-		score := computeScore(&row, s.cfg)
+		score := computeScore(&row, s.cfg, s.acquirerCentroids)
 		if score.Score >= minScore {
 			score.Passed = true
 		}
@@ -135,12 +167,14 @@ func (s *ADVScorer) Score(ctx context.Context, filters *ScoreFilters) ([]FirmSco
 
 // ScoreOne scores a single firm by CRD number.
 func (s *ADVScorer) ScoreOne(ctx context.Context, crdNumber int) (*FirmScore, error) {
+	s.loadAcquirerCentroids(ctx)
+
 	row, err := s.queryOneFirm(ctx, crdNumber)
 	if err != nil {
 		return nil, eris.Wrap(err, fmt.Sprintf("scorer: query firm %d", crdNumber))
 	}
 
-	score := computeScore(row, s.cfg)
+	score := computeScore(row, s.cfg, s.acquirerCentroids)
 	if score.Score >= s.cfg.MinScore {
 		score.Passed = true
 	}
@@ -155,14 +189,14 @@ func (s *ADVScorer) ScoreOne(ctx context.Context, crdNumber int) (*FirmScore, er
 }
 
 // computeScore calculates the composite score from a scoring row and config.
-// Exported via its lowercase name for internal use; tested via the test file.
-func computeScore(row *scoringRow, cfg config.ScorerConfig) FirmScore {
+// acquirerCentroids is optional — used for proximity scoring when no CBSA match.
+func computeScore(row *scoringRow, cfg config.ScorerConfig, acquirerCentroids []msaCentroid) FirmScore {
 	components := map[string]float64{
 		"aum_fit":           scoreAUMFit(row.AUM, cfg.MinAUM, cfg.MaxAUM),
 		"growth":            scoreGrowth(row.AUM3YrCAGRPct),
 		"client_quality":    scoreClientQuality(row.HNWRevenuePct, row.InstitutionalRevPct, row.ClientTypes),
 		"service_fit":       scoreServiceFit(row),
-		"geo_match":         scoreGeoMatch(row.State, cfg.TargetStates, cfg.GeoKeywords, row.BrochureText),
+		"geo_match":         scoreGeoMatch(row, cfg, acquirerCentroids),
 		"industry_match":    scoreIndustryMatch(cfg.IndustryKeywords, row.BrochureText, row.CRSText),
 		"regulatory_clean":  scoreRegulatoryClean(row.HasAnyDRP, row.DRPCriminalFirm, row.DRPRegulatoryFirm),
 		"succession_signal": scoreSuccessionSignal(cfg.SuccessionKeywords, row.BrochureText, row.CRSText),
@@ -323,33 +357,196 @@ func scoreServiceFit(row *scoringRow) float64 {
 	return math.Min(float64(hits)/4.0, 1.0)
 }
 
-// scoreGeoMatch returns 0.0-1.0 based on geographic targeting.
-func scoreGeoMatch(state string, targetStates, geoKeywords []string, brochureText string) float64 {
-	if len(targetStates) == 0 && len(geoKeywords) == 0 {
+// scoreGeoMatch returns 0.0-1.0 based on geographic targeting using MSA data.
+// Tiered scoring: multi-MSA > single-MSA > proximity > state+classification > state-only > keyword.
+func scoreGeoMatch(row *scoringRow, cfg config.ScorerConfig, acquirerCentroids []msaCentroid) float64 {
+	noPreference := len(cfg.TargetStates) == 0 && len(cfg.GeoKeywords) == 0 &&
+		len(cfg.AcquirerCBSAs) == 0 && len(cfg.TargetCBSAs) == 0
+	if noPreference {
 		return 0.5 // neutral when no geo preference
 	}
 
-	var score float64
+	// Tier 0: Multi-MSA scoring — check ALL MSA associations for best match.
+	if len(row.AllMSAs) > 0 {
+		var bestScore float64
+		for _, msa := range row.AllMSAs {
+			for _, ac := range cfg.AcquirerCBSAs {
+				if strings.EqualFold(msa.CBSACode, ac) {
+					s := applyDistanceDecay(1.0, &msa.CentroidKM)
+					if s > bestScore {
+						bestScore = s
+					}
+				}
+			}
+			for _, tc := range cfg.TargetCBSAs {
+				if strings.EqualFold(msa.CBSACode, tc) {
+					s := applyDistanceDecay(0.9, &msa.CentroidKM)
+					if s > bestScore {
+						bestScore = s
+					}
+				}
+			}
+		}
+		if bestScore > 0 {
+			return bestScore
+		}
+	}
 
-	// State match.
-	if len(targetStates) > 0 {
-		for _, ts := range targetStates {
-			if strings.EqualFold(state, ts) {
-				score = 1.0
-				break
+	// Tier 1: Single-MSA scoring when CBSA data is available (fallback for rows without AllMSAs).
+	if row.CBSACode != nil {
+		cbsa := *row.CBSACode
+
+		// Acquirer CBSA match (firm is near an acquirer office).
+		for _, ac := range cfg.AcquirerCBSAs {
+			if strings.EqualFold(cbsa, ac) {
+				return applyDistanceDecay(1.0, row.CentroidKM)
+			}
+		}
+
+		// Target market CBSA match (firm is in a target market).
+		for _, tc := range cfg.TargetCBSAs {
+			if strings.EqualFold(cbsa, tc) {
+				return applyDistanceDecay(0.9, row.CentroidKM)
+			}
+		}
+
+		// State match with classification bonus.
+		if stateMatches(row.State, cfg.TargetStates) && row.Classification != nil {
+			switch *row.Classification {
+			case "urban_core":
+				return 0.85
+			case "suburban":
+				return 0.75
+			case "exurban":
+				return applyEdgeDecay(0.7, row.EdgeKM)
+			case "rural":
+				return applyEdgeDecay(0.45, row.EdgeKM)
 			}
 		}
 	}
 
-	// Keyword match in brochure text.
-	if score < 1.0 && len(geoKeywords) > 0 && brochureText != "" {
-		hits := matchKeywords(geoKeywords, brochureText, "")
-		if len(hits) > 0 {
-			score = math.Max(score, 0.7)
+	// Tier 1.5: Acquirer proximity — firm is near an acquirer MSA but not in it.
+	if row.Latitude != nil && row.Longitude != nil && len(acquirerCentroids) > 0 {
+		proxScore := acquirerProximityScore(*row.Latitude, *row.Longitude, acquirerCentroids)
+		if proxScore > 0 {
+			return proxScore
 		}
 	}
 
-	return score
+	// Tier 2: Fallback — state match without geo specificity.
+	if stateMatches(row.State, cfg.TargetStates) {
+		return 0.5
+	}
+
+	// Keyword match in brochure text.
+	if len(cfg.GeoKeywords) > 0 && row.BrochureText != "" {
+		hits := matchKeywords(cfg.GeoKeywords, row.BrochureText, "")
+		if len(hits) > 0 {
+			return 0.3
+		}
+	}
+
+	return 0.0
+}
+
+// stateMatches returns true if the state matches any target state.
+func stateMatches(state string, targets []string) bool {
+	for _, ts := range targets {
+		if strings.EqualFold(state, ts) {
+			return true
+		}
+	}
+	return false
+}
+
+// applyEdgeDecay adjusts score based on distance from MSA boundary.
+// Firms closer to the edge get a higher score.
+func applyEdgeDecay(base float64, edgeKM *float64) float64 {
+	if edgeKM == nil {
+		return base * 0.9
+	}
+	km := *edgeKM
+	// 0-10km: full base score
+	// 10-40km: linear decay to 85% of base
+	// >40km: 85% of base
+	if km <= 10 {
+		return base
+	}
+	decay := 1.0 - 0.15*math.Min((km-10)/30.0, 1.0)
+	return base * decay
+}
+
+// applyDistanceDecay applies centroid distance decay to a base score.
+// The closer to the MSA centroid, the higher the score (within 50km window).
+func applyDistanceDecay(base float64, centroidKM *float64) float64 {
+	if centroidKM == nil {
+		return base * 0.95 // slight penalty when distance unknown
+	}
+	km := *centroidKM
+	decay := 1.0 - math.Min(km/50.0, 1.0)
+	return base * (0.95 + 0.05*decay)
+}
+
+// loadAcquirerCentroids queries cbsa_areas for acquirer MSA centroids.
+// Called lazily on first Score/ScoreOne invocation.
+func (s *ADVScorer) loadAcquirerCentroids(ctx context.Context) {
+	if len(s.cfg.AcquirerCBSAs) == 0 || len(s.acquirerCentroids) > 0 {
+		return
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT cbsa_code, ST_Y(ST_Centroid(geom)) AS lat, ST_X(ST_Centroid(geom)) AS lon
+		FROM public.cbsa_areas
+		WHERE cbsa_code = ANY($1)`,
+		s.cfg.AcquirerCBSAs)
+	if err != nil {
+		zap.L().Warn("scorer: failed to load acquirer centroids", zap.Error(err))
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c msaCentroid
+		if scanErr := rows.Scan(&c.CBSACode, &c.Latitude, &c.Longitude); scanErr != nil {
+			continue
+		}
+		s.acquirerCentroids = append(s.acquirerCentroids, c)
+	}
+}
+
+// haversineKM returns the great-circle distance in km between two lat/lon points.
+func haversineKM(lat1, lon1, lat2, lon2 float64) float64 {
+	const earthRadiusKM = 6371.0
+	dLat := (lat2 - lat1) * math.Pi / 180.0
+	dLon := (lon2 - lon1) * math.Pi / 180.0
+	lat1R := lat1 * math.Pi / 180.0
+	lat2R := lat2 * math.Pi / 180.0
+
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1R)*math.Cos(lat2R)*math.Sin(dLon/2)*math.Sin(dLon/2)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+	return earthRadiusKM * c
+}
+
+// acquirerProximityScore returns a proximity bonus for firms near (but not in)
+// an acquirer MSA. Returns 0 if no proximity is found.
+// Distance bands: 0-50km → 0.65, 50-100km → 0.5, >100km → 0.
+func acquirerProximityScore(lat, lon float64, centroids []msaCentroid) float64 {
+	if len(centroids) == 0 {
+		return 0
+	}
+	bestDist := math.MaxFloat64
+	for _, c := range centroids {
+		d := haversineKM(lat, lon, c.Latitude, c.Longitude)
+		if d < bestDist {
+			bestDist = d
+		}
+	}
+	if bestDist <= 50 {
+		return 0.65
+	}
+	if bestDist <= 100 {
+		return 0.5
+	}
+	return 0
 }
 
 // scoreIndustryMatch returns 0.0-1.0 based on industry keyword matches.
@@ -478,11 +675,30 @@ SELECT
     cm.institutional_revenue_pct,
     cm.acquisition_readiness,
     COALESCE(lb.text_content, ''),
-    COALESCE(lc.text_content, '')
+    COALESCE(lc.text_content, ''),
+    fm.latitude,
+    fm.longitude,
+    fm.cbsa_code,
+    fm.msa_name,
+    fm.is_within,
+    fm.centroid_km,
+    fm.edge_km,
+    fm.classification,
+    (SELECT jsonb_agg(jsonb_build_object(
+        'cbsa_code', am.cbsa_code,
+        'centroid_km', am.centroid_km,
+        'edge_km', am.edge_km,
+        'classification', am.classification
+    )) FROM public.address_msa am
+    JOIN public.company_addresses a ON a.id = am.address_id
+    JOIN public.company_matches cm2 ON cm2.company_id = a.company_id
+    WHERE cm2.matched_key = fc.crd_number::text
+    AND cm2.matched_source = 'adv_firms') AS all_msas
 FROM fed_data.mv_firm_combined fc
 LEFT JOIN fed_data.adv_computed_metrics cm ON cm.crd_number = fc.crd_number
 LEFT JOIN latest_brochure lb ON lb.crd_number = fc.crd_number
 LEFT JOIN latest_crs lc ON lc.crd_number = fc.crd_number
+LEFT JOIN public.v_firm_msa fm ON fm.crd_number = fc.crd_number
 WHERE fc.aum > 0`
 
 	var args []any
@@ -596,9 +812,28 @@ SELECT
     cm.institutional_revenue_pct,
     cm.acquisition_readiness,
     COALESCE((SELECT text_content FROM latest_brochure), ''),
-    COALESCE((SELECT text_content FROM latest_crs), '')
+    COALESCE((SELECT text_content FROM latest_crs), ''),
+    fm.latitude,
+    fm.longitude,
+    fm.cbsa_code,
+    fm.msa_name,
+    fm.is_within,
+    fm.centroid_km,
+    fm.edge_km,
+    fm.classification,
+    (SELECT jsonb_agg(jsonb_build_object(
+        'cbsa_code', am.cbsa_code,
+        'centroid_km', am.centroid_km,
+        'edge_km', am.edge_km,
+        'classification', am.classification
+    )) FROM public.address_msa am
+    JOIN public.company_addresses a ON a.id = am.address_id
+    JOIN public.company_matches cm2 ON cm2.company_id = a.company_id
+    WHERE cm2.matched_key = fc.crd_number::text
+    AND cm2.matched_source = 'adv_firms') AS all_msas
 FROM fed_data.mv_firm_combined fc
 LEFT JOIN fed_data.adv_computed_metrics cm ON cm.crd_number = fc.crd_number
+LEFT JOIN public.v_firm_msa fm ON fm.crd_number = fc.crd_number
 WHERE fc.crd_number = $1`
 
 	row := s.pool.QueryRow(ctx, query, crdNumber)
@@ -619,6 +854,7 @@ func scanScoringRows(rows pgx.Rows) ([]scoringRow, error) {
 	var results []scoringRow
 	for rows.Next() {
 		var sr scoringRow
+		var allMSAsJSON []byte
 		err := rows.Scan(
 			&sr.CRDNumber,
 			&sr.FirmName,
@@ -649,9 +885,23 @@ func scanScoringRows(rows pgx.Rows) ([]scoringRow, error) {
 			&sr.AcquisitionReadiness,
 			&sr.BrochureText,
 			&sr.CRSText,
+			&sr.Latitude,
+			&sr.Longitude,
+			&sr.CBSACode,
+			&sr.MSAName,
+			&sr.IsWithin,
+			&sr.CentroidKM,
+			&sr.EdgeKM,
+			&sr.Classification,
+			&allMSAsJSON,
 		)
 		if err != nil {
 			return nil, eris.Wrap(err, "scorer: scan row")
+		}
+		if len(allMSAsJSON) > 0 {
+			if err := json.Unmarshal(allMSAsJSON, &sr.AllMSAs); err != nil {
+				return nil, eris.Wrap(err, "scorer: unmarshal all_msas")
+			}
 		}
 		results = append(results, sr)
 	}
@@ -663,7 +913,8 @@ func scanScoringRows(rows pgx.Rows) ([]scoringRow, error) {
 
 // scanOneRow scans a single pgx row into a scoringRow.
 func scanOneRow(row pgx.Row, sr *scoringRow) error {
-	return row.Scan(
+	var allMSAsJSON []byte
+	err := row.Scan(
 		&sr.CRDNumber,
 		&sr.FirmName,
 		&sr.State,
@@ -693,5 +944,23 @@ func scanOneRow(row pgx.Row, sr *scoringRow) error {
 		&sr.AcquisitionReadiness,
 		&sr.BrochureText,
 		&sr.CRSText,
+		&sr.Latitude,
+		&sr.Longitude,
+		&sr.CBSACode,
+		&sr.MSAName,
+		&sr.IsWithin,
+		&sr.CentroidKM,
+		&sr.EdgeKM,
+		&sr.Classification,
+		&allMSAsJSON,
 	)
+	if err != nil {
+		return err
+	}
+	if len(allMSAsJSON) > 0 {
+		if err := json.Unmarshal(allMSAsJSON, &sr.AllMSAs); err != nil {
+			return eris.Wrap(err, "scorer: unmarshal all_msas")
+		}
+	}
+	return nil
 }

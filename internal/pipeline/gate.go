@@ -79,6 +79,7 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 				accountFields["Enrichment_Report__c"] = result.Report
 			}
 			ensureMinimumSFFields(accountFields, result.Company, result.FieldValues)
+			injectGeoFields(accountFields, result.GeoData)
 
 			accountID := result.Company.SalesforceID
 
@@ -239,6 +240,38 @@ func buildSFFieldsByObject(fieldValues map[string]model.FieldValue, registry *mo
 		}
 	}
 	return accountFields, contactFields
+}
+
+// injectGeoFields adds geographic enrichment data from Phase 7D to the
+// Salesforce account field map. No-op if geo data is nil.
+func injectGeoFields(fields map[string]any, gd *model.GeoData) {
+	if gd == nil {
+		return
+	}
+	if gd.Latitude != 0 {
+		fields["Longitude_and_Lattitude__Latitude__s"] = gd.Latitude //nolint:misspell // SF field name has typo
+	}
+	if gd.Longitude != 0 {
+		fields["Longitude_and_Lattitude__Longitude__s"] = gd.Longitude //nolint:misspell // SF field name has typo
+	}
+	if gd.MSAName != "" {
+		fields["Company_MSA__c"] = gd.MSAName
+	}
+	if gd.CBSACode != "" {
+		fields["MSA_CBSA_Code__c"] = gd.CBSACode
+	}
+	if gd.Classification != "" {
+		fields["Urban_Classification__c"] = gd.Classification
+	}
+	if gd.CentroidKM != 0 {
+		fields["Distance_to_MSA_Center_km__c"] = gd.CentroidKM
+	}
+	if gd.EdgeKM != 0 {
+		fields["Distance_to_MSA_Edge_km__c"] = gd.EdgeKM
+	}
+	if gd.CountyFIPS != "" {
+		fields["County_FIPS__c"] = gd.CountyFIPS
+	}
 }
 
 // ensureMinimumSFFields sets Name and Website from the Company if not already
@@ -407,7 +440,7 @@ func extractContactsForSF(fieldValues map[string]model.FieldValue, _ *model.Fiel
 		mapField("title", "Title")
 		mapField("email", "Email")
 		mapField("phone", "Phone")
-		mapField("linkedin_url", "LinkedIn_URL__c")
+		mapField("linkedin_url", "LinkedIn__c")
 
 		// LastName is required for SF Contact.
 		if sf["LastName"] != nil {
@@ -662,6 +695,7 @@ func PrepareGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 				accountFields["Enrichment_Report__c"] = result.Report
 			}
 			ensureMinimumSFFields(accountFields, result.Company, result.FieldValues)
+			injectGeoFields(accountFields, result.GeoData)
 
 			intent = &SFWriteIntent{
 				AccountFields: accountFields,

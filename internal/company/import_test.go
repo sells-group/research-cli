@@ -205,6 +205,26 @@ func (m *mockStore) GetTags(_ context.Context, companyID int64) ([]Tag, error) {
 	return m.tags[companyID], nil
 }
 
+func (m *mockStore) GetUngeocodedAddresses(_ context.Context, _ int) ([]Address, error) {
+	return nil, nil
+}
+
+func (m *mockStore) UpdateAddressGeocode(_ context.Context, _ int64, _, _ float64, _, _, _ string) error {
+	return nil
+}
+
+func (m *mockStore) UpsertAddressMSA(_ context.Context, _ *AddressMSA) error {
+	return nil
+}
+
+func (m *mockStore) GetAddressMSAs(_ context.Context, _ int64) ([]AddressMSA, error) {
+	return nil, nil
+}
+
+func (m *mockStore) GetCompanyMSAs(_ context.Context, _ int64) ([]AddressMSA, error) {
+	return nil, nil
+}
+
 func (m *mockStore) UpsertMatch(_ context.Context, match *Match) error {
 	match.ID = m.nextID
 	m.nextID++

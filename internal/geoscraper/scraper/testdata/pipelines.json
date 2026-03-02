@@ -1,0 +1,16 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 401,
+        "Operator": "Gulf Stream Energy",
+        "Shape_Length": 125000.5,
+        "Typepipe": "Interstate"
+      },
+      "geometry": {
+        "paths": [[[-98.0, 29.0], [-97.0, 30.0], [-96.0, 31.0]]]
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

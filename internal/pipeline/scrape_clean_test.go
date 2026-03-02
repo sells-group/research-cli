@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -422,6 +423,83 @@ func TestParsePhoneFromMarkdown(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := ParsePhoneFromMarkdown(tc.md)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestParsePhoneFromMarkdown_ContextAwareness(t *testing.T) {
+	// Use padding to ensure the ±100 char context window isolates each number
+	// from the other's keyword context.
+	pad := strings.Repeat("x", 120)
+
+	t.Run("prefers phone near contact keyword over fax", func(t *testing.T) {
+		md := "Fax: 555-111-2222" + pad + "Contact us\nPhone: 555-333-4444"
+		got := ParsePhoneFromMarkdown(md)
+		assert.Equal(t, "5553334444", got)
+	})
+
+	t.Run("deprioritizes fax number", func(t *testing.T) {
+		md := "Fax: 555-111-2222" + pad + "Main office: 555-333-4444"
+		got := ParsePhoneFromMarkdown(md)
+		assert.Equal(t, "5553334444", got)
+	})
+
+	t.Run("picks phone keyword over toll-free", func(t *testing.T) {
+		md := "Toll-free: 800-555-1234" + pad + "Phone: 555-333-4444"
+		got := ParsePhoneFromMarkdown(md)
+		assert.Equal(t, "5553334444", got)
+	})
+
+	t.Run("single match returns it regardless of context", func(t *testing.T) {
+		md := "Fax: 555-111-2222"
+		got := ParsePhoneFromMarkdown(md)
+		assert.Equal(t, "5551112222", got)
+	})
+}
+
+func TestParsePhoneFromMarkdown_EdgeCases(t *testing.T) {
+	t.Run("multiple matches with one short number skipped", func(t *testing.T) {
+		// First match is short (7 digits), second is valid 10 digits.
+		md := "Fax: 555-1234" + strings.Repeat(" ", 120) + "Phone: 555-333-4444"
+		got := ParsePhoneFromMarkdown(md)
+		assert.Equal(t, "5553334444", got)
+	})
+
+	t.Run("all multi-match numbers too short returns empty", func(t *testing.T) {
+		// Two short numbers, both <10 digits after normalization — but regex
+		// requires 10 digits so this is hard to trigger. Cover the single-match
+		// short-number path instead.
+		md := "Call 555-123" // Too short, no 10-digit match
+		got := ParsePhoneFromMarkdown(md)
+		assert.Equal(t, "", got)
+	})
+
+	t.Run("empty string returns empty", func(t *testing.T) {
+		got := ParsePhoneFromMarkdown("")
+		assert.Equal(t, "", got)
+	})
+}
+
+func TestPhoneContextScore(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		md        string
+		start     int
+		end       int
+		wantAbove int
+		wantBelow int
+	}{
+		{"phone keyword", "Phone: 555-111-2222", 7, 19, 0, 100},
+		{"fax keyword", "Fax: 555-111-2222", 5, 17, -100, 0},
+		{"neutral", "Number: 555-111-2222", 8, 20, -1, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			score := phoneContextScore(tc.md, tc.start, tc.end)
+			assert.Greater(t, score, tc.wantAbove)
+			assert.Less(t, score, tc.wantBelow)
 		})
 	}
 }

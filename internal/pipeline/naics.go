@@ -123,11 +123,11 @@ func extractIndustryKeywords(text string) []string {
 
 // ValidateAndCrossReferenceNAICS validates extracted NAICS codes against
 // the official NAICS reference data and cross-references with Secretary of
-// State filing data. It adjusts confidence scores based on validation results
-// and multi-source agreement.
+// State filing data and pre-seeded data. It adjusts confidence scores based
+// on validation results and multi-source agreement.
 //
 // This function should be called during Phase 7 (Aggregate) after MergeAnswers.
-func ValidateAndCrossReferenceNAICS(answers []model.ExtractionAnswer, pages []model.CrawledPage) []model.ExtractionAnswer {
+func ValidateAndCrossReferenceNAICS(answers []model.ExtractionAnswer, pages []model.CrawledPage, preSeeded ...map[string]any) []model.ExtractionAnswer {
 	// Find the NAICS answer.
 	naicsIdx := -1
 	for i, a := range answers {
@@ -205,9 +205,38 @@ func ValidateAndCrossReferenceNAICS(answers []model.ExtractionAnswer, pages []mo
 	}
 
 	// Step 3: Cross-reference with pre-seeded data (from Grata CSV).
-	// This is handled by the existing pre-seeded gap-fill in BuildFieldValues,
-	// but we can boost confidence when the extracted code matches pre-seeded.
-	// (No additional action needed here — BuildFieldValues already handles this.)
+	var ps map[string]any
+	if len(preSeeded) > 0 {
+		ps = preSeeded[0]
+	}
+	if ps != nil {
+		if psNAICS, ok := ps["naics_code"]; ok {
+			psCode := fmt.Sprintf("%v", psNAICS)
+			if psCode != "" && psCode != "<nil>" {
+				extractedCode := fmt.Sprintf("%v", naicsAnswer.Value)
+				psNorm := strings.TrimRight(psCode, "0")
+				exNorm := strings.TrimRight(extractedCode, "0")
+				if psNorm == exNorm || psCode == extractedCode {
+					// Exact match with pre-seeded — strong confidence boost.
+					naicsAnswer.Confidence = boostConfidence(naicsAnswer.Confidence, 0.10)
+					naicsAnswer.Source += "+preseeded_match"
+					log.Info("naics: pre-seeded exact match", zap.String("code", extractedCode))
+				} else if len(psCode) >= 2 && len(extractedCode) >= 2 && psCode[:2] != extractedCode[:2] {
+					// Different 2-digit sector and low LLM confidence → prefer pre-seeded.
+					if naicsAnswer.Confidence < 0.5 {
+						log.Info("naics: low-confidence sector mismatch, preferring pre-seeded",
+							zap.String("extracted", extractedCode),
+							zap.String("preseeded", psCode),
+							zap.Float64("confidence", naicsAnswer.Confidence),
+						)
+						naicsAnswer.Value = psCode
+						naicsAnswer.Confidence = 0.60
+						naicsAnswer.Source += "+preseeded_override"
+					}
+				}
+			}
+		}
+	}
 
 	return answers
 }

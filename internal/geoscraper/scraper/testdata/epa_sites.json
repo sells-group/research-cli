@@ -1,0 +1,51 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1001,
+        "REGISTRY_ID": "110000307365",
+        "PRIMARY_NAME": "Acme Chemical Plant",
+        "PGM_SYS_ACRNM": "RCRAINFO",
+        "ACTIVE_STATUS": "ACTIVE",
+        "LATITUDE83": 30.2672,
+        "LONGITUDE83": -97.7431,
+        "LOCATION_ADDRESS": "123 Main St",
+        "CITY_NAME": "Austin",
+        "COUNTY_NAME": "Travis",
+        "STATE_CODE": "TX",
+        "POSTAL_CODE": "78701",
+        "EPA_REGION_CODE": "06",
+        "INTEREST_TYPE": "RCRA-LQG",
+        "FIPS_CODE": "48453"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 1002,
+        "REGISTRY_ID": "110000307366",
+        "PRIMARY_NAME": "River Treatment Facility",
+        "PGM_SYS_ACRNM": "NPDES",
+        "ACTIVE_STATUS": "ACTIVE",
+        "LATITUDE83": 29.7604,
+        "LONGITUDE83": -95.3698,
+        "LOCATION_ADDRESS": "456 River Rd",
+        "CITY_NAME": "Houston",
+        "COUNTY_NAME": "Harris",
+        "STATE_CODE": "TX",
+        "POSTAL_CODE": "77001",
+        "EPA_REGION_CODE": "06",
+        "INTEREST_TYPE": "CWA",
+        "FIPS_CODE": "48201"
+      },
+      "geometry": {
+        "x": -95.3698,
+        "y": 29.7604
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

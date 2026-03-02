@@ -258,6 +258,8 @@ var (
 
 // ParsePhoneFromMarkdown extracts the first US phone number from page markdown.
 // Prefers tel: link hrefs (most reliable) over inline text patterns.
+// When multiple inline matches exist, prefers numbers near "phone"/"call"/"contact"
+// keywords and deprioritizes numbers near "fax"/"toll-free"/"support".
 func ParsePhoneFromMarkdown(md string) string {
 	// Priority 1: tel: links
 	if m := telLinkRe.FindStringSubmatch(md); m != nil {
@@ -267,14 +269,58 @@ func ParsePhoneFromMarkdown(md string) string {
 		}
 	}
 	// Priority 2: inline phone patterns (skip if too many matches — likely a directory)
-	matches := phoneRe.FindAllString(md, 10)
-	if len(matches) >= 1 && len(matches) <= 5 {
-		digits := normalizePhoneDigits(matches[0])
+	matches := phoneRe.FindAllStringIndex(md, 10)
+	if len(matches) < 1 || len(matches) > 5 {
+		return ""
+	}
+	if len(matches) == 1 {
+		digits := normalizePhoneDigits(md[matches[0][0]:matches[0][1]])
 		if len(digits) >= 10 {
 			return digits
 		}
+		return ""
 	}
-	return ""
+	// Multiple matches: score by keyword proximity.
+	best, bestScore := "", -1000
+	for _, idx := range matches {
+		digits := normalizePhoneDigits(md[idx[0]:idx[1]])
+		if len(digits) < 10 {
+			continue
+		}
+		score := phoneContextScore(md, idx[0], idx[1])
+		if best == "" || score > bestScore {
+			best = digits
+			bestScore = score
+		}
+	}
+	return best
+}
+
+// phoneContextScore scores a phone match position by surrounding keyword context.
+// Positive keywords (phone, call, contact, tel) boost; negative keywords
+// (fax, toll-free, support) penalize. Searches ±100 chars around the match.
+func phoneContextScore(md string, start, end int) int {
+	lo := start - 100
+	if lo < 0 {
+		lo = 0
+	}
+	hi := end + 100
+	if hi > len(md) {
+		hi = len(md)
+	}
+	ctx := strings.ToLower(md[lo:hi])
+	score := 0
+	for _, kw := range []string{"phone", "call ", "tel:", "contact", "main"} {
+		if strings.Contains(ctx, kw) {
+			score++
+		}
+	}
+	for _, kw := range []string{"fax", "toll-free", "toll free", "support", "helpline"} {
+		if strings.Contains(ctx, kw) {
+			score--
+		}
+	}
+	return score
 }
 
 func normalizePhoneDigits(s string) string {

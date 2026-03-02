@@ -527,7 +527,7 @@ func TestExtractContactsForSF_FromContacts(t *testing.T) {
 	assert.Equal(t, "Jane", contacts[0]["FirstName"])
 	assert.Equal(t, "CEO", contacts[0]["Title"])
 	assert.Equal(t, "jane@acme.com", contacts[0]["Email"])
-	assert.Equal(t, "https://linkedin.com/in/janedoe", contacts[0]["LinkedIn_URL__c"])
+	assert.Equal(t, "https://linkedin.com/in/janedoe", contacts[0]["LinkedIn__c"])
 	assert.Equal(t, "Smith", contacts[1]["LastName"])
 }
 
@@ -1517,4 +1517,50 @@ func TestQualityGate_CompletenessFloorBlocksPass(t *testing.T) {
 	gate, err := QualityGate(ctx, result, fields, questions, nil, nil, cfg)
 	require.NoError(t, err)
 	assert.False(t, gate.Passed, "gate should fail due to completeness floor")
+}
+
+func TestInjectGeoFields(t *testing.T) {
+	t.Run("nil geo data is no-op", func(t *testing.T) {
+		fields := make(map[string]any)
+		injectGeoFields(fields, nil)
+		assert.Empty(t, fields)
+	})
+
+	t.Run("full geo data populates all fields", func(t *testing.T) {
+		fields := make(map[string]any)
+		gd := &model.GeoData{
+			Latitude:       30.2672,
+			Longitude:      -97.7431,
+			MSAName:        "Austin-Round Rock-Georgetown, TX",
+			CBSACode:       "12420",
+			Classification: "urban_core",
+			CentroidKM:     5.2,
+			EdgeKM:         12.8,
+			CountyFIPS:     "48453",
+		}
+		injectGeoFields(fields, gd)
+
+		assert.Equal(t, 30.2672, fields["Longitude_and_Lattitude__Latitude__s"])   //nolint:misspell // SF field name
+		assert.Equal(t, -97.7431, fields["Longitude_and_Lattitude__Longitude__s"]) //nolint:misspell // SF field name
+		assert.Equal(t, "Austin-Round Rock-Georgetown, TX", fields["Company_MSA__c"])
+		assert.Equal(t, "12420", fields["MSA_CBSA_Code__c"])
+		assert.Equal(t, "urban_core", fields["Urban_Classification__c"])
+		assert.Equal(t, 5.2, fields["Distance_to_MSA_Center_km__c"])
+		assert.Equal(t, 12.8, fields["Distance_to_MSA_Edge_km__c"])
+		assert.Equal(t, "48453", fields["County_FIPS__c"])
+	})
+
+	t.Run("partial geo data only sets available fields", func(t *testing.T) {
+		fields := make(map[string]any)
+		gd := &model.GeoData{
+			Latitude:  30.2672,
+			Longitude: -97.7431,
+		}
+		injectGeoFields(fields, gd)
+
+		assert.Equal(t, 30.2672, fields["Longitude_and_Lattitude__Latitude__s"])   //nolint:misspell // SF field name
+		assert.Equal(t, -97.7431, fields["Longitude_and_Lattitude__Longitude__s"]) //nolint:misspell // SF field name
+		assert.Nil(t, fields["Company_MSA__c"])
+		assert.Nil(t, fields["MSA_CBSA_Code__c"])
+	})
 }

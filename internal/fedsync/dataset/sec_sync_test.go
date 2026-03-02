@@ -105,7 +105,7 @@ func TestADVPart1_Sync_WithFOIAZip(t *testing.T) {
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(mockDownloadToFileZIP(t, "ERA_ADV_Base_20250301_20250331.csv", csvContent)).Once()
 
-	firmCols := []string{"crd_number", "firm_name", "sec_number", "city", "state", "country", "website"}
+	firmCols := []string{"crd_number", "firm_name", "sec_number", "street1", "street2", "city", "state", "country", "zip", "website"}
 
 	expectBulkUpsert(pool, "fed_data.adv_firms", firmCols, 1)
 	expectBulkUpsert(pool, "fed_data.adv_filings", advFilingCols, 1)

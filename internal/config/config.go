@@ -31,6 +31,9 @@ type Config struct {
 	Server     ServerConfig     `yaml:"server" mapstructure:"server"`
 	Log        LogConfig        `yaml:"log" mapstructure:"log"`
 	Fedsync    FedsyncConfig    `yaml:"fedsync" mapstructure:"fedsync"`
+	Discovery  DiscoveryConfig  `yaml:"discovery" mapstructure:"discovery"`
+	Geo        GeoConfig        `yaml:"geo" mapstructure:"geo"`
+	Tiger      TigerConfig      `yaml:"tiger" mapstructure:"tiger"`
 	Scorer     ScorerConfig     `yaml:"scorer" mapstructure:"scorer"`
 	Waterfall  WaterfallConfig  `yaml:"waterfall" mapstructure:"waterfall"`
 	Retry      RetryConfig      `yaml:"retry" mapstructure:"retry"`
@@ -64,6 +67,53 @@ type CircuitConfig struct {
 	ResetTimeoutSecs int `yaml:"reset_timeout_secs" mapstructure:"reset_timeout_secs"`
 }
 
+// DiscoveryConfig configures the lead discovery subsystem.
+type DiscoveryConfig struct {
+	GooglePlacesRateLimit float64  `yaml:"google_places_rate_limit" mapstructure:"google_places_rate_limit"`
+	MaxCandidatesPerRun   int      `yaml:"max_candidates_per_run" mapstructure:"max_candidates_per_run"`
+	PPPMinApproval        float64  `yaml:"ppp_min_approval" mapstructure:"ppp_min_approval"`
+	CellSizeKM            float64  `yaml:"cell_size_km" mapstructure:"cell_size_km"`
+	DirectoryBlocklist    []string `yaml:"directory_blocklist" mapstructure:"directory_blocklist"`
+	T0URLTimeoutSecs      int      `yaml:"t0_url_timeout_secs" mapstructure:"t0_url_timeout_secs"`
+	T1ScoreThreshold      float64  `yaml:"t1_score_threshold" mapstructure:"t1_score_threshold"`
+	T2ScoreThreshold      float64  `yaml:"t2_score_threshold" mapstructure:"t2_score_threshold"`
+	MaxCostPerRunUSD      float64  `yaml:"max_cost_per_run_usd" mapstructure:"max_cost_per_run_usd"`
+}
+
+// GeoConfig configures geocoding and MSA association.
+type GeoConfig struct {
+	Enabled      bool            `yaml:"enabled" mapstructure:"enabled"`
+	CacheEnabled bool            `yaml:"cache_enabled" mapstructure:"cache_enabled"`
+	CacheTTLDays int             `yaml:"cache_ttl_days" mapstructure:"cache_ttl_days"`
+	MaxRating    int             `yaml:"max_rating" mapstructure:"max_rating"`
+	BatchSize    int             `yaml:"batch_size" mapstructure:"batch_size"`
+	TopMSAs      int             `yaml:"top_msas" mapstructure:"top_msas"`
+	Tiles        TileConfig      `yaml:"tiles" mapstructure:"tiles"`
+	TileCache    TileCacheConfig `yaml:"tile_cache" mapstructure:"tile_cache"`
+}
+
+// TileConfig configures the tile server and basemap proxy.
+type TileConfig struct {
+	Port          int    `yaml:"port" mapstructure:"port"`
+	BasemapURL    string `yaml:"basemap_url" mapstructure:"basemap_url"`
+	BasemapFormat string `yaml:"basemap_format" mapstructure:"basemap_format"`
+}
+
+// TileCacheConfig configures the MVT tile cache.
+type TileCacheConfig struct {
+	MaxEntries int `yaml:"max_entries" mapstructure:"max_entries"`
+	TTLMinutes int `yaml:"ttl_minutes" mapstructure:"ttl_minutes"`
+}
+
+// TigerConfig configures TIGER/Line data loading.
+type TigerConfig struct {
+	Year        int      `yaml:"year" mapstructure:"year"`
+	TempDir     string   `yaml:"temp_dir" mapstructure:"temp_dir"`
+	States      []string `yaml:"states" mapstructure:"states"`
+	Concurrency int      `yaml:"concurrency" mapstructure:"concurrency"`
+	Tables      []string `yaml:"tables" mapstructure:"tables"`
+}
+
 // ScorerConfig configures the multi-pass firm scoring pipeline.
 type ScorerConfig struct {
 	AUMFitWeight           float64  `yaml:"aum_fit_weight" mapstructure:"aum_fit_weight"`
@@ -79,6 +129,8 @@ type ScorerConfig struct {
 	MinEmployees           int      `yaml:"min_employees" mapstructure:"min_employees"`
 	MaxEmployees           int      `yaml:"max_employees" mapstructure:"max_employees"`
 	TargetStates           []string `yaml:"target_states" mapstructure:"target_states"`
+	AcquirerCBSAs          []string `yaml:"acquirer_cbsas" mapstructure:"acquirer_cbsas"`
+	TargetCBSAs            []string `yaml:"target_cbsas" mapstructure:"target_cbsas"`
 	GeoKeywords            []string `yaml:"geo_keywords" mapstructure:"geo_keywords"`
 	IndustryKeywords       []string `yaml:"industry_keywords" mapstructure:"industry_keywords"`
 	SuccessionKeywords     []string `yaml:"succession_keywords" mapstructure:"succession_keywords"`
@@ -102,6 +154,7 @@ type FedsyncConfig struct {
 	FREDKey        string    `yaml:"fred_api_key" mapstructure:"fred_api_key"`
 	BLSKey         string    `yaml:"bls_api_key" mapstructure:"bls_api_key"`
 	CensusKey      string    `yaml:"census_api_key" mapstructure:"census_api_key"`
+	FCCBDCKey      string    `yaml:"fcc_bdc_key" mapstructure:"fcc_bdc_key"`
 	EDGARUserAgent string    `yaml:"edgar_user_agent" mapstructure:"edgar_user_agent"`
 	N8NWebhook     string    `yaml:"n8n_webhook_url" mapstructure:"n8n_webhook_url"`
 	MistralKey     string    `yaml:"mistral_api_key" mapstructure:"mistral_api_key"`
@@ -309,6 +362,14 @@ func (c *Config) Validate(mode string) error {
 		if dbURL == "" {
 			errs = append(errs, "fedsync.database_url (or store.database_url) is required")
 		}
+	case "discovery":
+		dbURL := c.Store.DatabaseURL
+		if dbURL == "" {
+			errs = append(errs, "store.database_url is required")
+		}
+		if c.Google.Key == "" {
+			errs = append(errs, "google.key is required for discovery")
+		}
 	case "serve":
 		if c.Server.Port <= 0 {
 			errs = append(errs, "server.port must be > 0")
@@ -409,6 +470,32 @@ func Load() (*Config, error) {
 	v.SetDefault("fedsync.mistral_ocr_model", "pixtral-large-latest")
 	v.SetDefault("fedsync.ocr.provider", "local")
 	v.SetDefault("fedsync.ocr.pdftotext_path", "pdftotext")
+	v.SetDefault("discovery.google_places_rate_limit", 10.0)
+	v.SetDefault("discovery.max_candidates_per_run", 10000)
+	v.SetDefault("discovery.ppp_min_approval", 150000.0)
+	v.SetDefault("discovery.cell_size_km", 2.0)
+	v.SetDefault("discovery.directory_blocklist", []string{
+		"facebook.com", "yelp.com", "angi.com", "bbb.org",
+		"yellowpages.com", "manta.com", "linkedin.com",
+	})
+	v.SetDefault("discovery.t0_url_timeout_secs", 5)
+	v.SetDefault("discovery.t1_score_threshold", 0.5)
+	v.SetDefault("discovery.t2_score_threshold", 0.3)
+	v.SetDefault("discovery.max_cost_per_run_usd", 50.0)
+	v.SetDefault("geo.enabled", true)
+	v.SetDefault("geo.cache_enabled", true)
+	v.SetDefault("geo.max_rating", 100)
+	v.SetDefault("geo.batch_size", 1000)
+	v.SetDefault("geo.cache_ttl_days", 90)
+	v.SetDefault("geo.top_msas", 3)
+	v.SetDefault("geo.tiles.port", 8081)
+	v.SetDefault("geo.tiles.basemap_url", "https://tile.openstreetmap.org")
+	v.SetDefault("geo.tiles.basemap_format", "png")
+	v.SetDefault("geo.tile_cache.max_entries", 10000)
+	v.SetDefault("geo.tile_cache.ttl_minutes", 60)
+	v.SetDefault("tiger.year", 2024)
+	v.SetDefault("tiger.temp_dir", "/tmp/tiger")
+	v.SetDefault("tiger.concurrency", 3)
 	v.SetDefault("scorer.aum_fit_weight", 25)
 	v.SetDefault("scorer.growth_weight", 10)
 	v.SetDefault("scorer.client_quality_weight", 15)

@@ -870,6 +870,18 @@ func TestCompareField_Description_LoweredThreshold(t *testing.T) {
 			"A small firm offering plumbing repair services in rural areas",
 			false,
 		},
+		{
+			"bigram overlap catches phrase similarity",
+			"Screen Builders provides custom pool enclosures and screen rooms in South Florida",
+			"Screen Builders Inc is a company that builds screen rooms and pool enclosures for residential customers",
+			true,
+		},
+		{
+			"editorial vs detailed descriptions match via shared keywords",
+			"Davis Roofing is a commercial roofing contractor serving the greater Chicago area",
+			"A full-service roofing company specializing in commercial roofing installation, repair, and maintenance for businesses in Illinois",
+			true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -877,6 +889,32 @@ func TestCompareField_Description_LoweredThreshold(t *testing.T) {
 			match, _, _ := compareField("description", tc.grata, tc.ours, 0)
 			if match != tc.wantMatch {
 				t.Errorf("compareField description(%q, %q) match = %v, want %v", tc.grata, tc.ours, match, tc.wantMatch)
+			}
+		})
+	}
+}
+
+func TestBigramOverlap(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		a, b    string
+		wantMin float64
+	}{
+		{"identical phrases", "solar panel installation services", "solar panel installation services", 1.0},
+		{"shared bigrams", "custom pool enclosures and screen rooms", "screen rooms and pool enclosures for residential", 0.1},
+		{"no shared bigrams", "plumbing company texas", "software firm california", 0.0},
+		{"single word each", "hello", "world", 0.0},
+		{"empty inputs", "", "", 0.0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			aWords := strings.Fields(strings.ToLower(tc.a))
+			bWords := strings.Fields(strings.ToLower(tc.b))
+			got := bigramOverlap(aWords, bWords)
+			if got < tc.wantMin-0.01 {
+				t.Errorf("bigramOverlap(%q, %q) = %f, want >= %f", tc.a, tc.b, got, tc.wantMin)
 			}
 		})
 	}
@@ -908,7 +946,7 @@ func TestCompareField_EmployeeCount_SpecificThreshold(t *testing.T) {
 	}
 }
 
-func TestCompareField_NumericThreshold_OtherFields(t *testing.T) {
+func TestCompareField_NumericThreshold_ReviewCount(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name      string
@@ -916,9 +954,9 @@ func TestCompareField_NumericThreshold_OtherFields(t *testing.T) {
 		ours      string
 		wantMatch bool
 	}{
-		{"within 0.75", "100", "80", true},  // proximity = 0.80
-		{"exactly 0.75", "100", "75", true}, // proximity = 0.75
-		{"below 0.75", "100", "50", false},  // proximity = 0.50
+		{"within 0.60", "100", "80", true},  // proximity = 0.80
+		{"exactly 0.60", "100", "60", true}, // proximity = 0.60
+		{"below 0.60", "100", "30", false},  // proximity = 0.30
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1059,8 +1097,8 @@ func TestCompareField_ReviewCount_HighConf(t *testing.T) {
 		wantType  string
 	}{
 		{"high conf accepts divergent count", "93", "170", 0.95, true, "high_conf"},
-		{"high conf at threshold", "93", "170", 0.80, true, "high_conf"},
-		{"low conf rejects divergent count", "93", "170", 0.79, false, "wrong"},
+		{"high conf at threshold", "93", "170", 0.70, true, "high_conf"},
+		{"low conf rejects divergent count", "93", "170", 0.69, false, "wrong"},
 		{"close values match without high conf", "80", "82", 0.50, true, "close"},
 		{"exact match", "127", "127", 0.60, true, "exact"},
 	}

@@ -80,16 +80,6 @@
     "status": "Active"
   },
   {
-    "id": "q_owner_name",
-    "text": "Who is the owner or CEO of the company?",
-    "tier": 1,
-    "field_key": "owner_name",
-    "page_types": ["about", "team", "homepage"],
-    "instructions": "Extract the name and title of the primary owner, CEO, or president.",
-    "output_format": "string",
-    "status": "Active"
-  },
-  {
     "id": "q_employee_count",
     "text": "How many employees does the company have?",
     "tier": 1,
@@ -177,56 +167,6 @@
     "page_types": ["homepage", "about", "services"],
     "instructions": "What is the most specific NAICS code (up to 6 digits) for this company's primary business activity? Return just the code.",
     "output_format": "string",
-    "status": "Active"
-  },
-  {
-    "id": "q_key_people",
-    "text": "List key people (name and title) found on the website. Format: 'Name (Title), Name (Title)'.",
-    "tier": 1,
-    "field_key": "key_people",
-    "page_types": ["team", "about", "homepage"],
-    "instructions": "List key people (name and title) found on the website. Format: 'Name (Title), Name (Title)'.",
-    "output_format": "string",
-    "status": "Active"
-  },
-  {
-    "id": "q_exec_first_name",
-    "text": "What is the first name of the primary owner, CEO, or president?",
-    "tier": 1,
-    "field_key": "exec_first_name",
-    "page_types": ["team", "about", "homepage"],
-    "instructions": "What is the first name of the primary owner, CEO, or president?",
-    "output_format": "string",
-    "status": "Active"
-  },
-  {
-    "id": "q_exec_last_name",
-    "text": "What is the last name of the primary owner, CEO, or president?",
-    "tier": 1,
-    "field_key": "exec_last_name",
-    "page_types": ["team", "about", "homepage"],
-    "instructions": "What is the last name of the primary owner, CEO, or president?",
-    "output_format": "string",
-    "status": "Active"
-  },
-  {
-    "id": "q_exec_title",
-    "text": "What is the title of the primary owner, CEO, or president?",
-    "tier": 1,
-    "field_key": "exec_title",
-    "page_types": ["team", "about", "homepage"],
-    "instructions": "What is the title of the primary owner, CEO, or president?",
-    "output_format": "string",
-    "status": "Active"
-  },
-  {
-    "id": "q_exec_linkedin",
-    "text": "What is the LinkedIn profile URL of the primary owner/CEO/president, if found?",
-    "tier": 1,
-    "field_key": "exec_linkedin",
-    "page_types": ["team", "about", "linkedin"],
-    "instructions": "What is the LinkedIn profile URL of the primary owner/CEO/president, if found?",
-    "output_format": "url",
     "status": "Active"
   },
   {

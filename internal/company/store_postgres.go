@@ -208,18 +208,18 @@ func (s *PostgresStore) FindByIdentifier(ctx context.Context, system, identifier
 // UpsertAddress inserts or updates a company address.
 func (s *PostgresStore) UpsertAddress(ctx context.Context, addr *Address) error {
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO company_addresses (company_id, address_type, street, city, state, zip_code, country, latitude, longitude, source, confidence, is_primary)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		INSERT INTO company_addresses (company_id, address_type, street, city, state, zip_code, country, latitude, longitude, source, confidence, is_primary, county_fips)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		ON CONFLICT (id) DO UPDATE SET
 			street=EXCLUDED.street, city=EXCLUDED.city, state=EXCLUDED.state,
 			zip_code=EXCLUDED.zip_code, country=EXCLUDED.country,
 			latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude,
 			source=EXCLUDED.source, confidence=EXCLUDED.confidence,
-			is_primary=EXCLUDED.is_primary, updated_at=now()
+			is_primary=EXCLUDED.is_primary, county_fips=EXCLUDED.county_fips, updated_at=now()
 		RETURNING id, created_at, updated_at`,
 		addr.CompanyID, addr.AddressType, addr.Street, addr.City, addr.State,
 		addr.ZipCode, addr.Country, addr.Latitude, addr.Longitude,
-		addr.Source, addr.Confidence, addr.IsPrimary,
+		addr.Source, addr.Confidence, addr.IsPrimary, addr.CountyFIPS,
 	).Scan(&addr.ID, &addr.CreatedAt, &addr.UpdatedAt)
 	if err != nil {
 		return eris.Wrap(err, "company: upsert address")
@@ -231,7 +231,7 @@ func (s *PostgresStore) UpsertAddress(ctx context.Context, addr *Address) error 
 func (s *PostgresStore) GetAddresses(ctx context.Context, companyID int64) ([]Address, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, company_id, address_type, street, city, state, zip_code, country,
-			latitude, longitude, source, confidence, is_primary, created_at, updated_at
+			latitude, longitude, source, confidence, is_primary, county_fips, created_at, updated_at
 		FROM company_addresses WHERE company_id=$1 ORDER BY is_primary DESC`, companyID)
 	if err != nil {
 		return nil, eris.Wrap(err, "company: get addresses")
@@ -243,7 +243,7 @@ func (s *PostgresStore) GetAddresses(ctx context.Context, companyID int64) ([]Ad
 		var a Address
 		if err := rows.Scan(&a.ID, &a.CompanyID, &a.AddressType, &a.Street, &a.City, &a.State,
 			&a.ZipCode, &a.Country, &a.Latitude, &a.Longitude, &a.Source, &a.Confidence,
-			&a.IsPrimary, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			&a.IsPrimary, &a.CountyFIPS, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, eris.Wrap(err, "company: scan address")
 		}
 		addrs = append(addrs, a)
@@ -566,6 +566,136 @@ func (s *PostgresStore) FindByMatch(ctx context.Context, matchedSource, matchedK
 		return nil, eris.Wrapf(err, "company: find by match %s:%s", matchedSource, matchedKey)
 	}
 	return c, nil
+}
+
+// GetUngeocodedAddresses returns addresses without geocode data, up to limit.
+func (s *PostgresStore) GetUngeocodedAddresses(ctx context.Context, limit int) ([]Address, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, company_id, address_type, street, city, state, zip_code, country,
+			latitude, longitude, source, confidence, is_primary, county_fips,
+			geocode_source, geocode_quality, geocoded_at,
+			created_at, updated_at
+		FROM company_addresses
+		WHERE geocoded_at IS NULL
+			AND street IS NOT NULL AND street != ''
+			AND city IS NOT NULL AND city != ''
+			AND state IS NOT NULL AND state != ''
+		ORDER BY is_primary DESC, id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, eris.Wrap(err, "company: get ungeocoded addresses")
+	}
+	defer rows.Close()
+	return scanAddressesWithGeo(rows)
+}
+
+// UpdateAddressGeocode updates an address with geocoded coordinates.
+func (s *PostgresStore) UpdateAddressGeocode(ctx context.Context, id int64, lat, lon float64, source, quality, countyFIPS string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE company_addresses
+		SET latitude = $2, longitude = $3, geocode_source = $4, geocode_quality = $5, county_fips = $6, geocoded_at = now(), updated_at = now()
+		WHERE id = $1`,
+		id, lat, lon, source, quality, nilIfEmptyStr(countyFIPS))
+	if err != nil {
+		return eris.Wrapf(err, "company: update address geocode %d", id)
+	}
+	return nil
+}
+
+// nilIfEmptyStr returns nil for empty strings, allowing NULL storage in Postgres.
+func nilIfEmptyStr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// UpsertAddressMSA inserts or updates an address-MSA association.
+func (s *PostgresStore) UpsertAddressMSA(ctx context.Context, am *AddressMSA) error {
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO address_msa (address_id, cbsa_code, is_within, distance_km, centroid_km, edge_km, classification)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (address_id, cbsa_code) DO UPDATE SET
+			is_within = EXCLUDED.is_within,
+			distance_km = EXCLUDED.distance_km,
+			centroid_km = EXCLUDED.centroid_km,
+			edge_km = EXCLUDED.edge_km,
+			classification = EXCLUDED.classification,
+			computed_at = now()
+		RETURNING id, computed_at`,
+		am.AddressID, am.CBSACode, am.IsWithin, am.DistanceKM, am.CentroidKM, am.EdgeKM, am.Classification,
+	).Scan(&am.ID, &am.ComputedAt)
+	if err != nil {
+		return eris.Wrap(err, "company: upsert address MSA")
+	}
+	return nil
+}
+
+// GetAddressMSAs returns all MSA associations for a specific address.
+func (s *PostgresStore) GetAddressMSAs(ctx context.Context, addressID int64) ([]AddressMSA, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT am.id, am.address_id, am.cbsa_code, cb.name AS msa_name,
+			am.is_within, am.distance_km, am.centroid_km, am.edge_km,
+			am.classification, am.computed_at
+		FROM address_msa am
+		JOIN cbsa_areas cb ON cb.cbsa_code = am.cbsa_code
+		WHERE am.address_id = $1
+		ORDER BY am.centroid_km ASC`, addressID)
+	if err != nil {
+		return nil, eris.Wrap(err, "company: get address MSAs")
+	}
+	defer rows.Close()
+	return scanAddressMSAs(rows)
+}
+
+// GetCompanyMSAs returns all MSA associations for a company's addresses.
+func (s *PostgresStore) GetCompanyMSAs(ctx context.Context, companyID int64) ([]AddressMSA, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT am.id, am.address_id, am.cbsa_code, cb.name AS msa_name,
+			am.is_within, am.distance_km, am.centroid_km, am.edge_km,
+			am.classification, am.computed_at
+		FROM address_msa am
+		JOIN cbsa_areas cb ON cb.cbsa_code = am.cbsa_code
+		JOIN company_addresses ca ON ca.id = am.address_id
+		WHERE ca.company_id = $1
+		ORDER BY ca.is_primary DESC, am.centroid_km ASC`, companyID)
+	if err != nil {
+		return nil, eris.Wrap(err, "company: get company MSAs")
+	}
+	defer rows.Close()
+	return scanAddressMSAs(rows)
+}
+
+func scanAddressMSAs(rows pgx.Rows) ([]AddressMSA, error) {
+	var result []AddressMSA
+	for rows.Next() {
+		var am AddressMSA
+		if err := rows.Scan(&am.ID, &am.AddressID, &am.CBSACode, &am.MSAName,
+			&am.IsWithin, &am.DistanceKM, &am.CentroidKM, &am.EdgeKM,
+			&am.Classification, &am.ComputedAt); err != nil {
+			return nil, eris.Wrap(err, "company: scan address MSA")
+		}
+		result = append(result, am)
+	}
+	return result, rows.Err()
+}
+
+func scanAddressesWithGeo(rows pgx.Rows) ([]Address, error) {
+	var addrs []Address
+	for rows.Next() {
+		var a Address
+		if err := rows.Scan(&a.ID, &a.CompanyID, &a.AddressType, &a.Street, &a.City, &a.State,
+			&a.ZipCode, &a.Country, &a.Latitude, &a.Longitude, &a.Source, &a.Confidence,
+			&a.IsPrimary, &a.CountyFIPS, &a.GeocodeSource, &a.GeocodeQuality, &a.GeocodedAt,
+			&a.CreatedAt, &a.UpdatedAt); err != nil {
+			return nil, eris.Wrap(err, "company: scan address with geo")
+		}
+		addrs = append(addrs, a)
+	}
+	return addrs, rows.Err()
 }
 
 // companyColumns is the standard column list for company queries.
