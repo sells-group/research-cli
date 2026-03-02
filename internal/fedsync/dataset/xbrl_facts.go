@@ -98,7 +98,7 @@ func (d *XBRLFacts) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _
 				ef.Value,
 				ef.Unit,
 				ef.Form,
-				int16(ef.FY),
+				int16(ef.FY), // #nosec G115 -- fiscal year value (e.g. 2020-2030), fits in int16
 				ef.Filed,
 			})
 		}

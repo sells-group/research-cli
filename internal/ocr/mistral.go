@@ -61,7 +61,7 @@ type mistralOCRPage struct {
 
 // ExtractText reads a PDF file, sends it to Mistral OCR, and returns the extracted text.
 func (m *MistralOCR) ExtractText(ctx context.Context, pdfPath string) (string, error) {
-	data, err := os.ReadFile(pdfPath)
+	data, err := os.ReadFile(pdfPath) // #nosec G304 -- path from internal OCR pipeline, not user input
 	if err != nil {
 		return "", eris.Wrapf(err, "ocr: read PDF %s", pdfPath)
 	}

@@ -30,7 +30,7 @@ var geoLoadCBSACmd = &cobra.Command{
 		defer pool.Close()
 
 		tempDir, _ := cmd.Flags().GetString("temp-dir")
-		if err := os.MkdirAll(tempDir, 0o755); err != nil {
+		if err := os.MkdirAll(tempDir, 0o750); err != nil {
 			return eris.Wrapf(err, "geo: create temp dir %s", tempDir)
 		}
 		defer func() {

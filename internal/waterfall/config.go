@@ -44,7 +44,7 @@ type SourceConfig struct {
 
 // LoadConfig reads waterfall config from a YAML file.
 func LoadConfig(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- loading config file from trusted path
 	if err != nil {
 		return nil, eris.Wrapf(err, "waterfall: read config %s", path)
 	}

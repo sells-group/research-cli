@@ -182,7 +182,7 @@ func (d *EconCensus) parseResponse(data []byte, year int) ([][]any, error) {
 		geoID := getColIdx(record, colIdx, "GEO_ID")
 
 		row := []any{
-			int16(year),
+			int16(year), // #nosec G115 -- year is a census year (e.g. 2017, 2022), fits in int16
 			geoID,
 			naics,
 			parseIntOr(getColIdx(record, colIdx, "ESTAB"), 0),

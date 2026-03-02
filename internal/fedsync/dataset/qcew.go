@@ -189,7 +189,7 @@ func (d *QCEW) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int
 			areaFips,
 			ownCode,
 			industryCode,
-			int16(year),
+			int16(year), // #nosec G115 -- year is a calendar year (e.g. 2000-2030), fits in int16
 			qtr,
 			parseIntOr(trimQuotes(getCol(record, colIdx, "month1_emplvl")), 0),
 			parseIntOr(trimQuotes(getCol(record, colIdx, "month2_emplvl")), 0),

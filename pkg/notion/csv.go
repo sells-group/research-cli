@@ -48,7 +48,7 @@ func isGrataCSV(headers []string) bool {
 // Grata Link headers) and applies column mapping. Pages are created at 3 req/s
 // via a 334ms ticker. Returns the number of pages created.
 func ImportCSV(ctx context.Context, c Client, dbID string, csvPath string) (int, error) {
-	f, err := os.Open(csvPath)
+	f, err := os.Open(csvPath) // #nosec G304 -- path from function parameter
 	if err != nil {
 		return 0, eris.Wrap(err, fmt.Sprintf("notion: open csv %s", csvPath))
 	}

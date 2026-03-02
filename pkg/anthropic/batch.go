@@ -97,8 +97,8 @@ func PollBatch(ctx context.Context, client Client, batchID string, opts ...PollO
 		if interval > cfg.cap {
 			interval = cfg.cap
 		}
-		jitter := time.Duration(rand.Int64N(int64(interval) / 5))
-		if rand.IntN(2) == 0 {
+		jitter := time.Duration(rand.Int64N(int64(interval) / 5)) // #nosec G404 -- used for non-security jitter/backoff
+		if rand.IntN(2) == 0 {                                    // #nosec G404 -- used for non-security jitter/backoff
 			interval += jitter
 		} else {
 			interval -= jitter

@@ -138,7 +138,7 @@ func (d *PPP) discoverResources(ctx context.Context, f fetcher.Fetcher) ([]pppRe
 }
 
 func (d *PPP) processCSV(ctx context.Context, pool db.Pool, csvPath string) (int64, error) {
-	file, err := os.Open(csvPath)
+	file, err := os.Open(csvPath) // #nosec G304 -- path constructed from downloaded SBA data in trusted temp directory
 	if err != nil {
 		return 0, eris.Wrap(err, "ppp: open CSV")
 	}

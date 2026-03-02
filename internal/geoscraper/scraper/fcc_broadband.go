@@ -124,7 +124,7 @@ func (f *FCCBroadband) Sync(ctx context.Context, pool db.Pool, ft fetcher.Fetche
 
 // processCSV reads a single BDC CSV file and appends rows to the batch.
 func (f *FCCBroadband) processCSV(csvPath string, batch *[][]any, flush func() error) error {
-	file, err := os.Open(csvPath)
+	file, err := os.Open(csvPath) // #nosec G304 -- path from internal temp directory during sync
 	if err != nil {
 		return eris.Wrapf(err, "fcc_broadband: open CSV %s", filepath.Base(csvPath))
 	}

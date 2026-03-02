@@ -308,7 +308,7 @@ func outputScoreResults(results []scorer.FirmScore, format, outputPath string) e
 	var w *os.File
 	if outputPath != "" {
 		var err error
-		w, err = os.Create(outputPath)
+		w, err = os.Create(outputPath) // #nosec G304 -- path from CLI flag
 		if err != nil {
 			return eris.Wrapf(err, "score: create output file %s", outputPath)
 		}
@@ -387,7 +387,7 @@ func formatMoney(amount int64) string {
 		if i > 0 && (len(s)-i)%3 == 0 {
 			result = append(result, ',')
 		}
-		result = append(result, byte(c))
+		result = append(result, byte(c)) // #nosec G115 -- c is always an ASCII digit from fmt.Sprintf("%d"), fits in byte
 	}
 	return string(result)
 }

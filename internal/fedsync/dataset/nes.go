@@ -79,9 +79,9 @@ func (d *NES) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _ strin
 				continue
 			}
 			rows = append(rows, []any{
-				int16(year),
-				row[0], // naics
-				row[1], // geo_id
+				int16(year), // #nosec G115 -- year is a calendar year (e.g. 2020-2030), fits in int16
+				row[0],      // naics
+				row[1],      // geo_id
 				parseIntOr(row[2], 0),
 				parseInt64Or(row[3], 0),
 				parseFloat64Or(row[4], 0),

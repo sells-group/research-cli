@@ -70,7 +70,7 @@ func (d *SUSB) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDi
 			return nil, eris.Wrapf(err, "susb: download year %d", year)
 		}
 
-		file, err := os.Open(txtPath)
+		file, err := os.Open(txtPath) // #nosec G304 -- path constructed from downloaded Census data in trusted temp directory
 		if err != nil {
 			return nil, eris.Wrapf(err, "susb: open year %d", year)
 		}
@@ -130,7 +130,7 @@ func (d *SUSB) parseCSV(ctx context.Context, pool db.Pool, r io.Reader, year int
 		entrSize := trimQuotes(getCol(record, colIdx, "entrsizedscr"))
 
 		row := []any{
-			int16(year),
+			int16(year), // #nosec G115 -- year is a calendar year (e.g. 2020-2030), fits in int16
 			fipsState,
 			naics,
 			entrSize,

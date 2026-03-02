@@ -84,7 +84,7 @@ func (n *NWIWetlands) Sync(ctx context.Context, pool db.Pool, ft fetcher.Fetcher
 		}
 
 		extractDir := filepath.Join(tempDir, "nwi_"+state)
-		if err := os.MkdirAll(extractDir, 0o755); err != nil {
+		if err := os.MkdirAll(extractDir, 0o750); err != nil {
 			return nil, eris.Wrapf(err, "nwi_wetlands: create extract dir for %s", state)
 		}
 

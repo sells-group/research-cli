@@ -220,7 +220,7 @@ func (c *httpClient) get(ctx context.Context, path string, out any) error {
 }
 
 func (c *httpClient) do(req *http.Request, out any) error {
-	resp, err := c.http.Do(req)
+	resp, err := c.http.Do(req) // #nosec G704 -- URL constructed from configured Firecrawl API base URL
 	if err != nil {
 		return eris.Wrap(err, "execute request")
 	}

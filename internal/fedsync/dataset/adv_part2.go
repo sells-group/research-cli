@@ -76,7 +76,7 @@ func (d *ADVPart2) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, te
 
 	// Extract ZIP to temp dir.
 	extractDir := filepath.Join(tempDir, "adv_brochures_extract")
-	if err := os.MkdirAll(extractDir, 0o755); err != nil {
+	if err := os.MkdirAll(extractDir, 0o750); err != nil {
 		return nil, eris.Wrap(err, "adv_part2: create extract dir")
 	}
 	defer os.RemoveAll(extractDir) //nolint:errcheck
@@ -182,7 +182,7 @@ type brochureMapping struct {
 
 // parseBrochureMapping reads the mapping CSV from the brochure ZIP.
 func parseBrochureMapping(path string) ([]brochureMapping, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path constructed from extracted ZIP in trusted temp directory
 	if err != nil {
 		return nil, eris.Wrap(err, "open mapping CSV")
 	}

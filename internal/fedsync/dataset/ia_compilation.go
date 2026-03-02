@@ -169,7 +169,7 @@ func (d *IACompilation) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetche
 	defer os.Remove(gzPath) //nolint:errcheck
 
 	// Decompress gzip → parse XML.
-	gzFile, err := os.Open(gzPath)
+	gzFile, err := os.Open(gzPath) // #nosec G304 -- path constructed from downloaded IARD feed in trusted temp directory
 	if err != nil {
 		return nil, eris.Wrap(err, "ia_compilation: open gzip file")
 	}

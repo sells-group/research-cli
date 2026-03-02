@@ -17,7 +17,7 @@ import (
 // ParseGrataCSV reads a Grata-exported CSV and returns parsed companies.
 // It maps Grata columns (Domain, Name, City, State) to model.Company fields.
 func ParseGrataCSV(csvPath string) ([]model.Company, error) {
-	f, err := os.Open(csvPath)
+	f, err := os.Open(csvPath) // #nosec G304 -- path from CLI flag or function parameter
 	if err != nil {
 		return nil, eris.Wrap(err, "grata: open csv")
 	}
@@ -287,7 +287,7 @@ type GrataCompany struct {
 
 // ParseGrataCSVFull reads ALL Grata CSV columns into GrataCompany structs.
 func ParseGrataCSVFull(csvPath string) ([]GrataCompany, error) {
-	f, err := os.Open(csvPath)
+	f, err := os.Open(csvPath) // #nosec G304 -- path from CLI flag or function parameter
 	if err != nil {
 		return nil, eris.Wrap(err, "grata: open csv")
 	}

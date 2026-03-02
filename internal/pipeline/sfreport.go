@@ -31,7 +31,7 @@ type SFReportCompany struct {
 
 // DetectCSVFormat reads the header row of a CSV file and returns the detected format.
 func DetectCSVFormat(csvPath string) (CSVFormat, error) {
-	f, err := os.Open(csvPath)
+	f, err := os.Open(csvPath) // #nosec G304 -- path from CLI flag
 	if err != nil {
 		return CSVFormatUnknown, eris.Wrap(err, "detect csv format: open")
 	}
@@ -60,7 +60,7 @@ func DetectCSVFormat(csvPath string) (CSVFormat, error) {
 
 // ParseSFReportCSV reads a Salesforce report CSV and returns parsed companies.
 func ParseSFReportCSV(csvPath string) ([]SFReportCompany, error) {
-	f, err := os.Open(csvPath)
+	f, err := os.Open(csvPath) // #nosec G304 -- path from CLI flag
 	if err != nil {
 		return nil, eris.Wrap(err, "sf-report: open csv")
 	}

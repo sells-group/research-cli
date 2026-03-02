@@ -74,7 +74,7 @@ func startServer(ctx context.Context, handler http.Handler, port int) error {
 	}
 
 	// Graceful shutdown — use a fresh context since ctx is already cancelled.
-	go func() {
+	go func() { // #nosec G118 -- intentional: background context outlives HTTP request for async shutdown
 		<-ctx.Done()
 		zap.L().Info("shutting down server")
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)

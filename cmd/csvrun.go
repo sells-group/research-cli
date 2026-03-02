@@ -199,7 +199,7 @@ Examples:
 				comps := pipeline.CompareResults(grataFull, results)
 				report := pipeline.FormatComparisonReport(comps)
 				if csvrunCompareOutput != "" {
-					if writeErr := os.WriteFile(csvrunCompareOutput, []byte(report), 0o644); writeErr != nil {
+					if writeErr := os.WriteFile(csvrunCompareOutput, []byte(report), 0o600); writeErr != nil {
 						zap.L().Error("csvrun: write comparison report", zap.Error(writeErr))
 					} else {
 						zap.L().Info("csvrun: comparison report written", zap.String("path", csvrunCompareOutput))
@@ -353,7 +353,7 @@ func validateAPIKeys() error {
 func writeResults(results []*model.EnrichmentResult) error {
 	var w *os.File
 	if csvrunOutput != "" {
-		f, err := os.Create(csvrunOutput)
+		f, err := os.Create(csvrunOutput) // #nosec G304 -- path from CLI flag
 		if err != nil {
 			return eris.Wrap(err, "csvrun: create output file")
 		}

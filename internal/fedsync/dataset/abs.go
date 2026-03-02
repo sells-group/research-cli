@@ -80,7 +80,7 @@ func (d *ABS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _ strin
 				continue
 			}
 			rows = append(rows, []any{
-				int16(year),
+				int16(year),             // #nosec G115 -- year is a calendar year (e.g. 2020-2030), fits in int16
 				row[0],                  // naics
 				row[1],                  // geo_id
 				parseIntOr(row[2], 0),   // firmpdemp

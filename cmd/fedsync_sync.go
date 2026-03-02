@@ -56,11 +56,11 @@ Use --full to perform a full reload instead of incremental sync.`,
 
 		// Create temp directory with a unique run-specific subdirectory.
 		tempDir := cfg.Fedsync.TempDir
-		if err := os.MkdirAll(tempDir, 0o755); err != nil {
+		if err := os.MkdirAll(tempDir, 0o750); err != nil {
 			return eris.Wrapf(err, "fedsync sync: create temp dir %s", tempDir)
 		}
 		runDir := filepath.Join(tempDir, fmt.Sprintf("run-%d", time.Now().UnixNano()))
-		if err := os.MkdirAll(runDir, 0o755); err != nil {
+		if err := os.MkdirAll(runDir, 0o750); err != nil {
 			return eris.Wrapf(err, "fedsync sync: create run dir %s", runDir)
 		}
 		defer os.RemoveAll(runDir) //nolint:errcheck

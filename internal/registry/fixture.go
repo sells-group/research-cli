@@ -11,7 +11,7 @@ import (
 
 // LoadQuestionsFromFile reads a JSON array of model.Question from the given path.
 func LoadQuestionsFromFile(path string) ([]model.Question, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- loading test fixtures from trusted path
 	if err != nil {
 		return nil, eris.Wrap(err, "registry: read questions fixture")
 	}
@@ -27,7 +27,7 @@ func LoadQuestionsFromFile(path string) ([]model.Question, error) {
 // LoadFieldsFromFile reads a JSON array of model.FieldMapping from the given
 // path and returns an indexed FieldRegistry.
 func LoadFieldsFromFile(path string) (*model.FieldRegistry, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- loading test fixtures from trusted path
 	if err != nil {
 		return nil, eris.Wrap(err, "registry: read fields fixture")
 	}
