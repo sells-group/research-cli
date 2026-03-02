@@ -24,14 +24,16 @@ import (
 const (
 	usaspendingBatchSize       = 5000
 	usaspendingBulkDownloadURL = "https://api.usaspending.gov/api/v2/bulk_download/awards/"
-	usaspendingStatusURL       = "https://api.usaspending.gov/api/v2/bulk_download/status/"
+	usaspendingStatusURL       = "https://api.usaspending.gov/api/v2/download/status/"
 	usaspendingPollInterval    = 10 * time.Second
 	usaspendingMaxPollAttempts = 180
 )
 
-// usaspendingAwardTypeCodes lists all award type codes for the bulk download request.
-var usaspendingAwardTypeCodes = []string{
-	"A", "B", "C", "D", "IDV",
+// usaspendingPrimeAwardTypes lists all prime award type codes for the bulk download request.
+// Contracts: A-D; IDV subtypes: IDV_A through IDV_E; Assistance: 02-11.
+var usaspendingPrimeAwardTypes = []string{
+	"A", "B", "C", "D",
+	"IDV_A", "IDV_B", "IDV_B_A", "IDV_B_B", "IDV_B_C", "IDV_C", "IDV_D", "IDV_E",
 	"02", "03", "04", "05", "06", "07", "08", "09", "10", "11",
 }
 
@@ -65,9 +67,9 @@ type bulkDownloadRequest struct {
 
 // bulkDownloadFilters defines the filter criteria for a bulk download request.
 type bulkDownloadFilters struct {
-	AwardTypeCodes []string              `json:"award_type_codes"`
-	DateType       string                `json:"date_type"`
-	DateRange      bulkDownloadDateRange `json:"date_range"`
+	PrimeAwardTypes []string              `json:"prime_award_types"`
+	DateType        string                `json:"date_type"`
+	DateRange       bulkDownloadDateRange `json:"date_range"`
 }
 
 // bulkDownloadDateRange defines the date range for a bulk download filter.
@@ -291,9 +293,9 @@ func (d *USAspending) downloadAndProcess(ctx context.Context, pool db.Pool, f fe
 func (d *USAspending) requestBulkDownload(ctx context.Context, startDate, endDate string) (*bulkDownloadResponse, error) {
 	reqBody := bulkDownloadRequest{
 		Filters: bulkDownloadFilters{
-			AwardTypeCodes: usaspendingAwardTypeCodes,
-			DateType:       "last_modified_date",
-			DateRange:      bulkDownloadDateRange{StartDate: startDate, EndDate: endDate},
+			PrimeAwardTypes: usaspendingPrimeAwardTypes,
+			DateType:        "last_modified_date",
+			DateRange:       bulkDownloadDateRange{StartDate: startDate, EndDate: endDate},
 		},
 		FileFormat: "csv",
 	}
@@ -532,16 +534,16 @@ func (d *USAspending) mapRow(record []string, colIdx map[string]int) []any {
 // classifyAwardType maps award_type_code to a category.
 func classifyAwardType(code string) string {
 	code = strings.TrimSpace(strings.ToUpper(code))
-	switch code {
-	case "A", "B", "C", "D", "IDV":
+	switch {
+	case code == "A" || code == "B" || code == "C" || code == "D" || strings.HasPrefix(code, "IDV"):
 		return "contract"
-	case "02", "03", "04", "05":
+	case code == "02" || code == "03" || code == "04" || code == "05":
 		return "grant"
-	case "06", "10":
+	case code == "06" || code == "10":
 		return "direct_payment"
-	case "07", "08":
+	case code == "07" || code == "08":
 		return "loan"
-	case "09", "11":
+	case code == "09" || code == "11":
 		return "other"
 	default:
 		return "other"
