@@ -1,6 +1,6 @@
 # Fedsync Dataset Catalog
 
-> Complete reference for all 30 federal datasets synced by the fedsync subsystem.
+> Complete reference for all 31 federal datasets synced by the fedsync subsystem.
 
 ## Quick Reference
 
@@ -36,6 +36,7 @@
 | 28 | `abs` | 3 | Annual | Census | `fed_data.abs_data` | Census |
 | 29 | `cps_laus` | 3 | Monthly | BLS | `fed_data.laus_data` | BLS |
 | 30 | `m3` | 3 | Monthly | Census | `fed_data.m3_data` | Census |
+| 31 | `fdic_bankfind` | 2 | Weekly | FDIC | `fed_data.fdic_institutions` | No |
 
 \* Mistral API key required only when OCR provider is set to `mistral` (fallback mode). Local `pdftotext` requires no key.
 
@@ -97,6 +98,7 @@ graph LR
         NES[nes]
         ASM[asm]
         ECI[eci]
+        FDIC[fdic_bankfind]
     end
 
     subgraph "Phase 3: On-Demand"
@@ -141,7 +143,7 @@ graph TB
         I1[adv_enrichment] & I2[adv_extract]
     end
 
-    subgraph "Other Agencies (8)"
+    subgraph "Other Agencies (9)"
         O1[fpds<br/>SAM.gov]
         O2[ppp<br/>SBA]
         O3[brokercheck<br/>FINRA]
@@ -150,6 +152,7 @@ graph TB
         O6[epa_echo<br/>EPA]
         O7[xbrl_facts<br/>SEC]
         O8[fred<br/>FRED]
+        O9[fdic_bankfind<br/>FDIC]
     end
 ```
 
@@ -458,6 +461,25 @@ graph TB
 | Batch Size | N/A |
 | API Key | **BLS** (`RESEARCH_FEDSYNC_BLS_API_KEY`) |
 | File | `internal/fedsync/dataset/eci.go` |
+
+### fdic_bankfind — FDIC BankFind Institutions & Branches
+
+| Field | Value |
+|---|---|
+| Source | `https://api.fdic.gov/api/financials` + `https://api.fdic.gov/api/locations` |
+| Tables | `fed_data.fdic_institutions` (97 cols), `fed_data.fdic_branches` (38 cols) |
+| Cadence | Weekly |
+| Schedule | `WeeklySchedule` |
+| Conflict Keys | `cert` (institutions), `uni_num` (branches) |
+| Batch Size | 5,000 |
+| API Key | None required |
+| File | `internal/fedsync/dataset/fdic_bankfind.go` |
+
+Two-stage sync: paginate institutions (limit=10000, ~3 pages), then branches (~8 pages).
+All API fields captured. Branch records include FDIC-provided lat/lng coordinates.
+Backfill creates company records with branch sub-locations via `geo backfill-fdic`.
+
+**FDIC data refresh**: Institutions and locations updated weekly by FDIC.
 
 ---
 
