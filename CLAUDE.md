@@ -2,7 +2,7 @@
 
 Automated account enrichment pipeline + federal data sync in Go. Two subsystems:
 1. **Enrichment:** Crawls company websites, classifies pages, extracts structured data via tiered Claude models (Haiku → Sonnet → Opus), writes to Salesforce. Leads enter via CSV → Notion; registries (questions + fields) live in Notion.
-2. **Fedsync:** Incrementally syncs 26 federal datasets (Census, BLS, SEC EDGAR, FINRA, OSHA, EPA, FRED) into `fed_data.*` Postgres tables. Runs daily via Fly.io cron, exits in <1s when no new data is expected.
+2. **Fedsync:** Incrementally syncs 30 federal datasets (Census, BLS, SEC EDGAR, FINRA, DOL, SBA, OSHA, EPA, FRED) into `fed_data.*` Postgres tables. Runs daily via Fly.io cron, exits in <1s when no new data is expected.
 
 ## Stack
 
@@ -45,12 +45,20 @@ go run ./cmd fedsync sync                                 # sync all due dataset
 go run ./cmd fedsync sync --phase 1                       # sync Phase 1 only
 go run ./cmd fedsync sync --datasets cbp,fpds --force     # force specific datasets
 go run ./cmd fedsync xref                                 # build entity cross-reference
+
+# Geo pipeline commands
+go run ./cmd geo backfill --limit 100                    # geocode ungeocoded addresses
+go run ./cmd geo backfill-adv --limit 1000               # stub + geocode ADV firms
+go run ./cmd geo backfill-5500 --limit 10000             # stub + geocode Form 5500 sponsors
+
+# Salesforce report enrichment
+go run ./cmd sfreport --report-id 00O... --limit 5       # enrich from SF report
 ```
 
 ## Project Structure
 
 ```
-cmd/                        # cobra commands: root, import, run, batch, serve, fedsync
+cmd/                        # cobra commands: root, import, run, batch, serve, sfreport, fedsync, geo
 internal/
   config/config.go          # viper struct + loader (includes FedsyncConfig)
   pipeline/                 # enrichment pipeline (phases 1-9)
@@ -80,8 +88,8 @@ internal/
   fedsync/                  # federal data sync subsystem
     migrate.go              # embed.FS migration runner → fed_data.schema_migrations
     synclog.go              # sync log tracking (start, complete, fail)
-    migrations/*.sql        # 40 SQL migration files (001-040)
-    dataset/                # 26 dataset implementations
+    migrations/*.sql        # 96 SQL migration files (001-092)
+    dataset/                # 30 dataset implementations
       interface.go          # Dataset interface, Phase, Cadence, SyncResult
       schedule.go           # ShouldRun helpers: Daily, Weekly, Monthly, Quarterly, Annual
       registry.go           # Registry: maps names → Dataset impls
@@ -93,6 +101,8 @@ internal/
       oews.go               # BLS OEWS (Phase 1, annual)
       fpds.go               # SAM.gov FPDS (Phase 1, daily)
       econ_census.go        # Census Economic Census (Phase 1, annual)
+      ppp.go                # SBA PPP loans (Phase 1, one-time)
+      form_5500.go          # DOL Form 5500 ERISA plans (Phase 1, annual)
       adv_part1.go          # SEC ADV Part 1A (Phase 1B, monthly)
       ia_compilation.go     # IARD daily XML (Phase 1B, daily)
       holdings_13f.go       # SEC 13F holdings (Phase 1B, quarterly)
@@ -107,7 +117,10 @@ internal/
       nes.go                # Census NES (Phase 2, annual)
       asm.go                # Census ASM (Phase 2, annual)
       eci.go                # BLS ECI (Phase 2, quarterly)
+      sec_enforcement.go    # SEC enforcement actions (Phase 2, monthly)
       adv_part3.go          # CRS PDFs → OCR (Phase 3, monthly)
+      adv_enrichment.go     # ADV brochure structured extraction (Phase 3, monthly)
+      adv_extract.go        # ADV advisor answers via LLM (Phase 3, monthly)
       xbrl_facts.go         # EDGAR XBRL facts (Phase 3, daily)
       fred.go               # FRED series (Phase 3, monthly)
       abs.go                # Census ABS (Phase 3, annual)
@@ -118,6 +131,12 @@ internal/
     xbrl/                   # XBRL JSON-LD fact parser
   fetcher/                  # download + parse (HTTP, FTP, CSV, XML, JSON, XLSX, ZIP)
   ocr/                      # PDF text extraction (pdftotext → Mistral fallback)
+  company/                    # company records + entity linking
+    company.go                # CompanyRecord, Identifier, Address, Match types
+    store_postgres.go         # CompanyStore interface + pgx implementation
+    link.go                   # Linker: CRD/CIK/EIN/name→fed_data matching
+  geo/                        # geospatial association
+    associate.go              # Associator: address→MSA via PostGIS distance
 pkg/
   anthropic/                # Messages + Batch + cache primer
   firecrawl/                # crawl, scrape, batch scrape + poll
@@ -178,7 +197,7 @@ pkg/
 - T3 gating: `"always"` or `"ambiguity_only"` (config)
 
 ### Fedsync — Dataset interface
-- Each of 26 datasets implements `Dataset` in `internal/fedsync/dataset/`
+- Each of 30 datasets implements `Dataset` in `internal/fedsync/dataset/`
 - `ShouldRun(now, lastSync)` checks cadence (daily/weekly/monthly/quarterly/annual)
 - `Sync(ctx, pool, fetcher, tempDir)` returns `*SyncResult` with row count + metadata
 - Engine iterates registry, checks `ShouldRun()`, calls `Sync()`, records in `fed_data.sync_log`
@@ -203,6 +222,18 @@ pkg/
 - Tracked in `fed_data.schema_migrations`
 - Applied in lexicographic filename order, idempotent (skips already-applied)
 - All tables live in `fed_data` schema (separate from enrichment)
+
+### Fedsync — Entity aggregation pipeline
+For entity-level federal datasets with company/firm records and addresses, a standard `geo backfill-<source>` command bridges `fed_data.*` into the company/geo system:
+1. **Aggregate** by unique identifier (EIN/CRD/CIK) across filing years via `DISTINCT ON`
+2. **Create stub company** in `public.companies` (skip if already linked)
+3. **Upsert identifier** (EIN/CRD/CIK) into `public.company_identifiers`
+4. **Upsert address** into `public.company_addresses` with `source` tag
+5. **Geocode** via PostGIS TIGER (`pkg/geocode.Client`)
+6. **Associate MSAs** — nearest CBSAs by distance (`geo.Associator`)
+7. **Link** via `public.company_matches` (`matched_source`, `matched_key`, `match_type`, confidence)
+
+Implemented: `cmd/geo_backfill_adv.go` (CRD→adv_firms) and `cmd/geo_backfill_5500.go` (EIN→form_5500). Future entity datasets (FDIC, NCUA, IRS 990) should follow the same pattern.
 
 ## API Client Pattern (`pkg/`)
 
@@ -241,7 +272,7 @@ Each external API gets its own package in `pkg/`:
 
 ### Pre-commit hook
 
-A pre-commit hook runs `gofmt`, `go vet`, and `golangci-lint` on staged Go files. Install it:
+A pre-commit hook runs `gofmt`, `go fix`, `go vet`, and `golangci-lint` on staged Go files. Install it:
 
 ```bash
 ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
@@ -328,6 +359,10 @@ The project uses `golangci-lint` v2.10+ with config in `.golangci.yml`. Active l
 | `whitespace` | Trailing whitespace, blank lines |
 
 Run locally: `golangci-lint run ./...` (or `~/go/bin/golangci-lint run ./...`)
+
+### CI & Branch Protection
+
+CI runs 5 parallel jobs on every push/PR to `main`: `test`, `vet`, `lint`, `gofix`, `security`. All 5 are required status checks — PRs cannot merge until all pass. Branch protection is configured with `strict: true` (branch must be up-to-date with `main`).
 
 ## Environment Variables
 

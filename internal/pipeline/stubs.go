@@ -279,6 +279,11 @@ func (s *StubSalesforceClient) DescribeSObject(_ context.Context, name string) (
 	return &salesforce.SObjectDescription{Name: name, Label: name}, nil
 }
 
+// RunReport implements salesforce.Client.
+func (s *StubSalesforceClient) RunReport(_ context.Context, _ string) (*salesforce.ReportResult, error) {
+	return &salesforce.ReportResult{}, nil
+}
+
 // --- Notion Stub ---
 
 // StubNotionClient implements notion.Client as a no-op.

@@ -11,6 +11,7 @@ config..yaml
 # Secrets / keys
 *.pem
 *.key
+*.crt
 
 # IDE
 .idea/

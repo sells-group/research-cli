@@ -1,4 +1,4 @@
-.PHONY: build test test-coverage test-integration lint mocks clean
+.PHONY: build test test-coverage test-integration lint fix mocks clean
 
 build:
 	go build -o research-cli ./cmd
@@ -15,6 +15,9 @@ test-integration:
 
 lint:
 	golangci-lint run
+
+fix:
+	go fix ./...
 
 mocks:
 	mockery

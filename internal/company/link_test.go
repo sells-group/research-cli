@@ -2,8 +2,10 @@ package company
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/pashagolub/pgxmock/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,6 +15,39 @@ import (
 func init() {
 	zap.ReplaceGlobals(zap.NewNop())
 }
+
+// errorMockStore wraps mockStore to inject errors on specific calls.
+type errorMockStore struct {
+	mockStore
+	identifiersErr error
+	companyErr     error
+}
+
+func (m *errorMockStore) GetIdentifiers(_ context.Context, _ int64) ([]Identifier, error) {
+	if m.identifiersErr != nil {
+		return nil, m.identifiersErr
+	}
+	return m.mockStore.GetIdentifiers(context.Background(), 0)
+}
+
+func (m *errorMockStore) GetCompany(_ context.Context, id int64) (*CompanyRecord, error) {
+	if m.companyErr != nil {
+		return nil, m.companyErr
+	}
+	return m.mockStore.GetCompany(context.Background(), id)
+}
+
+// errMatchStore wraps mockStore but returns an error on UpsertMatch.
+type errMatchStore struct {
+	mockStore
+	upsertErr error
+}
+
+func (m *errMatchStore) UpsertMatch(_ context.Context, _ *Match) error {
+	return m.upsertErr
+}
+
+// --- FDIC tests ---
 
 func TestLinker_MatchFDIC_Found(t *testing.T) {
 	pool, err := pgxmock.NewPool()
@@ -58,6 +93,26 @@ func TestLinker_MatchFDIC_NotFound(t *testing.T) {
 	require.NoError(t, pool.ExpectationsWereMet())
 }
 
+func TestLinker_MatchFDIC_QueryError(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	ms := newMockStore()
+
+	pool.ExpectQuery(`SELECT name FROM fed_data\.fdic_institutions WHERE cert = \$1`).
+		WithArgs("bad").
+		WillReturnError(assert.AnError)
+
+	l := NewLinker(pool, ms)
+	_, err = l.matchFDIC(context.Background(), 1, "bad")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "query fdic_institutions")
+	require.NoError(t, pool.ExpectationsWereMet())
+}
+
+// --- CRD tests ---
+
 func TestLinker_MatchCRD_Found(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
@@ -97,6 +152,26 @@ func TestLinker_MatchCRD_NotFound(t *testing.T) {
 	assert.Empty(t, ms.matches[1])
 	require.NoError(t, pool.ExpectationsWereMet())
 }
+
+func TestLinker_MatchCRD_QueryError(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	ms := newMockStore()
+
+	pool.ExpectQuery(`SELECT firm_name FROM fed_data\.adv_firms WHERE crd_number = \$1`).
+		WithArgs("bad").
+		WillReturnError(assert.AnError)
+
+	l := NewLinker(pool, ms)
+	_, err = l.matchCRD(context.Background(), 1, "bad")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "query adv_firms")
+	require.NoError(t, pool.ExpectationsWereMet())
+}
+
+// --- CIK tests ---
 
 func TestLinker_MatchCIK_Found(t *testing.T) {
 	pool, err := pgxmock.NewPool()
@@ -138,6 +213,124 @@ func TestLinker_MatchCIK_NotFound(t *testing.T) {
 	require.NoError(t, pool.ExpectationsWereMet())
 }
 
+func TestLinker_MatchCIK_QueryError(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	ms := newMockStore()
+
+	pool.ExpectQuery(`SELECT entity_name FROM fed_data\.edgar_entities WHERE cik = \$1`).
+		WithArgs("bad").
+		WillReturnError(assert.AnError)
+
+	l := NewLinker(pool, ms)
+	_, err = l.matchCIK(context.Background(), 2, "bad")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "query edgar_entities")
+	require.NoError(t, pool.ExpectationsWereMet())
+}
+
+// --- EIN tests ---
+
+func TestLinker_MatchEIN(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	store := newMockStore()
+	linker := NewLinker(pool, store)
+
+	rows := pgxmock.NewRows([]string{"sponsor_dfe_name"}).
+		AddRow("ACME Corp 401(k) Plan")
+	pool.ExpectQuery("SELECT sponsor_dfe_name FROM fed_data.form_5500").
+		WithArgs("123456789").
+		WillReturnRows(rows)
+
+	n, err := linker.matchEIN(context.Background(), 42, "123456789")
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+
+	// Verify the match was upserted with correct fields.
+	require.Len(t, store.matches[42], 1)
+	m := store.matches[42][0]
+	assert.Equal(t, int64(42), m.CompanyID)
+	assert.Equal(t, "form_5500", m.MatchedSource)
+	assert.Equal(t, "123456789", m.MatchedKey)
+	assert.Equal(t, "direct_ein", m.MatchType)
+	require.NotNil(t, m.Confidence)
+	assert.Equal(t, 1.0, *m.Confidence)
+
+	assert.NoError(t, pool.ExpectationsWereMet())
+}
+
+func TestLinker_MatchEIN_QueryError(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	store := newMockStore()
+	linker := NewLinker(pool, store)
+
+	pool.ExpectQuery("SELECT sponsor_dfe_name FROM fed_data.form_5500").
+		WithArgs("999999999").
+		WillReturnError(errors.New("connection refused"))
+
+	n, err := linker.matchEIN(context.Background(), 42, "999999999")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "link: query form_5500")
+	assert.Equal(t, 0, n)
+
+	assert.Empty(t, store.matches[42])
+	assert.NoError(t, pool.ExpectationsWereMet())
+}
+
+func TestLinker_MatchEIN_NoRows(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	store := newMockStore()
+	linker := NewLinker(pool, store)
+
+	pool.ExpectQuery("SELECT sponsor_dfe_name FROM fed_data.form_5500").
+		WithArgs("000000000").
+		WillReturnError(pgx.ErrNoRows)
+
+	n, err := linker.matchEIN(context.Background(), 42, "000000000")
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+
+	assert.Empty(t, store.matches[42])
+	assert.NoError(t, pool.ExpectationsWereMet())
+}
+
+func TestLinker_MatchEIN_UpsertError(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	store := &errMatchStore{
+		mockStore: *newMockStore(),
+		upsertErr: errors.New("upsert failed"),
+	}
+	linker := NewLinker(pool, store)
+
+	rows := pgxmock.NewRows([]string{"sponsor_dfe_name"}).
+		AddRow("Test Plan")
+	pool.ExpectQuery("SELECT sponsor_dfe_name FROM fed_data.form_5500").
+		WithArgs("111222333").
+		WillReturnRows(rows)
+
+	n, err := linker.matchEIN(context.Background(), 42, "111222333")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "upsert failed")
+	assert.Equal(t, 0, n)
+	assert.NoError(t, pool.ExpectationsWereMet())
+}
+
+// --- Name+State tests ---
+
 func TestLinker_MatchNameState(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
@@ -178,6 +371,26 @@ func TestLinker_MatchNameState_NoMatch(t *testing.T) {
 	assert.Equal(t, 0, matched)
 	require.NoError(t, pool.ExpectationsWereMet())
 }
+
+func TestLinker_MatchNameState_QueryError(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	ms := newMockStore()
+
+	pool.ExpectQuery(`SELECT cik, entity_name FROM fed_data\.edgar_entities`).
+		WithArgs("Bad Corp", "XX").
+		WillReturnError(assert.AnError)
+
+	l := NewLinker(pool, ms)
+	_, err = l.matchNameState(context.Background(), 1, "Bad Corp", "XX")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "name+state query")
+	require.NoError(t, pool.ExpectationsWereMet())
+}
+
+// --- Fuzzy name tests ---
 
 func TestLinker_MatchFuzzyName(t *testing.T) {
 	pool, err := pgxmock.NewPool()
@@ -258,6 +471,26 @@ func TestLinker_MatchFuzzyName_SkipsAlreadyMatched(t *testing.T) {
 	require.NoError(t, pool.ExpectationsWereMet())
 }
 
+func TestLinker_MatchFuzzyName_QueryError(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	ms := newMockStore()
+
+	pool.ExpectQuery(`SELECT cik, entity_name, similarity`).
+		WithArgs("Error Corp", "FL").
+		WillReturnError(assert.AnError)
+
+	l := NewLinker(pool, ms)
+	_, err = l.matchFuzzyName(context.Background(), 1, "Error Corp", "FL")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "fuzzy query")
+	require.NoError(t, pool.ExpectationsWereMet())
+}
+
+// --- LinkFedData integration tests ---
+
 func TestLinker_LinkFedData_FullCascade(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
@@ -297,161 +530,6 @@ func TestLinker_LinkFedData_FullCascade(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, matched) // CRD + FDIC
 	require.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestLinker_MatchFDIC_QueryError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := newMockStore()
-
-	pool.ExpectQuery(`SELECT name FROM fed_data\.fdic_institutions WHERE cert = \$1`).
-		WithArgs("bad").
-		WillReturnError(assert.AnError)
-
-	l := NewLinker(pool, ms)
-	_, err = l.matchFDIC(context.Background(), 1, "bad")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "query fdic_institutions")
-	require.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestLinker_MatchCRD_QueryError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := newMockStore()
-
-	pool.ExpectQuery(`SELECT firm_name FROM fed_data\.adv_firms WHERE crd_number = \$1`).
-		WithArgs("bad").
-		WillReturnError(assert.AnError)
-
-	l := NewLinker(pool, ms)
-	_, err = l.matchCRD(context.Background(), 1, "bad")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "query adv_firms")
-	require.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestLinker_MatchCIK_QueryError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := newMockStore()
-
-	pool.ExpectQuery(`SELECT entity_name FROM fed_data\.edgar_entities WHERE cik = \$1`).
-		WithArgs("bad").
-		WillReturnError(assert.AnError)
-
-	l := NewLinker(pool, ms)
-	_, err = l.matchCIK(context.Background(), 2, "bad")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "query edgar_entities")
-	require.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestLinker_MatchNameState_QueryError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := newMockStore()
-
-	pool.ExpectQuery(`SELECT cik, entity_name FROM fed_data\.edgar_entities`).
-		WithArgs("Bad Corp", "XX").
-		WillReturnError(assert.AnError)
-
-	l := NewLinker(pool, ms)
-	_, err = l.matchNameState(context.Background(), 1, "Bad Corp", "XX")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "name+state query")
-	require.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestLinker_MatchFuzzyName_QueryError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := newMockStore()
-
-	pool.ExpectQuery(`SELECT cik, entity_name, similarity`).
-		WithArgs("Error Corp", "FL").
-		WillReturnError(assert.AnError)
-
-	l := NewLinker(pool, ms)
-	_, err = l.matchFuzzyName(context.Background(), 1, "Error Corp", "FL")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "fuzzy query")
-	require.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestLinker_LinkFedData_GetIdentifiersError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := &errorMockStore{mockStore: *newMockStore(), identifiersErr: assert.AnError}
-	ms.companies[1] = &CompanyRecord{ID: 1, Name: "Corp", State: "CA"}
-
-	l := NewLinker(pool, ms)
-	_, err = l.LinkFedData(context.Background(), 1)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "get identifiers")
-}
-
-func TestLinker_LinkFedData_GetCompanyError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := &errorMockStore{mockStore: *newMockStore(), companyErr: assert.AnError}
-	ms.identifiers[1] = []Identifier{}
-
-	l := NewLinker(pool, ms)
-	_, err = l.LinkFedData(context.Background(), 1)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "get company")
-}
-
-func TestLinker_LinkFedData_EmptyNameState(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := newMockStore()
-	ms.companies[30] = &CompanyRecord{ID: 30, Name: "", State: ""}
-	ms.identifiers[30] = []Identifier{}
-
-	l := NewLinker(pool, ms)
-	matched, err := l.LinkFedData(context.Background(), 30)
-	require.NoError(t, err)
-	assert.Equal(t, 0, matched)
-	require.NoError(t, pool.ExpectationsWereMet())
-}
-
-// errorMockStore wraps mockStore to inject errors on specific calls.
-type errorMockStore struct {
-	mockStore
-	identifiersErr error
-	companyErr     error
-}
-
-func (m *errorMockStore) GetIdentifiers(_ context.Context, _ int64) ([]Identifier, error) {
-	if m.identifiersErr != nil {
-		return nil, m.identifiersErr
-	}
-	return m.mockStore.GetIdentifiers(context.Background(), 0)
-}
-
-func (m *errorMockStore) GetCompany(_ context.Context, id int64) (*CompanyRecord, error) {
-	if m.companyErr != nil {
-		return nil, m.companyErr
-	}
-	return m.mockStore.GetCompany(context.Background(), id)
 }
 
 func TestLinker_LinkFedData_MatchErrorsContinue(t *testing.T) {
@@ -541,4 +619,56 @@ func TestLinker_LinkFedData_NoIdentifiers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, matched)
 	require.NoError(t, pool.ExpectationsWereMet())
+}
+
+func TestLinker_LinkFedData_GetIdentifiersError(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	ms := &errorMockStore{mockStore: *newMockStore(), identifiersErr: assert.AnError}
+	ms.companies[1] = &CompanyRecord{ID: 1, Name: "Corp", State: "CA"}
+
+	l := NewLinker(pool, ms)
+	_, err = l.LinkFedData(context.Background(), 1)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "get identifiers")
+}
+
+func TestLinker_LinkFedData_GetCompanyError(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	ms := &errorMockStore{mockStore: *newMockStore(), companyErr: assert.AnError}
+	ms.identifiers[1] = []Identifier{}
+
+	l := NewLinker(pool, ms)
+	_, err = l.LinkFedData(context.Background(), 1)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "get company")
+}
+
+func TestLinker_LinkFedData_EmptyNameState(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	ms := newMockStore()
+	ms.companies[30] = &CompanyRecord{ID: 30, Name: "", State: ""}
+	ms.identifiers[30] = []Identifier{}
+
+	l := NewLinker(pool, ms)
+	matched, err := l.LinkFedData(context.Background(), 30)
+	require.NoError(t, err)
+	assert.Equal(t, 0, matched)
+	require.NoError(t, pool.ExpectationsWereMet())
+}
+
+// --- Utility tests ---
+
+func TestPtrFloat(t *testing.T) {
+	p := ptrFloat(0.95)
+	require.NotNil(t, p)
+	assert.Equal(t, 0.95, *p)
 }
