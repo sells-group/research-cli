@@ -206,6 +206,50 @@ func TestEOBMF_ParseCSV_FinalBatchUpsertError(t *testing.T) {
 	assert.Contains(t, err.Error(), "eo_bmf: bulk upsert final batch")
 }
 
+func TestEOBMF_ParseCSV_MalformedRow(t *testing.T) {
+	// Row with wrong number of fields — csv.Reader returns an error, should be skipped.
+	csvContent := eoBMFCSVHeader +
+		"too,few,fields\n" +
+		"123456789,VALID ORG,,456 OAK AVE,DALLAS,TX,75201,0000,03,3,1000,200001,1,15,0,1,01,202209,5,5,01,00,12,500000,100000,100000,B11,\n"
+
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	expectBulkUpsert(pool, "fed_data.eo_bmf", eoBMFColumns, 1)
+
+	ds := &EOBMF{}
+	rows, err := ds.parseCSV(context.Background(), pool, strings.NewReader(csvContent))
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), rows)
+	assert.NoError(t, pool.ExpectationsWereMet())
+}
+
+func TestEOBMF_Sync_ParseError(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write an invalid CSV file (no EIN column) that will cause parseCSV to error.
+	badCSV := "BOGUS,COLUMNS\n1,2\n"
+
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	f := fetchermocks.NewMockFetcher(t)
+	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, _ string, destPath string) {
+			if err := os.WriteFile(destPath, []byte(badCSV), 0644); err != nil {
+				panic("test: write CSV: " + err.Error())
+			}
+		}).
+		Return(int64(len(badCSV)), nil)
+
+	ds := &EOBMF{}
+	_, err = ds.Sync(context.Background(), pool, f, dir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "EIN column not found")
+}
+
 func TestEOBMF_Sync_DownloadError(t *testing.T) {
 	pool, err := pgxmock.NewPool()
 	require.NoError(t, err)
