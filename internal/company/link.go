@@ -60,6 +60,14 @@ func (l *Linker) LinkFedData(ctx context.Context, companyID int64) (int, error) 
 			}
 			matched += n
 		}
+		if id.System == SystemEIN {
+			n, err := l.matchEIN(ctx, companyID, id.Identifier)
+			if err != nil {
+				log.Warn("link: EIN match failed", zap.Error(err))
+				continue
+			}
+			matched += n
+		}
 	}
 
 	// Pass 2: Exact name+state match against EDGAR entities.
@@ -129,6 +137,31 @@ func (l *Linker) matchCIK(ctx context.Context, companyID int64, cik string) (int
 		MatchedSource: "edgar_entities",
 		MatchedKey:    cik,
 		MatchType:     "direct_cik",
+		Confidence:    ptrFloat(1.0),
+	}
+	if err := l.store.UpsertMatch(ctx, m); err != nil {
+		return 0, err
+	}
+	return 1, nil
+}
+
+func (l *Linker) matchEIN(ctx context.Context, companyID int64, ein string) (int, error) {
+	var sponsorName string
+	err := l.pool.QueryRow(ctx,
+		`SELECT sponsor_dfe_name FROM fed_data.form_5500 WHERE spons_dfe_ein = $1 LIMIT 1`, ein).
+		Scan(&sponsorName)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 0, nil
+		}
+		return 0, eris.Wrap(err, "link: query form_5500")
+	}
+
+	m := &Match{
+		CompanyID:     companyID,
+		MatchedSource: "form_5500",
+		MatchedKey:    ein,
+		MatchType:     "direct_ein",
 		Confidence:    ptrFloat(1.0),
 	}
 	if err := l.store.UpsertMatch(ctx, m); err != nil {
