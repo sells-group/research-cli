@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/sells-group/research-cli/internal/model"
 )
 
@@ -296,4 +298,160 @@ func TestExportGrataCSV_MultipleResults(t *testing.T) {
 	if records[2][0] != "b.com" {
 		t.Errorf("row 2 Domain = %q, want %q", records[2][0], "b.com")
 	}
+}
+
+func TestFormatDollars_Negative(t *testing.T) {
+	assert.Equal(t, "-$1,234,567", formatDollars(-1234567))
+	assert.Equal(t, "-$999", formatDollars(-999))
+}
+
+func TestFieldStr_NilValue(t *testing.T) {
+	fv := map[string]model.FieldValue{
+		"key": {FieldKey: "key", Value: nil},
+	}
+	assert.Equal(t, "", fieldStr(fv, "key"))
+}
+
+func TestFieldStr_NotFound(t *testing.T) {
+	fv := map[string]model.FieldValue{}
+	assert.Equal(t, "", fieldStr(fv, "missing"))
+}
+
+func TestFormatRevenue_NonNumericEstimate(t *testing.T) {
+	fv := map[string]model.FieldValue{
+		"revenue_estimate": {FieldKey: "revenue_estimate", Value: "unknown"},
+	}
+	assert.Equal(t, "unknown", formatRevenue(fv))
+}
+
+func TestFormatRevenue_ZeroEstimate(t *testing.T) {
+	fv := map[string]model.FieldValue{
+		"revenue_estimate": {FieldKey: "revenue_estimate", Value: float64(0)},
+	}
+	// Zero is not > 0, so should fall through to string format.
+	assert.Equal(t, "0", formatRevenue(fv))
+}
+
+func TestFormatRevenue_NilEstimateValue(t *testing.T) {
+	fv := map[string]model.FieldValue{
+		"revenue_estimate": {FieldKey: "revenue_estimate", Value: nil},
+	}
+	assert.Equal(t, "", formatRevenue(fv))
+}
+
+func TestExportGrataCSV_BadPath(t *testing.T) {
+	results := []*model.EnrichmentResult{
+		{Company: model.Company{URL: "https://a.com", Name: "A"}},
+	}
+	err := ExportGrataCSV(results, "/nonexistent/dir/out.csv")
+	assert.Error(t, err)
+}
+
+func TestExportGrataCSV_ExecLinkedInAndKeyPeople(t *testing.T) {
+	results := []*model.EnrichmentResult{
+		{
+			Company: model.Company{
+				URL:  "https://example.com",
+				Name: "Test Inc",
+			},
+			FieldValues: map[string]model.FieldValue{
+				"exec_linkedin": {FieldKey: "exec_linkedin", Value: "https://linkedin.com/in/johndoe"},
+				"key_people":    {FieldKey: "key_people", Value: "John Doe (CEO), Jane Doe (COO)"},
+			},
+		},
+	}
+
+	outPath := filepath.Join(t.TempDir(), "linkedin.csv")
+	err := ExportGrataCSV(results, outPath)
+	assert.NoError(t, err)
+
+	f, err := os.Open(outPath)
+	assert.NoError(t, err)
+	defer f.Close() //nolint:errcheck
+
+	reader := csv.NewReader(f)
+	records, err := reader.ReadAll()
+	assert.NoError(t, err)
+	assert.Len(t, records, 2)
+
+	header := records[0]
+	colIdx := make(map[string]int, len(header))
+	for i, col := range header {
+		colIdx[col] = i
+	}
+
+	row := records[1]
+	assert.Equal(t, "https://linkedin.com/in/johndoe", row[colIdx["Executive Linkedin"]])
+	assert.Equal(t, "John Doe (CEO), Jane Doe (COO)", row[colIdx["Key People"]])
+}
+
+func TestFormatRevenue_Int64Type(t *testing.T) {
+	fv := map[string]model.FieldValue{
+		"revenue_estimate": {FieldKey: "revenue_estimate", Value: int64(7500000)},
+	}
+	assert.Equal(t, "$7,500,000", formatRevenue(fv))
+}
+
+func TestFormatRevenue_Float32Type(t *testing.T) {
+	fv := map[string]model.FieldValue{
+		"revenue_estimate": {FieldKey: "revenue_estimate", Value: float32(3000000)},
+	}
+	assert.Equal(t, "$3,000,000", formatRevenue(fv))
+}
+
+func TestExportGrataCSV_EmptyResults(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "empty.csv")
+	err := ExportGrataCSV([]*model.EnrichmentResult{}, outPath)
+	assert.NoError(t, err)
+
+	f, err := os.Open(outPath)
+	assert.NoError(t, err)
+	defer f.Close() //nolint:errcheck
+
+	reader := csv.NewReader(f)
+	records, err := reader.ReadAll()
+	assert.NoError(t, err)
+	// Should have only the header row.
+	assert.Len(t, records, 1)
+	assert.Equal(t, grataColumns, records[0])
+}
+
+func TestExportGrataCSV_YearFoundedAndNAICS(t *testing.T) {
+	results := []*model.EnrichmentResult{
+		{
+			Company: model.Company{
+				URL:  "https://widgets.com",
+				Name: "Widgets LLC",
+			},
+			FieldValues: map[string]model.FieldValue{
+				"year_founded": {FieldKey: "year_founded", Value: 1999},
+				"naics_code":   {FieldKey: "naics_code", Value: "332710"},
+				"review_count": {FieldKey: "review_count", Value: 0},
+			},
+		},
+	}
+
+	outPath := filepath.Join(t.TempDir(), "year_naics.csv")
+	err := ExportGrataCSV(results, outPath)
+	assert.NoError(t, err)
+
+	f, err := os.Open(outPath)
+	assert.NoError(t, err)
+	defer f.Close() //nolint:errcheck
+
+	reader := csv.NewReader(f)
+	records, err := reader.ReadAll()
+	assert.NoError(t, err)
+	assert.Len(t, records, 2)
+
+	header := records[0]
+	colIdx := make(map[string]int, len(header))
+	for i, col := range header {
+		colIdx[col] = i
+	}
+
+	row := records[1]
+	assert.Equal(t, "1999", row[colIdx["Year Founded"]])
+	assert.Equal(t, "332710", row[colIdx["NAICS 6"]])
+	assert.Equal(t, "0", row[colIdx["Total Review Count"]])
 }

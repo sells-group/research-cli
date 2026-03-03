@@ -1570,3 +1570,182 @@ func TestFormatPreSeededContext_Partial(t *testing.T) {
 	assert.NotContains(t, result, "Executive Last Name")
 	assert.NotContains(t, result, "Executive Title")
 }
+
+// --- ExtractTier3 edge cases ---
+
+func TestExtractTier3_WithPPPContext(t *testing.T) {
+	ctx := context.Background()
+
+	routed := []model.RoutedQuestion{
+		{
+			Question: model.Question{ID: "q1", Text: "Revenue?", FieldKey: "revenue", OutputFormat: "string"},
+			Pages: []model.ClassifiedPage{
+				{CrawledPage: model.CrawledPage{URL: "https://acme.com", Markdown: "Revenue info"}},
+			},
+		},
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+	// Haiku summarization for prepareTier3Context.
+	aiClient.On("CreateMessage", mock.Anything, mock.MatchedBy(func(req anthropic.MessageRequest) bool {
+		return req.Model == "claude-haiku-4-5-20251001"
+	})).Return(&anthropic.MessageResponse{
+		Content: []anthropic.ContentBlock{{Text: "Acme Corp summary with revenue $5M."}},
+		Usage:   anthropic.TokenUsage{InputTokens: 500, OutputTokens: 100},
+	}, nil).Maybe()
+
+	// Opus T3 extraction (primer + direct).
+	aiClient.On("CreateMessage", mock.Anything, mock.MatchedBy(func(req anthropic.MessageRequest) bool {
+		return req.Model == "claude-opus-4-6"
+	})).Return(&anthropic.MessageResponse{
+		Content: []anthropic.ContentBlock{{Text: `{"value": "$5M", "confidence": 0.85, "reasoning": "from PPP data", "source_url": "https://acme.com"}`}},
+		Usage:   anthropic.TokenUsage{InputTokens: 800, OutputTokens: 100},
+	}, nil).Maybe()
+
+	pppMatches := []ppp.LoanMatch{
+		{
+			BorrowerName:    "ACME CORP",
+			CurrentApproval: 250_000,
+			JobsReported:    15,
+			MatchScore:      0.95,
+		},
+	}
+
+	aiCfg := config.AnthropicConfig{
+		OpusModel:  "claude-opus-4-6",
+		HaikuModel: "claude-haiku-4-5-20251001",
+		NoBatch:    true,
+	}
+
+	result, err := ExtractTier3(ctx, routed, nil, []model.CrawledPage{{URL: "https://acme.com", Markdown: "Revenue info"}}, model.Company{Name: "Acme"}, pppMatches, aiClient, aiCfg)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, 3, result.Tier)
+	assert.Len(t, result.Answers, 1)
+}
+
+// --- prepareTier3Context edge cases ---
+
+func TestPrepareTier3Context_EmptyPages(t *testing.T) {
+	ctx := context.Background()
+	aiClient := anthropicmocks.NewMockClient(t)
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(&anthropic.MessageResponse{
+			Content: []anthropic.ContentBlock{{Text: "Empty summary."}},
+			Usage:   anthropic.TokenUsage{InputTokens: 50, OutputTokens: 20},
+		}, nil)
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+
+	summary, usage, err := prepareTier3Context(ctx, nil, nil, aiClient, aiCfg)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "Empty summary.", summary)
+	assert.NotNil(t, usage)
+}
+
+func TestPrepareTier3Context_SingleChunk(t *testing.T) {
+	ctx := context.Background()
+	pages := []model.CrawledPage{
+		{URL: "https://acme.com/about", Title: "About", Markdown: "Acme Corp is a technology company."},
+	}
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "industry", Value: "Tech", Confidence: 0.9},
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(&anthropic.MessageResponse{
+			Content: []anthropic.ContentBlock{{Text: "Acme Corp is a tech company with operations in technology."}},
+			Usage:   anthropic.TokenUsage{InputTokens: 200, OutputTokens: 80},
+		}, nil)
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+
+	summary, usage, err := prepareTier3Context(ctx, pages, answers, aiClient, aiCfg)
+
+	assert.NoError(t, err)
+	assert.Contains(t, summary, "Acme Corp")
+	assert.Equal(t, 200, usage.InputTokens)
+}
+
+func TestPrepareTier3Context_MultipleChunks(t *testing.T) {
+	ctx := context.Background()
+
+	// Create enough pages to exceed the 15K char chunk limit.
+	var pages []model.CrawledPage
+	bigContent := strings.Repeat("A", 3000)
+	for i := 0; i < 8; i++ {
+		pages = append(pages, model.CrawledPage{
+			URL:      fmt.Sprintf("https://acme.com/page%d", i),
+			Title:    fmt.Sprintf("Page %d", i),
+			Markdown: bigContent,
+		})
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+	// Multiple chunk summarizations + merge call.
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(&anthropic.MessageResponse{
+			Content: []anthropic.ContentBlock{{Text: "Summarized chunk content."}},
+			Usage:   anthropic.TokenUsage{InputTokens: 300, OutputTokens: 60},
+		}, nil)
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+
+	summary, usage, err := prepareTier3Context(ctx, pages, nil, aiClient, aiCfg)
+
+	assert.NoError(t, err)
+	assert.NotEmpty(t, summary)
+	assert.True(t, usage.InputTokens > 0)
+}
+
+func TestPrepareTier3Context_SummarizeError(t *testing.T) {
+	ctx := context.Background()
+	pages := []model.CrawledPage{
+		{URL: "https://acme.com", Title: "Home", Markdown: "Content"},
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(nil, errors.New("api error"))
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+
+	_, _, err := prepareTier3Context(ctx, pages, nil, aiClient, aiCfg)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "prepare t3 context")
+}
+
+func TestPrepareTier3Context_ExternalPagesFirst(t *testing.T) {
+	ctx := context.Background()
+	pages := []model.CrawledPage{
+		{URL: "https://acme.com", Title: "Home", Markdown: "Main content."},
+		{URL: "https://bbb.org/acme", Title: "[BBB] Acme Corp", Markdown: "BBB data for Acme."},
+		{URL: "https://maps.google.com", Title: "[Google_Maps] Acme", Markdown: "Google Maps listing."},
+	}
+
+	var capturedPrompt string
+	aiClient := anthropicmocks.NewMockClient(t)
+	aiClient.On("CreateMessage", mock.Anything, mock.MatchedBy(func(req anthropic.MessageRequest) bool {
+		if len(req.Messages) > 0 {
+			capturedPrompt = req.Messages[0].Content
+		}
+		return true
+	})).Return(&anthropic.MessageResponse{
+		Content: []anthropic.ContentBlock{{Text: "Summary with external sources first."}},
+		Usage:   anthropic.TokenUsage{InputTokens: 200, OutputTokens: 60},
+	}, nil)
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+
+	_, _, err := prepareTier3Context(ctx, pages, nil, aiClient, aiCfg)
+
+	assert.NoError(t, err)
+	// External pages ([BBB], [Google_Maps]) should appear before regular pages.
+	bbbIdx := strings.Index(capturedPrompt, "[BBB]")
+	homeIdx := strings.Index(capturedPrompt, "--- Home")
+	assert.True(t, bbbIdx < homeIdx, "external pages should appear before regular pages in context")
+}

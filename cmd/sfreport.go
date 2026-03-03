@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os/signal"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 
@@ -158,14 +157,9 @@ Examples:
 		companies := reportAccountsToCompanies(withWebsite)
 
 		// Enable deferred SF writes.
-		var intentsMu sync.Mutex
-		var intents []*pipeline.SFWriteIntent
-
-		env.Pipeline.SetDeferredWrites(func(intent *pipeline.SFWriteIntent) {
-			intentsMu.Lock()
-			intents = append(intents, intent)
-			intentsMu.Unlock()
-		})
+		if sfExp, ok := env.Pipeline.ExporterByName("salesforce").(*pipeline.SalesforceExporter); ok {
+			sfExp.SetDeferredMode(true)
+		}
 
 		if sfreportForce {
 			env.Pipeline.SetForceReExtract(true)
@@ -200,20 +194,9 @@ Examples:
 
 		_ = g.Wait()
 
-		// Flush deferred SF writes in bulk.
-		if len(intents) > 0 {
-			zap.L().Info("flushing deferred SF writes",
-				zap.Int("intents", len(intents)),
-			)
-			summary, flushErr := env.Pipeline.FlushDeferredWrites(ctx, intents)
-			if flushErr != nil {
-				return eris.Wrap(flushErr, "sfreport: flush deferred SF writes")
-			}
-			if summary != nil && len(summary.Failures) > 0 {
-				zap.L().Warn("sfreport: SF write failures detected",
-					zap.Int("total_failures", len(summary.Failures)),
-				)
-			}
+		// Flush exporters (deferred SF writes + any others).
+		if err := env.Pipeline.FlushExporters(ctx); err != nil {
+			return eris.Wrap(err, "sfreport: flush exporters")
 		}
 
 		zap.L().Info("sfreport: batch complete",

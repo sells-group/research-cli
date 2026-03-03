@@ -792,6 +792,67 @@ func TestScrapeSource_BBB_PerplexityFallbackOnSearchError(t *testing.T) {
 	assert.Equal(t, "[bbb] Acme Corp", page.Title)
 }
 
+func TestResolveGoogleMapsFallbacks_AllNilClients(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", City: "Springfield", State: "IL"}
+
+	meta := resolveGoogleMapsFallbacks(ctx, company, nil, nil, nil)
+	assert.Nil(t, meta)
+}
+
+func TestResolveGoogleMapsFallbacks_GoogleAPIFallback(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", City: "Springfield", State: "IL"}
+
+	// Jina fails (no matches), Perplexity fails (not found), Google API succeeds.
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string")).
+		Return(&jina.SearchResponse{Code: 200, Data: []jina.SearchResult{}}, nil)
+
+	pplxClient := &mockPerplexityClient{response: "not found"}
+
+	googleClient := googlemocks.NewMockClient(t)
+	googleClient.On("TextSearch", mock.Anything, "Acme Corp Springfield IL").
+		Return(&google.TextSearchResponse{
+			Places: []google.Place{
+				{
+					DisplayName:     google.DisplayName{Text: "Acme Corp"},
+					Rating:          4.8,
+					UserRatingCount: 200,
+				},
+			},
+		}, nil)
+
+	meta := resolveGoogleMapsFallbacks(ctx, company, jinaClient, pplxClient, googleClient)
+
+	assert.NotNil(t, meta)
+	assert.Equal(t, "google_api", meta.Source)
+	assert.InDelta(t, 4.8, meta.Rating, 0.001)
+	assert.Equal(t, 200, meta.ReviewCount)
+}
+
+func TestResolveGoogleMapsFallbacks_JinaSucceedsFirst(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", City: "Springfield", State: "IL"}
+
+	// Jina succeeds with review data → should return immediately without calling perplexity/google.
+	jinaClient := jinamocks.NewMockClient(t)
+	jinaClient.On("Search", mock.Anything, mock.AnythingOfType("string")).
+		Return(&jina.SearchResponse{
+			Code: 200,
+			Data: []jina.SearchResult{
+				{Title: "Acme Corp", Content: "Rated 4.3 stars (75 reviews)"},
+			},
+		}, nil)
+
+	meta := resolveGoogleMapsFallbacks(ctx, company, jinaClient, nil, nil)
+
+	assert.NotNil(t, meta)
+	assert.Equal(t, "jina_search", meta.Source)
+	assert.InDelta(t, 4.3, meta.Rating, 0.001)
+	assert.Equal(t, 75, meta.ReviewCount)
+}
+
 // mockPerplexityClient is a simple mock for testing Perplexity fallback.
 type mockPerplexityClient struct {
 	response string
@@ -807,4 +868,34 @@ func (m *mockPerplexityClient) ChatCompletion(_ context.Context, _ perplexity.Ch
 			{Message: perplexity.Message{Role: "assistant", Content: m.response}},
 		},
 	}, nil
+}
+
+func TestResolveSoSViaPerplexity_Error(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
+
+	pplxClient := &mockPerplexityClient{err: errors.New("api error")}
+
+	page := resolveSoSViaPerplexity(ctx, company, pplxClient)
+	assert.Nil(t, page)
+}
+
+func TestResolveSoSViaPerplexity_EmptyContent(t *testing.T) {
+	ctx := context.Background()
+	company := model.Company{Name: "Acme Corp", URL: "https://acme.com"}
+
+	pplxClient := &mockPerplexityClient{response: ""}
+
+	page := resolveSoSViaPerplexity(ctx, company, pplxClient)
+	assert.Nil(t, page)
+}
+
+func TestParsePerplexityFreeform_EmptyContent(t *testing.T) {
+	result := parsePerplexityFreeform("")
+	assert.Nil(t, result)
+}
+
+func TestParsePerplexityFreeform_NoJSONFound(t *testing.T) {
+	result := parsePerplexityFreeform("Just some plain text without any JSON objects")
+	assert.Nil(t, result)
 }

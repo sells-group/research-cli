@@ -7,7 +7,6 @@ import (
 	"math"
 	"os/signal"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -77,14 +76,9 @@ var batchCmd = &cobra.Command{
 
 		// Enable deferred SF writes: collect intents during enrichment,
 		// flush in bulk after all companies are processed.
-		var intentsMu sync.Mutex
-		var intents []*pipeline.SFWriteIntent
-
-		env.Pipeline.SetDeferredWrites(func(intent *pipeline.SFWriteIntent) {
-			intentsMu.Lock()
-			intents = append(intents, intent)
-			intentsMu.Unlock()
-		})
+		if sfExp, ok := env.Pipeline.ExporterByName("salesforce").(*pipeline.SalesforceExporter); ok {
+			sfExp.SetDeferredMode(true)
+		}
 
 		batchErr := processBatch(ctx, leads, batchLimit, cfg.Batch.MaxConcurrentCompanies, env.Notion, env.Store, dlqMaxRetries, func(ctx context.Context, company model.Company) (*model.EnrichmentResult, error) {
 			return env.Pipeline.Run(ctx, company)
@@ -93,20 +87,9 @@ var batchCmd = &cobra.Command{
 			return batchErr
 		}
 
-		// Flush deferred SF writes in bulk.
-		if len(intents) > 0 {
-			zap.L().Info("flushing deferred SF writes",
-				zap.Int("intents", len(intents)),
-			)
-			summary, flushErr := env.Pipeline.FlushDeferredWrites(ctx, intents)
-			if flushErr != nil {
-				return eris.Wrap(flushErr, "flush deferred SF writes")
-			}
-			if summary != nil && len(summary.Failures) > 0 {
-				zap.L().Warn("batch: SF write failures detected",
-					zap.Int("total_failures", len(summary.Failures)),
-				)
-			}
+		// Flush exporters (deferred SF writes + any others).
+		if err := env.Pipeline.FlushExporters(ctx); err != nil {
+			return eris.Wrap(err, "flush exporters")
 		}
 
 		return nil
@@ -230,14 +213,9 @@ var reEnrichCmd = &cobra.Command{
 		)
 
 		// Enable deferred SF writes.
-		var intentsMu sync.Mutex
-		var intents []*pipeline.SFWriteIntent
-
-		env.Pipeline.SetDeferredWrites(func(intent *pipeline.SFWriteIntent) {
-			intentsMu.Lock()
-			intents = append(intents, intent)
-			intentsMu.Unlock()
-		})
+		if sfExp, ok := env.Pipeline.ExporterByName("salesforce").(*pipeline.SalesforceExporter); ok {
+			sfExp.SetDeferredMode(true)
+		}
 		env.Pipeline.SetForceReExtract(true)
 
 		g, gctx := errgroup.WithContext(ctx)
@@ -272,20 +250,9 @@ var reEnrichCmd = &cobra.Command{
 			return eris.Wrap(err, "re-enrich processing")
 		}
 
-		// Flush deferred SF writes.
-		if len(intents) > 0 {
-			zap.L().Info("flushing deferred SF writes",
-				zap.Int("intents", len(intents)),
-			)
-			summary, flushErr := env.Pipeline.FlushDeferredWrites(ctx, intents)
-			if flushErr != nil {
-				return eris.Wrap(flushErr, "flush deferred SF writes")
-			}
-			if summary != nil && len(summary.Failures) > 0 {
-				zap.L().Warn("re-enrich: SF write failures detected",
-					zap.Int("total_failures", len(summary.Failures)),
-				)
-			}
+		// Flush exporters (deferred SF writes + any others).
+		if err := env.Pipeline.FlushExporters(ctx); err != nil {
+			return eris.Wrap(err, "re-enrich: flush exporters")
 		}
 
 		zap.L().Info("re-enrich complete",

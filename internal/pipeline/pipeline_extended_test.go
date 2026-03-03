@@ -1,12 +1,18 @@
 package pipeline
 
 import (
+	"context"
+	"errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
+	storemocks "github.com/sells-group/research-cli/internal/store/mocks"
 )
 
 func TestConvertAnthropicPricing_Nil(t *testing.T) {
@@ -123,4 +129,123 @@ func TestComputePhaseCost_AllPhases(t *testing.T) {
 
 	cost = p.computePhaseCost("9_gate", model.TokenUsage{InputTokens: 100})
 	assert.Equal(t, 0.0, cost)
+}
+
+func TestExecutePhase_Success(t *testing.T) {
+	st := storemocks.NewMockStore(t)
+	st.On("CreatePhase", mock.Anything, "run-1", "test_phase").
+		Return(&model.RunPhase{ID: "phase-1"}, nil)
+	st.On("CompletePhase", mock.Anything, "phase-1", mock.AnythingOfType("*model.PhaseResult")).
+		Return(nil)
+
+	p := &Pipeline{
+		store: st,
+		cfg:   &config.Config{},
+	}
+
+	var mu sync.Mutex
+	result := &model.EnrichmentResult{}
+
+	pr := p.executePhase(context.Background(), "run-1", "test_phase", func() (*model.PhaseResult, error) {
+		return &model.PhaseResult{
+			Metadata: map[string]any{"key": "value"},
+		}, nil
+	}, zap.L(), &mu, result)
+
+	assert.Equal(t, model.PhaseStatusComplete, pr.Status)
+	assert.Equal(t, "test_phase", pr.Name)
+	assert.Len(t, result.Phases, 1)
+}
+
+func TestExecutePhase_Error(t *testing.T) {
+	st := storemocks.NewMockStore(t)
+	st.On("CreatePhase", mock.Anything, "run-1", "fail_phase").
+		Return(&model.RunPhase{ID: "phase-1"}, nil)
+	st.On("CompletePhase", mock.Anything, "phase-1", mock.AnythingOfType("*model.PhaseResult")).
+		Return(nil)
+
+	p := &Pipeline{
+		store: st,
+		cfg:   &config.Config{},
+	}
+
+	var mu sync.Mutex
+	result := &model.EnrichmentResult{}
+
+	pr := p.executePhase(context.Background(), "run-1", "fail_phase", func() (*model.PhaseResult, error) {
+		return nil, errors.New("phase exploded")
+	}, zap.L(), &mu, result)
+
+	assert.Equal(t, model.PhaseStatusFailed, pr.Status)
+	assert.Contains(t, pr.Error, "phase exploded")
+	assert.Len(t, result.Phases, 1)
+}
+
+func TestExecutePhase_CreatePhaseFails(t *testing.T) {
+	st := storemocks.NewMockStore(t)
+	st.On("CreatePhase", mock.Anything, "run-1", "test_phase").
+		Return(nil, errors.New("db down"))
+	// CompletePhase should NOT be called since phase creation failed.
+
+	p := &Pipeline{
+		store: st,
+		cfg:   &config.Config{},
+	}
+
+	var mu sync.Mutex
+	result := &model.EnrichmentResult{}
+
+	pr := p.executePhase(context.Background(), "run-1", "test_phase", func() (*model.PhaseResult, error) {
+		return &model.PhaseResult{}, nil
+	}, zap.L(), &mu, result)
+
+	assert.Equal(t, model.PhaseStatusComplete, pr.Status)
+	assert.Len(t, result.Phases, 1)
+}
+
+func TestExecutePhase_CompletePhaseFails(t *testing.T) {
+	st := storemocks.NewMockStore(t)
+	st.On("CreatePhase", mock.Anything, "run-1", "test_phase").
+		Return(&model.RunPhase{ID: "phase-1"}, nil)
+	st.On("CompletePhase", mock.Anything, "phase-1", mock.AnythingOfType("*model.PhaseResult")).
+		Return(errors.New("disk full"))
+
+	p := &Pipeline{
+		store: st,
+		cfg:   &config.Config{},
+	}
+
+	var mu sync.Mutex
+	result := &model.EnrichmentResult{}
+
+	pr := p.executePhase(context.Background(), "run-1", "test_phase", func() (*model.PhaseResult, error) {
+		return &model.PhaseResult{}, nil
+	}, zap.L(), &mu, result)
+
+	// Phase still succeeds even though persistence failed.
+	assert.Equal(t, model.PhaseStatusComplete, pr.Status)
+	assert.Len(t, result.Phases, 1)
+}
+
+func TestExecutePhase_NilResult(t *testing.T) {
+	st := storemocks.NewMockStore(t)
+	st.On("CreatePhase", mock.Anything, "run-1", "nil_phase").
+		Return(&model.RunPhase{ID: "phase-1"}, nil)
+	st.On("CompletePhase", mock.Anything, "phase-1", mock.AnythingOfType("*model.PhaseResult")).
+		Return(nil)
+
+	p := &Pipeline{
+		store: st,
+		cfg:   &config.Config{},
+	}
+
+	var mu sync.Mutex
+	result := &model.EnrichmentResult{}
+
+	pr := p.executePhase(context.Background(), "run-1", "nil_phase", func() (*model.PhaseResult, error) {
+		return nil, nil // fn returns nil result
+	}, zap.L(), &mu, result)
+
+	assert.Equal(t, model.PhaseStatusComplete, pr.Status)
+	assert.Equal(t, "nil_phase", pr.Name)
 }

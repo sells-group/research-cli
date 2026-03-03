@@ -45,6 +45,7 @@ func TestBaseURL(t *testing.T) {
 	}{
 		{"with path", "https://acme.com/about", "https://acme.com"},
 		{"with port", "http://localhost:8080/test", "http://localhost:8080"},
+		{"malformed returns raw", "://bad\x00url", "://bad\x00url"},
 	}
 
 	for _, tt := range tests {
@@ -724,4 +725,167 @@ func TestDiscoverLinks_ParallelContextCancel(t *testing.T) {
 	// Must not hang — should return well within 1 second (context cancelled at 200ms).
 	assert.Less(t, elapsed, 1*time.Second,
 		"DiscoverLinks should return promptly after context cancellation, took %v", elapsed)
+}
+
+// --- normalizeURL edge cases ---
+
+func TestNormalizeURL_EmptyString(t *testing.T) {
+	// Empty string gets "https://" prepended and still parses.
+	result, err := normalizeURL("")
+	assert.NoError(t, err)
+	assert.Equal(t, "https:///", result)
+}
+
+func TestNormalizeURL_InvalidScheme(t *testing.T) {
+	// normalizeURL adds https:// to bare domains, but truly invalid URLs
+	// should still parse if they resemble a domain.
+	result, err := normalizeURL("localhost:8080")
+	assert.NoError(t, err)
+	assert.Equal(t, "https://localhost:8080/", result)
+}
+
+// --- checkExists edge cases ---
+
+func TestCheckExists_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
+	ctx := context.Background()
+
+	// 500 status should return false (not "exists").
+	assert.False(t, lc.checkExists(ctx, srv.URL+"/robots.txt"))
+}
+
+func TestCheckExists_ContextCancelled(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(2 * time.Second)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	assert.False(t, lc.checkExists(ctx, srv.URL+"/robots.txt"))
+}
+
+// --- extractLinks edge cases ---
+
+func TestExtractLinks_ConnectionError(t *testing.T) {
+	lc := &LocalCrawler{http: http.DefaultClient, matcher: scrape.NewPathMatcher(nil)}
+	ctx := context.Background()
+	base, _ := url.Parse("http://127.0.0.1:1")
+
+	_, err := lc.extractLinks(ctx, "http://127.0.0.1:1/page", base)
+	assert.Error(t, err)
+}
+
+// --- fetchSitemapURLs edge cases ---
+
+func TestFetchSitemapURLs_EmptyLocEntries(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>  </loc></url>
+  <url><loc>https://acme.com/valid</loc></url>
+</urlset>`)
+	}))
+	defer srv.Close()
+
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
+	ctx := context.Background()
+	base, _ := url.Parse("https://acme.com")
+
+	urls := lc.fetchSitemapURLs(ctx, srv.URL+"/sitemap.xml", base)
+	// Empty loc entry should be skipped, only valid one returned.
+	assert.Len(t, urls, 1)
+	assert.Equal(t, "https://acme.com/valid", urls[0])
+}
+
+func TestFetchSitemapURLs_ConnectionError(t *testing.T) {
+	lc := &LocalCrawler{http: http.DefaultClient, matcher: scrape.NewPathMatcher(nil)}
+	ctx := context.Background()
+	base, _ := url.Parse("https://acme.com")
+
+	urls := lc.fetchSitemapURLs(ctx, "http://127.0.0.1:1/sitemap.xml", base)
+	assert.Nil(t, urls)
+}
+
+func TestExtractLinks_NonOKStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
+	ctx := context.Background()
+	base, _ := url.Parse(srv.URL)
+
+	links, err := lc.extractLinks(ctx, srv.URL, base)
+	assert.NoError(t, err)
+	assert.Nil(t, links)
+}
+
+func TestParseLinks_SkipsAnchorsMailtoJavascript(t *testing.T) {
+	base, _ := url.Parse("https://acme.com")
+	html := `<a href="#">anchor</a>
+<a href="javascript:void(0)">js</a>
+<a href="mailto:test@test.com">email</a>
+<a href="/valid">valid</a>`
+
+	links := parseLinks(html, base)
+	assert.Len(t, links, 1)
+	assert.Equal(t, "https://acme.com/valid", links[0])
+}
+
+func TestParseLinks_DeduplicatesURLs(t *testing.T) {
+	base, _ := url.Parse("https://acme.com")
+	html := `<a href="/about">About</a>
+<a href="/about">About Again</a>`
+
+	links := parseLinks(html, base)
+	assert.Len(t, links, 1)
+}
+
+func TestParseLinks_UnclosedQuote(t *testing.T) {
+	base, _ := url.Parse("https://acme.com")
+	// href=" without closing quote → loop should break.
+	html := `<a href="/about">About</a><a href="/contact`
+
+	links := parseLinks(html, base)
+	assert.Len(t, links, 1)
+	assert.Equal(t, "https://acme.com/about", links[0])
+}
+
+func TestParseLinks_ExternalHostFiltered(t *testing.T) {
+	base, _ := url.Parse("https://acme.com")
+	html := `<a href="https://other.com/page">External</a>`
+
+	links := parseLinks(html, base)
+	assert.Empty(t, links)
+}
+
+func TestFetchSitemapURLs_InvalidLocURLParse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>://invalid</loc></url>
+  <url><loc>https://acme.com/about</loc></url>
+</urlset>`)
+	}))
+	defer srv.Close()
+
+	lc := &LocalCrawler{http: srv.Client(), matcher: scrape.NewPathMatcher(nil)}
+	ctx := context.Background()
+	base, _ := url.Parse("https://acme.com")
+
+	urls := lc.fetchSitemapURLs(ctx, srv.URL+"/sitemap.xml", base)
+	assert.Len(t, urls, 1)
+	assert.Equal(t, "https://acme.com/about", urls[0])
 }

@@ -199,6 +199,10 @@ func TestDomainToName(t *testing.T) {
 		{"https://smith.com", "Smith"},
 		{"https://my-great-company.io", "My Great Company"},
 		{"", ""},
+		{"localhost", ""},                    // single-part domain, no TLD
+		{"https://localhost:8080", ""},       // single-part with port
+		{"://invalid", ""},                   // malformed URL
+		{"https://sub.acme.com/page", "Sub"}, // subdomain
 	}
 	for _, tt := range tests {
 		t.Run(tt.url, func(t *testing.T) {

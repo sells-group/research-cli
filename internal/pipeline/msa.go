@@ -2,6 +2,43 @@ package pipeline
 
 import "strings"
 
+// msaAbbrev maps full MSA names to commonly used abbreviated display names.
+var msaAbbrev = map[string]string{
+	"Dallas-Fort Worth-Arlington, TX":              "DFW",
+	"New York-Newark-Jersey City, NY-NJ-PA":        "NYC",
+	"Washington-Arlington-Alexandria, DC-VA-MD-WV": "DC",
+	"Minneapolis-St. Paul-Bloomington, MN-WI":      "MSP",
+	"San Francisco-Oakland-Berkeley, CA":           "SF Bay Area",
+	"Tampa-St. Petersburg-Clearwater, FL":          "Tampa Bay",
+	"Los Angeles-Long Beach-Anaheim, CA":           "LA",
+	"San Jose-Sunnyvale-Santa Clara, CA":           "Silicon Valley",
+	"Miami-Fort Lauderdale-Pompano Beach, FL":      "South Florida",
+	"Riverside-San Bernardino-Ontario, CA":         "Inland Empire",
+	"Virginia Beach-Norfolk-Newport News, VA-NC":   "Hampton Roads",
+	"Louisville/Jefferson County, KY-IN":           "Louisville",
+}
+
+// MSAShortName converts a full MSA name to an abbreviated display name.
+// It uses a curated abbreviation map for well-known metros and falls back to
+// extracting the first city name for other MSAs.
+func MSAShortName(fullMSA string) string {
+	if fullMSA == "" {
+		return ""
+	}
+	if short, ok := msaAbbrev[fullMSA]; ok {
+		return short
+	}
+	// Fallback: extract first city before "-", then strip state suffix.
+	s := fullMSA
+	if idx := strings.Index(s, "-"); idx > 0 {
+		s = strings.TrimSpace(s[:idx])
+	}
+	if idx := strings.Index(s, ","); idx > 0 {
+		s = strings.TrimSpace(s[:idx])
+	}
+	return s
+}
+
 // LookupMSA returns the Metropolitan Statistical Area name for a given city and
 // state abbreviation. Returns empty string if no MSA match is found.
 func LookupMSA(city, state string) string {
@@ -18,8 +55,11 @@ func LookupMSA(city, state string) string {
 	return ""
 }
 
-// msaIndex maps "city,state_abbr" (lowercase) to MSA names for major US metros.
-var msaIndex = map[string]string{
+// msaIndex maps "city,state_abbr" (lowercase) to MSA names for all US
+// metropolitan statistical areas per 2023 OMB delineations (Bulletin 23-01).
+var msaIndex = map[string]string{ // #nosec G101 -- city-to-MSA lookup, not credentials
+	// ── Top metros (existing, with suburban coverage) ─────────────────
+
 	// New York–Newark–Jersey City
 	"new york,ny":        "New York-Newark-Jersey City, NY-NJ-PA",
 	"newark,nj":          "New York-Newark-Jersey City, NY-NJ-PA",
@@ -560,7 +600,7 @@ var msaIndex = map[string]string{
 	// Buffalo–Cheektowaga
 	"buffalo,ny": "Buffalo-Cheektowaga, NY",
 
-	// Rochester
+	// Rochester, NY
 	"rochester,ny": "Rochester, NY",
 
 	// Grand Rapids–Kentwood
@@ -607,4 +647,517 @@ var msaIndex = map[string]string{
 	// Bridgeport–Stamford–Norwalk
 	"bridgeport,ct": "Bridgeport-Stamford-Norwalk, CT",
 	"norwalk,ct":    "Bridgeport-Stamford-Norwalk, CT",
+
+	// ── Additional MSAs (2023 OMB Delineations) ──────────────────────
+
+	// Alabama
+	"anniston,al":      "Anniston-Oxford, AL",
+	"oxford,al":        "Anniston-Oxford, AL",
+	"auburn,al":        "Auburn-Opelika, AL",
+	"opelika,al":       "Auburn-Opelika, AL",
+	"daphne,al":        "Daphne-Fairhope-Foley, AL",
+	"fairhope,al":      "Daphne-Fairhope-Foley, AL",
+	"foley,al":         "Daphne-Fairhope-Foley, AL",
+	"decatur,al":       "Decatur, AL",
+	"dothan,al":        "Dothan, AL",
+	"florence,al":      "Florence-Muscle Shoals, AL",
+	"muscle shoals,al": "Florence-Muscle Shoals, AL",
+	"gadsden,al":       "Gadsden, AL",
+	"huntsville,al":    "Huntsville, AL",
+	"madison,al":       "Huntsville, AL",
+	"mobile,al":        "Mobile, AL",
+	"montgomery,al":    "Montgomery, AL",
+	"tuscaloosa,al":    "Tuscaloosa, AL",
+
+	// Alaska
+	"anchorage,ak": "Anchorage, AK",
+	"fairbanks,ak": "Fairbanks, AK",
+
+	// Arizona
+	"flagstaff,az":        "Flagstaff, AZ",
+	"lake havasu city,az": "Lake Havasu City-Kingman, AZ",
+	"kingman,az":          "Lake Havasu City-Kingman, AZ",
+	"prescott,az":         "Prescott Valley-Prescott, AZ",
+	"prescott valley,az":  "Prescott Valley-Prescott, AZ",
+	"sierra vista,az":     "Sierra Vista-Douglas, AZ",
+	"yuma,az":             "Yuma, AZ",
+
+	// Arkansas
+	"fayetteville,ar": "Fayetteville-Springdale-Rogers, AR",
+	"springdale,ar":   "Fayetteville-Springdale-Rogers, AR",
+	"rogers,ar":       "Fayetteville-Springdale-Rogers, AR",
+	"bentonville,ar":  "Fayetteville-Springdale-Rogers, AR",
+	"fort smith,ar":   "Fort Smith, AR-OK",
+	"hot springs,ar":  "Hot Springs, AR",
+	"jonesboro,ar":    "Jonesboro, AR",
+	"pine bluff,ar":   "Pine Bluff, AR",
+
+	// California
+	"bakersfield,ca":     "Bakersfield, CA",
+	"chico,ca":           "Chico, CA",
+	"el centro,ca":       "El Centro, CA",
+	"fresno,ca":          "Fresno, CA",
+	"clovis,ca":          "Fresno, CA",
+	"hanford,ca":         "Hanford-Corcoran, CA",
+	"madera,ca":          "Madera, CA",
+	"merced,ca":          "Merced, CA",
+	"modesto,ca":         "Modesto, CA",
+	"napa,ca":            "Napa, CA",
+	"oxnard,ca":          "Oxnard-Thousand Oaks-Ventura, CA",
+	"thousand oaks,ca":   "Oxnard-Thousand Oaks-Ventura, CA",
+	"ventura,ca":         "Oxnard-Thousand Oaks-Ventura, CA",
+	"simi valley,ca":     "Oxnard-Thousand Oaks-Ventura, CA",
+	"camarillo,ca":       "Oxnard-Thousand Oaks-Ventura, CA",
+	"redding,ca":         "Redding, CA",
+	"salinas,ca":         "Salinas, CA",
+	"san luis obispo,ca": "San Luis Obispo-Paso Robles, CA",
+	"paso robles,ca":     "San Luis Obispo-Paso Robles, CA",
+	"santa cruz,ca":      "Santa Cruz-Watsonville, CA",
+	"watsonville,ca":     "Santa Cruz-Watsonville, CA",
+	"santa maria,ca":     "Santa Maria-Santa Barbara, CA",
+	"santa barbara,ca":   "Santa Maria-Santa Barbara, CA",
+	"santa rosa,ca":      "Santa Rosa-Petaluma, CA",
+	"petaluma,ca":        "Santa Rosa-Petaluma, CA",
+	"stockton,ca":        "Stockton, CA",
+	"lodi,ca":            "Stockton, CA",
+	"vallejo,ca":         "Vallejo, CA",
+	"visalia,ca":         "Visalia, CA",
+	"yuba city,ca":       "Yuba City, CA",
+
+	// Colorado
+	"colorado springs,co": "Colorado Springs, CO",
+	"fort collins,co":     "Fort Collins, CO",
+	"loveland,co":         "Fort Collins, CO",
+	"grand junction,co":   "Grand Junction, CO",
+	"greeley,co":          "Greeley, CO",
+	"pueblo,co":           "Pueblo, CO",
+
+	// Connecticut
+	"new haven,ct":  "New Haven-Milford, CT",
+	"milford,ct":    "New Haven-Milford, CT",
+	"new london,ct": "Norwich-New London, CT",
+	"norwich,ct":    "Norwich-New London, CT",
+	"waterbury,ct":  "Waterbury, CT",
+	"danbury,ct":    "Danbury, CT",
+	"torrington,ct": "Torrington, CT",
+
+	// Delaware
+	"dover,de": "Dover, DE",
+
+	// Florida
+	"cape coral,fl":        "Cape Coral-Fort Myers, FL",
+	"fort myers,fl":        "Cape Coral-Fort Myers, FL",
+	"crestview,fl":         "Crestview-Fort Walton Beach-Destin, FL",
+	"fort walton beach,fl": "Crestview-Fort Walton Beach-Destin, FL",
+	"destin,fl":            "Crestview-Fort Walton Beach-Destin, FL",
+	"deltona,fl":           "Deltona-Daytona Beach-Ormond Beach, FL",
+	"daytona beach,fl":     "Deltona-Daytona Beach-Ormond Beach, FL",
+	"ormond beach,fl":      "Deltona-Daytona Beach-Ormond Beach, FL",
+	"gainesville,fl":       "Gainesville, FL",
+	"naples,fl":            "Naples-Marco Island, FL",
+	"marco island,fl":      "Naples-Marco Island, FL",
+	"north port,fl":        "North Port-Sarasota-Bradenton, FL",
+	"sarasota,fl":          "North Port-Sarasota-Bradenton, FL",
+	"bradenton,fl":         "North Port-Sarasota-Bradenton, FL",
+	"venice,fl":            "North Port-Sarasota-Bradenton, FL",
+	"ocala,fl":             "Ocala, FL",
+	"palm bay,fl":          "Palm Bay-Melbourne-Titusville, FL",
+	"melbourne,fl":         "Palm Bay-Melbourne-Titusville, FL",
+	"titusville,fl":        "Palm Bay-Melbourne-Titusville, FL",
+	"panama city,fl":       "Panama City, FL",
+	"pensacola,fl":         "Pensacola-Ferry Pass-Brent, FL",
+	"port st. lucie,fl":    "Port St. Lucie, FL",
+	"port st lucie,fl":     "Port St. Lucie, FL",
+	"punta gorda,fl":       "Punta Gorda, FL",
+	"vero beach,fl":        "Sebastian-Vero Beach, FL",
+	"sebastian,fl":         "Sebastian-Vero Beach, FL",
+	"sebring,fl":           "Sebring-Avon Park, FL",
+	"tallahassee,fl":       "Tallahassee, FL",
+	"the villages,fl":      "The Villages, FL",
+
+	// Georgia
+	"albany,ga":        "Albany, GA",
+	"athens,ga":        "Athens-Clarke County, GA",
+	"augusta,ga":       "Augusta-Richmond County, GA-SC",
+	"brunswick,ga":     "Brunswick, GA",
+	"columbus,ga":      "Columbus, GA-AL",
+	"dalton,ga":        "Dalton, GA",
+	"gainesville,ga":   "Gainesville, GA",
+	"hinesville,ga":    "Hinesville, GA",
+	"macon,ga":         "Macon-Bibb County, GA",
+	"rome,ga":          "Rome, GA",
+	"savannah,ga":      "Savannah, GA",
+	"valdosta,ga":      "Valdosta, GA",
+	"warner robins,ga": "Warner Robins, GA",
+
+	// Hawaii
+	"kahului,hi": "Kahului-Wailuku-Lahaina, HI",
+
+	// Idaho
+	"coeur d'alene,id": "Coeur d'Alene, ID",
+	"idaho falls,id":   "Idaho Falls, ID",
+	"lewiston,id":      "Lewiston, ID-WA",
+	"pocatello,id":     "Pocatello, ID",
+	"twin falls,id":    "Twin Falls, ID",
+
+	// Illinois
+	"bloomington,il": "Bloomington, IL",
+	"champaign,il":   "Champaign-Urbana, IL",
+	"urbana,il":      "Champaign-Urbana, IL",
+	"danville,il":    "Danville, IL",
+	"decatur,il":     "Decatur, IL",
+	"kankakee,il":    "Kankakee, IL",
+	"peoria,il":      "Peoria, IL",
+	"rockford,il":    "Rockford, IL",
+	"springfield,il": "Springfield, IL",
+
+	// Indiana
+	"bloomington,in":    "Bloomington, IN",
+	"columbus,in":       "Columbus, IN",
+	"elkhart,in":        "Elkhart-Goshen, IN",
+	"goshen,in":         "Elkhart-Goshen, IN",
+	"evansville,in":     "Evansville, IN-KY",
+	"fort wayne,in":     "Fort Wayne, IN",
+	"kokomo,in":         "Kokomo, IN",
+	"lafayette,in":      "Lafayette-West Lafayette, IN",
+	"west lafayette,in": "Lafayette-West Lafayette, IN",
+	"michigan city,in":  "Michigan City-La Porte, IN",
+	"la porte,in":       "Michigan City-La Porte, IN",
+	"muncie,in":         "Muncie, IN",
+	"south bend,in":     "South Bend-Mishawaka, IN-MI",
+	"mishawaka,in":      "South Bend-Mishawaka, IN-MI",
+	"terre haute,in":    "Terre Haute, IN",
+
+	// Iowa
+	"cedar rapids,ia": "Cedar Rapids, IA",
+	"davenport,ia":    "Davenport-Moline-Rock Island, IA-IL",
+	"moline,il":       "Davenport-Moline-Rock Island, IA-IL",
+	"rock island,il":  "Davenport-Moline-Rock Island, IA-IL",
+	"dubuque,ia":      "Dubuque, IA",
+	"iowa city,ia":    "Iowa City, IA",
+	"sioux city,ia":   "Sioux City, IA-NE-SD",
+	"waterloo,ia":     "Waterloo-Cedar Falls, IA",
+	"cedar falls,ia":  "Waterloo-Cedar Falls, IA",
+
+	// Kansas
+	"lawrence,ks":  "Lawrence, KS",
+	"manhattan,ks": "Manhattan, KS",
+	"topeka,ks":    "Topeka, KS",
+	"wichita,ks":   "Wichita, KS",
+
+	// Kentucky
+	"bowling green,ky": "Bowling Green, KY",
+	"elizabethtown,ky": "Elizabethtown-Fort Knox, KY",
+	"lexington,ky":     "Lexington-Fayette, KY",
+	"owensboro,ky":     "Owensboro, KY",
+
+	// Louisiana
+	"baton rouge,la":  "Baton Rouge, LA",
+	"hammond,la":      "Hammond, LA",
+	"houma,la":        "Houma-Thibodaux, LA",
+	"thibodaux,la":    "Houma-Thibodaux, LA",
+	"lafayette,la":    "Lafayette, LA",
+	"lake charles,la": "Lake Charles, LA",
+	"monroe,la":       "Monroe, LA",
+	"shreveport,la":   "Shreveport-Bossier City, LA",
+	"bossier city,la": "Shreveport-Bossier City, LA",
+
+	// Maine
+	"bangor,me":         "Bangor, ME",
+	"lewiston,me":       "Lewiston-Auburn, ME",
+	"auburn,me":         "Lewiston-Auburn, ME",
+	"portland,me":       "Portland-South Portland, ME",
+	"south portland,me": "Portland-South Portland, ME",
+
+	// Maryland
+	"california,md":     "California-Lexington Park, MD",
+	"lexington park,md": "California-Lexington Park, MD",
+	"cumberland,md":     "Cumberland, MD-WV",
+	"hagerstown,md":     "Hagerstown-Martinsburg, MD-WV",
+	"martinsburg,wv":    "Hagerstown-Martinsburg, MD-WV",
+	"salisbury,md":      "Salisbury, MD-DE",
+
+	// Massachusetts
+	"barnstable,ma":  "Barnstable Town, MA",
+	"leominster,ma":  "Leominster-Gardner, MA",
+	"new bedford,ma": "New Bedford, MA",
+	"pittsfield,ma":  "Pittsfield, MA",
+	"springfield,ma": "Springfield, MA",
+	"holyoke,ma":     "Springfield, MA",
+	"chicopee,ma":    "Springfield, MA",
+	"worcester,ma":   "Worcester, MA-CT",
+
+	// Michigan
+	"battle creek,mi": "Battle Creek, MI",
+	"bay city,mi":     "Bay City, MI",
+	"flint,mi":        "Flint, MI",
+	"jackson,mi":      "Jackson, MI",
+	"kalamazoo,mi":    "Kalamazoo-Portage, MI",
+	"portage,mi":      "Kalamazoo-Portage, MI",
+	"lansing,mi":      "Lansing-East Lansing, MI",
+	"east lansing,mi": "Lansing-East Lansing, MI",
+	"midland,mi":      "Midland, MI",
+	"monroe,mi":       "Monroe, MI",
+	"muskegon,mi":     "Muskegon, MI",
+	"niles,mi":        "Niles, MI",
+	"saginaw,mi":      "Saginaw, MI",
+
+	// Minnesota
+	"duluth,mn":      "Duluth, MN-WI",
+	"mankato,mn":     "Mankato, MN",
+	"rochester,mn":   "Rochester, MN",
+	"st. cloud,mn":   "St. Cloud, MN",
+	"saint cloud,mn": "St. Cloud, MN",
+
+	// Mississippi
+	"gulfport,ms":    "Gulfport-Biloxi, MS",
+	"biloxi,ms":      "Gulfport-Biloxi, MS",
+	"hattiesburg,ms": "Hattiesburg, MS",
+	"jackson,ms":     "Jackson, MS",
+
+	// Missouri
+	"cape girardeau,mo": "Cape Girardeau, MO-IL",
+	"columbia,mo":       "Columbia, MO",
+	"jefferson city,mo": "Jefferson City, MO",
+	"joplin,mo":         "Joplin, MO",
+	"springfield,mo":    "Springfield, MO",
+
+	// Montana
+	"billings,mt":    "Billings, MT",
+	"great falls,mt": "Great Falls, MT",
+	"missoula,mt":    "Missoula, MT",
+
+	// Nebraska
+	"grand island,ne": "Grand Island, NE",
+	"lincoln,ne":      "Lincoln, NE",
+
+	// Nevada
+	"carson city,nv": "Carson City, NV",
+	"reno,nv":        "Reno, NV",
+	"sparks,nv":      "Reno, NV",
+
+	// New Hampshire
+	"concord,nh": "Concord, NH",
+	"dover,nh":   "Dover-Durham, NH-ME",
+	"durham,nh":  "Dover-Durham, NH-ME",
+
+	// New Jersey
+	"atlantic city,nj": "Atlantic City-Hammonton, NJ",
+	"hammonton,nj":     "Atlantic City-Hammonton, NJ",
+	"ocean city,nj":    "Ocean City, NJ",
+	"trenton,nj":       "Trenton-Princeton, NJ",
+	"vineland,nj":      "Vineland-Bridgeton, NJ",
+	"bridgeton,nj":     "Vineland-Bridgeton, NJ",
+
+	// New Mexico
+	"farmington,nm": "Farmington, NM",
+	"las cruces,nm": "Las Cruces, NM",
+	"santa fe,nm":   "Santa Fe, NM",
+
+	// New York
+	"albany,ny":      "Albany-Schenectady-Troy, NY",
+	"schenectady,ny": "Albany-Schenectady-Troy, NY",
+	"troy,ny":        "Albany-Schenectady-Troy, NY",
+	"binghamton,ny":  "Binghamton, NY",
+	"elmira,ny":      "Elmira, NY",
+	"glens falls,ny": "Glens Falls, NY",
+	"ithaca,ny":      "Ithaca, NY",
+	"kingston,ny":    "Kingston, NY",
+	"syracuse,ny":    "Syracuse, NY",
+	"utica,ny":       "Utica-Rome, NY",
+	"rome,ny":        "Utica-Rome, NY",
+	"watertown,ny":   "Watertown-Fort Drum, NY",
+
+	// North Carolina
+	"asheville,nc":     "Asheville, NC",
+	"burlington,nc":    "Burlington, NC",
+	"fayetteville,nc":  "Fayetteville, NC",
+	"goldsboro,nc":     "Goldsboro, NC",
+	"greensboro,nc":    "Greensboro-High Point, NC",
+	"high point,nc":    "Greensboro-High Point, NC",
+	"greenville,nc":    "Greenville, NC",
+	"hickory,nc":       "Hickory-Lenoir-Morganton, NC",
+	"lenoir,nc":        "Hickory-Lenoir-Morganton, NC",
+	"jacksonville,nc":  "Jacksonville, NC",
+	"new bern,nc":      "New Bern, NC",
+	"rocky mount,nc":   "Rocky Mount, NC",
+	"wilmington,nc":    "Wilmington, NC",
+	"winston-salem,nc": "Winston-Salem, NC",
+
+	// North Dakota
+	"bismarck,nd":    "Bismarck, ND",
+	"fargo,nd":       "Fargo, ND-MN",
+	"grand forks,nd": "Grand Forks, ND-MN",
+
+	// Ohio
+	"akron,oh":       "Akron, OH",
+	"canton,oh":      "Canton-Massillon, OH",
+	"massillon,oh":   "Canton-Massillon, OH",
+	"dayton,oh":      "Dayton-Kettering, OH",
+	"kettering,oh":   "Dayton-Kettering, OH",
+	"lima,oh":        "Lima, OH",
+	"mansfield,oh":   "Mansfield, OH",
+	"springfield,oh": "Springfield, OH",
+	"toledo,oh":      "Toledo, OH",
+	"youngstown,oh":  "Youngstown-Warren-Boardman, OH-PA",
+	"warren,oh":      "Youngstown-Warren-Boardman, OH-PA",
+	"boardman,oh":    "Youngstown-Warren-Boardman, OH-PA",
+
+	// Oklahoma
+	"lawton,ok": "Lawton, OK",
+
+	// Oregon
+	"albany,or":      "Albany-Lebanon, OR",
+	"lebanon,or":     "Albany-Lebanon, OR",
+	"bend,or":        "Bend, OR",
+	"corvallis,or":   "Corvallis, OR",
+	"eugene,or":      "Eugene-Springfield, OR",
+	"springfield,or": "Eugene-Springfield, OR",
+	"grants pass,or": "Grants Pass, OR",
+	"medford,or":     "Medford, OR",
+	"salem,or":       "Salem, OR",
+	"keizer,or":      "Salem, OR",
+
+	// Pennsylvania
+	"allentown,pa":        "Allentown-Bethlehem-Easton, PA-NJ",
+	"bethlehem,pa":        "Allentown-Bethlehem-Easton, PA-NJ",
+	"easton,pa":           "Allentown-Bethlehem-Easton, PA-NJ",
+	"altoona,pa":          "Altoona, PA",
+	"chambersburg,pa":     "Chambersburg-Waynesboro, PA",
+	"east stroudsburg,pa": "East Stroudsburg, PA",
+	"erie,pa":             "Erie, PA",
+	"gettysburg,pa":       "Gettysburg, PA",
+	"harrisburg,pa":       "Harrisburg-Carlisle, PA",
+	"carlisle,pa":         "Harrisburg-Carlisle, PA",
+	"johnstown,pa":        "Johnstown, PA",
+	"lancaster,pa":        "Lancaster, PA",
+	"lebanon,pa":          "Lebanon, PA",
+	"reading,pa":          "Reading, PA",
+	"scranton,pa":         "Scranton--Wilkes-Barre, PA",
+	"wilkes-barre,pa":     "Scranton--Wilkes-Barre, PA",
+	"state college,pa":    "State College, PA",
+	"williamsport,pa":     "Williamsport, PA",
+	"york,pa":             "York-Hanover, PA",
+	"hanover,pa":          "York-Hanover, PA",
+
+	// South Carolina
+	"columbia,sc":           "Columbia, SC",
+	"florence,sc":           "Florence, SC",
+	"hilton head island,sc": "Hilton Head Island-Bluffton, SC",
+	"bluffton,sc":           "Hilton Head Island-Bluffton, SC",
+	"myrtle beach,sc":       "Myrtle Beach-Conway-North Myrtle Beach, SC-NC",
+	"conway,sc":             "Myrtle Beach-Conway-North Myrtle Beach, SC-NC",
+	"north myrtle beach,sc": "Myrtle Beach-Conway-North Myrtle Beach, SC-NC",
+	"spartanburg,sc":        "Spartanburg, SC",
+	"sumter,sc":             "Sumter, SC",
+	"anderson,sc":           "Greenville-Anderson, SC",
+
+	// South Dakota
+	"rapid city,sd":  "Rapid City, SD",
+	"sioux falls,sd": "Sioux Falls, SD",
+
+	// Tennessee
+	"chattanooga,tn":  "Chattanooga, TN-GA",
+	"clarksville,tn":  "Clarksville, TN-KY",
+	"cleveland,tn":    "Cleveland, TN",
+	"jackson,tn":      "Jackson, TN",
+	"johnson city,tn": "Johnson City, TN",
+	"kingsport,tn":    "Kingsport-Bristol, TN-VA",
+	"bristol,tn":      "Kingsport-Bristol, TN-VA",
+	"morristown,tn":   "Morristown, TN",
+
+	// Texas
+	"amarillo,tx":        "Amarillo, TX",
+	"beaumont,tx":        "Beaumont-Port Arthur, TX",
+	"port arthur,tx":     "Beaumont-Port Arthur, TX",
+	"brownsville,tx":     "Brownsville-Harlingen, TX",
+	"harlingen,tx":       "Brownsville-Harlingen, TX",
+	"college station,tx": "College Station-Bryan, TX",
+	"bryan,tx":           "College Station-Bryan, TX",
+	"corpus christi,tx":  "Corpus Christi, TX",
+	"killeen,tx":         "Killeen-Temple, TX",
+	"temple,tx":          "Killeen-Temple, TX",
+	"laredo,tx":          "Laredo, TX",
+	"longview,tx":        "Longview, TX",
+	"lubbock,tx":         "Lubbock, TX",
+	"mcallen,tx":         "McAllen-Edinburg-Mission, TX",
+	"edinburg,tx":        "McAllen-Edinburg-Mission, TX",
+	"mission,tx":         "McAllen-Edinburg-Mission, TX",
+	"midland,tx":         "Midland, TX",
+	"odessa,tx":          "Odessa, TX",
+	"san angelo,tx":      "San Angelo, TX",
+	"sherman,tx":         "Sherman-Denison, TX",
+	"denison,tx":         "Sherman-Denison, TX",
+	"texarkana,tx":       "Texarkana, TX-AR",
+	"tyler,tx":           "Tyler, TX",
+	"victoria,tx":        "Victoria, TX",
+	"waco,tx":            "Waco, TX",
+	"wichita falls,tx":   "Wichita Falls, TX",
+	"abilene,tx":         "Abilene, TX",
+
+	// Utah
+	"logan,ut":        "Logan, UT-ID",
+	"st. george,ut":   "St. George, UT",
+	"saint george,ut": "St. George, UT",
+
+	// Vermont
+	"burlington,vt":       "Burlington-South Burlington, VT",
+	"south burlington,vt": "Burlington-South Burlington, VT",
+
+	// Virginia
+	"blacksburg,va":      "Blacksburg-Christiansburg, VA",
+	"christiansburg,va":  "Blacksburg-Christiansburg, VA",
+	"charlottesville,va": "Charlottesville, VA",
+	"harrisonburg,va":    "Harrisonburg, VA",
+	"lynchburg,va":       "Lynchburg, VA",
+	"roanoke,va":         "Roanoke, VA",
+	"staunton,va":        "Staunton, VA",
+	"winchester,va":      "Winchester, VA-WV",
+
+	// Washington
+	"bellingham,wa":     "Bellingham, WA",
+	"bremerton,wa":      "Bremerton-Silverdale-Port Orchard, WA",
+	"silverdale,wa":     "Bremerton-Silverdale-Port Orchard, WA",
+	"kennewick,wa":      "Kennewick-Richland, WA",
+	"richland,wa":       "Kennewick-Richland, WA",
+	"longview,wa":       "Longview, WA",
+	"mount vernon,wa":   "Mount Vernon-Anacortes, WA",
+	"anacortes,wa":      "Mount Vernon-Anacortes, WA",
+	"olympia,wa":        "Olympia-Lacey-Tumwater, WA",
+	"lacey,wa":          "Olympia-Lacey-Tumwater, WA",
+	"tumwater,wa":       "Olympia-Lacey-Tumwater, WA",
+	"spokane,wa":        "Spokane-Spokane Valley, WA",
+	"spokane valley,wa": "Spokane-Spokane Valley, WA",
+	"walla walla,wa":    "Walla Walla, WA",
+	"wenatchee,wa":      "Wenatchee, WA",
+	"yakima,wa":         "Yakima, WA",
+
+	// West Virginia
+	"charleston,wv":  "Charleston, WV",
+	"huntington,wv":  "Huntington-Ashland, WV-KY-OH",
+	"ashland,ky":     "Huntington-Ashland, WV-KY-OH",
+	"morgantown,wv":  "Morgantown, WV",
+	"parkersburg,wv": "Parkersburg-Vienna, WV",
+	"vienna,wv":      "Parkersburg-Vienna, WV",
+	"wheeling,wv":    "Wheeling, WV-OH",
+
+	// Wisconsin
+	"appleton,wi":    "Appleton, WI",
+	"eau claire,wi":  "Eau Claire, WI",
+	"fond du lac,wi": "Fond du Lac, WI",
+	"green bay,wi":   "Green Bay, WI",
+	"janesville,wi":  "Janesville-Beloit, WI",
+	"beloit,wi":      "Janesville-Beloit, WI",
+	"la crosse,wi":   "La Crosse-Onalaska, WI-MN",
+	"onalaska,wi":    "La Crosse-Onalaska, WI-MN",
+	"madison,wi":     "Madison, WI",
+	"oshkosh,wi":     "Oshkosh-Neenah, WI",
+	"neenah,wi":      "Oshkosh-Neenah, WI",
+	"racine,wi":      "Racine, WI",
+	"sheboygan,wi":   "Sheboygan, WI",
+	"wausau,wi":      "Wausau-Weston, WI",
+
+	// Wyoming
+	"casper,wy":   "Casper, WY",
+	"cheyenne,wy": "Cheyenne, WY",
 }

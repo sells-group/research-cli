@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/sells-group/research-cli/pkg/jina"
@@ -50,4 +51,31 @@ func TestValidateJinaResponse_ZeroCodeValidContent(t *testing.T) {
 		Data: jina.ReadData{Content: content},
 	}
 	assert.False(t, ValidateJinaResponse(resp))
+}
+
+func TestValidateJinaResponse_LongContentWithChallenge(t *testing.T) {
+	// Challenge signature present but content is > 1000 chars → should pass (not blocked).
+	content := "Checking your browser. " + strings.Repeat("This is real content with lots of detail. ", 50)
+	resp := &jina.ReadResponse{
+		Code: 200,
+		Data: jina.ReadData{Content: content},
+	}
+	assert.False(t, ValidateJinaResponse(resp))
+}
+
+func TestValidateJinaResponse_ShortChallengeAccessDenied(t *testing.T) {
+	content := strings.Repeat("x", 101) + " access denied to this resource, please try again later"
+	resp := &jina.ReadResponse{
+		Code: 200,
+		Data: jina.ReadData{Content: content},
+	}
+	assert.True(t, ValidateJinaResponse(resp))
+}
+
+func TestValidateJinaResponse_Code500(t *testing.T) {
+	resp := &jina.ReadResponse{
+		Code: 500,
+		Data: jina.ReadData{Content: "Internal Server Error"},
+	}
+	assert.True(t, ValidateJinaResponse(resp))
 }

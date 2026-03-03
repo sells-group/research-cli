@@ -60,16 +60,14 @@ type Pipeline struct {
 	geocoder geocode.Client
 	geoAssoc *geo.Associator
 
-	// Deferred SF write mode: when set, Phase 9 builds write intents
-	// via PrepareGate instead of executing SF writes via QualityGate.
-	// The callback is invoked with each intent for external collection.
-	deferSFWrites  bool
-	onWriteIntent  func(*SFWriteIntent)
 	forceReExtract bool
 
 	// Company golden record importer. When set, enrichment results are
 	// persisted to the companies table after Phase 9.
 	companyImporter *companypkg.Importer
+
+	// exporters holds registered result exporters invoked after Phase 9.
+	exporters []ResultExporter
 }
 
 // New creates a new Pipeline with all dependencies.
@@ -141,15 +139,6 @@ func (p *Pipeline) SetFedsyncPool(pool db.Pool) {
 	p.fedsyncPool = pool
 }
 
-// SetDeferredWrites enables deferred SF write mode for batch aggregation.
-// When set, Phase 9 calls PrepareGate (building intents) instead of QualityGate
-// (executing writes). The callback fn is invoked with each write intent.
-// Call FlushDeferredWrites after all pipeline runs complete.
-func (p *Pipeline) SetDeferredWrites(fn func(*SFWriteIntent)) {
-	p.deferSFWrites = true
-	p.onWriteIntent = fn
-}
-
 // SetForceReExtract disables answer reuse so all fields are re-extracted.
 func (p *Pipeline) SetForceReExtract(force bool) {
 	p.forceReExtract = force
@@ -160,10 +149,31 @@ func (p *Pipeline) SetCompanyImporter(imp *companypkg.Importer) {
 	p.companyImporter = imp
 }
 
-// FlushDeferredWrites executes collected SF write intents in bulk using the
-// Pipeline's own SF and Notion clients.
-func (p *Pipeline) FlushDeferredWrites(ctx context.Context, intents []*SFWriteIntent) (*FlushSummary, error) {
-	return FlushSFWrites(ctx, p.salesforce, p.notion, intents)
+// AddExporter registers a ResultExporter to receive results after Phase 9.
+func (p *Pipeline) AddExporter(e ResultExporter) {
+	p.exporters = append(p.exporters, e)
+}
+
+// ExporterByName returns the first registered exporter with the given name,
+// or nil if none matches.
+func (p *Pipeline) ExporterByName(name string) ResultExporter {
+	for _, e := range p.exporters {
+		if e.Name() == name {
+			return e
+		}
+	}
+	return nil
+}
+
+// FlushExporters calls Flush on all registered exporters. Used by batch
+// callers after all companies have been processed.
+func (p *Pipeline) FlushExporters(ctx context.Context) error {
+	for _, e := range p.exporters {
+		if err := e.Flush(ctx); err != nil {
+			return eris.Wrapf(err, "flush exporter %s", e.Name())
+		}
+	}
+	return nil
 }
 
 // convertAnthropicPricing maps config pricing to cost pricing types.
@@ -1102,48 +1112,31 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		return &model.PhaseResult{}, nil
 	})
 
-	// ===== Phase 9: Quality Gate =====
+	// ===== Phase 9: Quality Gate + Export =====
 	setStatus(model.RunStatusWritingSF)
 
-	if p.deferSFWrites && p.onWriteIntent != nil {
-		// Deferred mode: build write intent without executing SF writes.
-		trackPhaseWithRetry("9_gate", "salesforce", func() (*model.PhaseResult, error) {
-			gate, intent, gateErr := PrepareGate(ctx, result, p.fields, p.questions, p.salesforce, p.notion, p.cfg)
-			if gateErr != nil {
-				return nil, gateErr
+	trackPhaseWithRetry("9_gate", "salesforce", func() (*model.PhaseResult, error) {
+		gate := ComputeGateResult(result, p.fields, p.questions, p.cfg)
+
+		for _, exp := range p.exporters {
+			if exportErr := exp.ExportResult(ctx, result, gate); exportErr != nil {
+				log.Warn("pipeline: exporter failed",
+					zap.String("exporter", exp.Name()),
+					zap.Error(exportErr),
+				)
 			}
-			if intent != nil {
-				p.onWriteIntent(intent)
-			}
-			return &model.PhaseResult{
-				Metadata: map[string]any{
-					"score":           gate.Score,
-					"score_breakdown": gate.ScoreBreakdown,
-					"passed":          gate.Passed,
-					"dedup_match":     gate.DedupMatch,
-					"manual_review":   gate.ManualReview,
-					"deferred":        true,
-				},
-			}, nil
-		})
-	} else {
-		// Immediate mode: execute SF writes inline (single-company run).
-		trackPhaseWithRetry("9_gate", "salesforce", func() (*model.PhaseResult, error) {
-			gate, gateErr := QualityGate(ctx, result, p.fields, p.questions, p.salesforce, p.notion, p.cfg)
-			if gateErr != nil {
-				return nil, gateErr
-			}
-			return &model.PhaseResult{
-				Metadata: map[string]any{
-					"score":           gate.Score,
-					"score_breakdown": gate.ScoreBreakdown,
-					"passed":          gate.Passed,
-					"sf_updated":      gate.SFUpdated,
-					"manual_review":   gate.ManualReview,
-				},
-			}, nil
-		})
-	}
+		}
+
+		return &model.PhaseResult{
+			Metadata: map[string]any{
+				"score":            gate.Score,
+				"score_breakdown":  gate.ScoreBreakdown,
+				"passed":           gate.Passed,
+				"missing_required": gate.MissingRequired,
+				"manual_review":    gate.ManualReview,
+			},
+		}, nil
+	})
 
 	// Persist to company golden record (non-fatal).
 	if p.companyImporter != nil {
