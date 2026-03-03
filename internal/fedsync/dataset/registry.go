@@ -12,7 +12,7 @@ type Registry struct {
 	order    []string // insertion order for deterministic iteration
 }
 
-// NewRegistry creates a registry populated with all 33 datasets.
+// NewRegistry creates a registry populated with all 34 datasets.
 func NewRegistry(cfg *config.Config) *Registry {
 	r := &Registry{
 		datasets: make(map[string]Dataset),
@@ -50,6 +50,7 @@ func NewRegistry(cfg *config.Config) *Registry {
 	r.Register(&ASM{cfg: cfg})
 	r.Register(&ECI{cfg: cfg})
 	r.Register(&FDICBankFind{})
+	r.Register(&NCEN{cfg: cfg})
 
 	// Phase 3: On-Demand
 	r.Register(&ADVPart3{cfg: cfg})
