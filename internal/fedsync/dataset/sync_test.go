@@ -943,8 +943,8 @@ func TestEntityXref_Sync(t *testing.T) {
 	// Stage 2: MultiXrefBuilder.Build() — multi-dataset cross-reference
 	pool.ExpectExec("TRUNCATE TABLE fed_data.entity_xref_multi").
 		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
-	// 15 match passes, each returning 2 rows.
-	for range 15 {
+	// 59 match passes, each returning 2 rows.
+	for range 59 {
 		pool.ExpectExec("INSERT INTO fed_data.entity_xref_multi").
 			WillReturnResult(pgxmock.NewResult("INSERT", 2))
 	}
@@ -952,10 +952,10 @@ func TestEntityXref_Sync(t *testing.T) {
 	ds := &EntityXref{}
 	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
 	require.NoError(t, err)
-	// 81 from CRD-CIK + 30 from multi (15 passes × 2 rows)
-	assert.Equal(t, int64(111), result.RowsSynced)
+	// 81 from CRD-CIK + 118 from multi (59 passes × 2 rows)
+	assert.Equal(t, int64(199), result.RowsSynced)
 	assert.Equal(t, int64(81), result.Metadata["crd_cik_matched"])
-	assert.Equal(t, int64(30), result.Metadata["multi_matched"])
+	assert.Equal(t, int64(118), result.Metadata["multi_matched"])
 }
 
 func TestEntityXref_Sync_TruncateError(t *testing.T) {

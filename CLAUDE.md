@@ -239,6 +239,62 @@ For entity-level federal datasets with company/firm records and addresses, a sta
 
 Implemented: `cmd/geo_backfill_adv.go` (CRD→adv_firms), `cmd/geo_backfill_5500.go` (EIN→form_5500), `cmd/geo_backfill_990.go` (EIN→eo_bmf), and `cmd/geo_backfill_fdic.go` (FDIC cert→fdic_institutions). Future entity datasets (NCUA, USAspending) should follow the same pattern.
 
+### Fedsync — Entity cross-reference web
+
+The entity cross-reference system (`internal/fedsync/resolve/multi_xref.go`) builds a relationship graph across all entity-bearing federal datasets. Every time entity data is synced, cross-references are automatically rebuilt so new records are immediately linked into the web.
+
+**Architecture:**
+- `fed_data.entity_xref` — legacy CRD↔CIK table (3-pass ADV↔EDGAR matching)
+- `fed_data.entity_xref_multi` — main cross-reference table linking all entity datasets
+- `resolve.MultiXrefBuilder` executes ordered passes, each generating `INSERT ... ON CONFLICT DO NOTHING`
+- Higher-confidence passes run first; `NOT EXISTS` clauses in lower passes skip already-matched entities
+- `engine.go` auto-triggers `entity_xref` rebuild whenever an entity-bearing dataset syncs
+
+**Pass groups (ordered by confidence):**
+
+| Group | Strategy | Confidence | Example |
+|---|---|---|---|
+| 1 | Direct CRD | 1.00 | ADV↔BrokerCheck, N-CEN↔ADV |
+| 2 | Direct CIK | 1.00 | ADV↔EDGAR, Form D↔EDGAR, N-CEN↔EDGAR |
+| 3 | Direct DUNS/UEI | 1.00 | USAspending↔FPDS |
+| 4 | Direct EIN | 0.95 | Form 5500↔EDGAR, EO BMF↔EDGAR |
+| 5 | Exact name + ZIP | 0.90 | FPDS↔PPP, Form 5500↔OSHA, FDIC↔EPA |
+| 6 | Exact name + state | 0.88 | ADV↔FPDS, EDGAR↔PPP, USAspending↔ADV |
+| 7 | Fuzzy name + state | 0.60-0.90 | ADV↔PPP (pg_trgm similarity > 0.6) |
+
+**Entity-bearing datasets** (tracked in `engine.go:entityBearingDatasets`):
+ADV, BrokerCheck, Form BD, EDGAR, Form D, N-CEN, Form 5500, EO BMF, FDIC, USAspending, FPDS, PPP, OSHA, EPA
+
+**Checklist: Adding a new entity-bearing dataset**
+
+When implementing a new dataset that contains firm/company/entity records:
+
+1. **Implement the dataset** — `internal/fedsync/dataset/<name>.go` with `Dataset` interface
+2. **Create migration** — `internal/fedsync/migrations/<NNN>_<name>.sql` with appropriate indexes on identifier columns (CRD, CIK, EIN, DUNS, UEI) and name/state/zip
+3. **Register in registry** — add to `internal/fedsync/dataset/registry.go`
+4. **Add to entity-bearing set** — add `Name()` to `entityBearingDatasets` map in `engine.go` so the auto-trigger fires
+5. **Add xref passes** — add passes to `allPasses()` in `resolve/multi_xref.go`:
+   - **Direct ID passes** (confidence 1.0/0.95) for any shared identifiers (CRD, CIK, EIN, DUNS, UEI). Use `directCRDSQL`, `directEINSQL`, or write a custom helper.
+   - **Name+ZIP passes** (confidence 0.90) against all operational datasets that have ZIP. Use `exactNameGeoSQL(..., "zip", 0.90, normName)`.
+   - **Name+state passes** (confidence 0.88) against hub datasets lacking ZIP (ADV, EDGAR). Use `exactNameGeoSQL(..., "state", 0.88, normName)`.
+   - For non-standard state formats (e.g., N-CEN "US-XX"), write a custom SQL helper with `REPLACE()`.
+6. **Update pass count in tests** — update `TestAllPasses_Count`, `TestMultiXrefBuilder_Build_Success` in `multi_xref_test.go` and `TestEntityXref_Sync` in `sync_test.go`
+7. **Update docstring** — update `EntityXref` type comment in `entity_xref.go` to list the new dataset
+8. **Consider geo backfill** — if the dataset has addresses, add a `cmd/geo_backfill_<name>.go` command following the entity aggregation pipeline pattern above
+
+**Choosing pass type by identifier availability:**
+
+| Source has | Target has | Pass type | Helper |
+|---|---|---|---|
+| CRD | CRD | `directCRDSQL()` | Generic |
+| CIK | CIK | Custom (see `cikAdvEdgarSQL`) | Per-pair |
+| EIN | EIN | `directEINSQL()` | Generic |
+| DUNS | DUNS | Custom (see `directDUNSSQL`) | Per-pair |
+| UEI | UEI | Custom (see `directUEISQL`) | Per-pair |
+| Name + ZIP | Name + ZIP | `exactNameGeoSQL(..., "zip")` | Generic |
+| Name + State | Name + State | `exactNameGeoSQL(..., "state")` | Generic |
+| Name + State (non-standard) | Name + State | Custom SQL with `REPLACE()` | Per-pair |
+
 ## API Client Pattern (`pkg/`)
 
 Each external API gets its own package in `pkg/`:
