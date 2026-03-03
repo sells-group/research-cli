@@ -255,5 +255,35 @@
     "required": false,
     "max_length": 1000,
     "status": "Active"
+  },
+  {
+    "id": "f_office_2_city",
+    "key": "office_2_city",
+    "sf_field": "Office_2_City__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 255,
+    "status": "Active"
+  },
+  {
+    "id": "f_office_3_city",
+    "key": "office_3_city",
+    "sf_field": "Office_3_City__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 255,
+    "status": "Active"
+  },
+  {
+    "id": "f_office_4_city",
+    "key": "office_4_city",
+    "sf_field": "Office_4_City__c",
+    "sf_object": "Account",
+    "data_type": "string",
+    "required": false,
+    "max_length": 255,
+    "status": "Active"
   }
 ]

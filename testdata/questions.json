@@ -238,5 +238,35 @@
     "instructions": "Identify the primary industries, markets, or sectors this company serves. Return as a comma-separated list (e.g. Healthcare, Manufacturing, Government).",
     "output_format": "string",
     "status": "Active"
+  },
+  {
+    "id": "q_office_2_city",
+    "text": "What city is the company's second office or branch location in?",
+    "tier": 2,
+    "field_key": "office_2_city",
+    "page_types": ["contact", "about", "homepage", "locations"],
+    "instructions": "Extract the city and state of the company's second office location (not HQ). Return as 'City, ST' or null if fewer than 2 locations.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_office_3_city",
+    "text": "What city is the company's third office or branch location in?",
+    "tier": 2,
+    "field_key": "office_3_city",
+    "page_types": ["contact", "about", "homepage", "locations"],
+    "instructions": "Extract the city and state of the company's third office location (not HQ). Return as 'City, ST' or null if fewer than 3 locations.",
+    "output_format": "string",
+    "status": "Active"
+  },
+  {
+    "id": "q_office_4_city",
+    "text": "What city is the company's fourth office or branch location in?",
+    "tier": 2,
+    "field_key": "office_4_city",
+    "page_types": ["contact", "about", "homepage", "locations"],
+    "instructions": "Extract the city and state of the company's fourth office location (not HQ). Return as 'City, ST' or null if fewer than 4 locations.",
+    "output_format": "string",
+    "status": "Active"
   }
 ]

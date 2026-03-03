@@ -22,6 +22,9 @@ var sfReportColumns = []string{
 	"Shipping State/Province",
 	"Company MSA",
 	"Shipping City",
+	"Office #2 City",
+	"Office #3 City",
+	"Office #4 City",
 	"Company Research Notes",
 	"Ownership",
 	"End Markets",
@@ -91,21 +94,24 @@ func buildSFReportRow(r *model.EnrichmentResult, original *SFReportCompany) []st
 	}
 
 	return []string{
-		r.Company.Name,                   // Account Name
-		accountID,                        // Account ID
-		stripScheme(r.Company.URL),       // Website
-		fieldStr(fv, "year_established"), // Year Founded
-		locations,                        // Locations
-		employees,                        // Employees
-		state,                            // Shipping State/Province
-		LookupMSA(city, state),           // Company MSA
-		titleCase(city),                  // Shipping City
-		buildResearchNotes(r),            // Company Research Notes
-		ownership,                        // Ownership
-		fieldStr(fv, "end_markets"),      // End Markets
-		StateToRegion(state),             // Region
-		"",                               // Priority (blank for manual review)
-		formatRevenue(fv),                // Annual Revenue
+		r.Company.Name,                       // Account Name
+		accountID,                            // Account ID
+		stripScheme(r.Company.URL),           // Website
+		fieldStr(fv, "year_established"),     // Year Founded
+		locations,                            // Locations
+		employees,                            // Employees
+		state,                                // Shipping State/Province
+		MSAShortName(LookupMSA(city, state)), // Company MSA
+		titleCase(city),                      // Shipping City
+		fieldStr(fv, "office_2_city"),        // Office #2 City
+		fieldStr(fv, "office_3_city"),        // Office #3 City
+		fieldStr(fv, "office_4_city"),        // Office #4 City
+		buildResearchNotes(r),                // Company Research Notes
+		ownership,                            // Ownership
+		fieldStr(fv, "end_markets"),          // End Markets
+		StateToRegion(state),                 // Region
+		"",                                   // Priority (blank for manual review)
+		formatRevenue(fv),                    // Annual Revenue
 	}
 }
 
