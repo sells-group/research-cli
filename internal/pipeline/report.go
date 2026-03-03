@@ -41,7 +41,7 @@ func FormatReport(company model.Company, answers []model.ExtractionAnswer, field
 	}
 	b.WriteString("\n")
 
-	// Field values by tier.
+	// Field values with provenance.
 	b.WriteString("## Extracted Fields\n")
 	if len(fieldValues) == 0 {
 		b.WriteString("No fields extracted.\n\n")
@@ -53,12 +53,34 @@ func FormatReport(company model.Company, answers []model.ExtractionAnswer, field
 		}
 		sort.Strings(keys)
 
+		sourcePages := make(map[string]bool)
 		for _, k := range keys {
 			fv := fieldValues[k]
 			fmt.Fprintf(&b, "- **%s** (%s): %v [T%d, %.0f%%]\n",
 				fv.FieldKey, fv.SFField, fv.Value, fv.Tier, fv.Confidence*100)
+			if fv.Source != "" {
+				fmt.Fprintf(&b, "  Source: %s\n", fv.Source)
+				sourcePages[fv.Source] = true
+			}
+			if fv.Reasoning != "" {
+				fmt.Fprintf(&b, "  Reasoning: %s\n", fv.Reasoning)
+			}
 		}
 		b.WriteString("\n")
+
+		// Source pages summary.
+		if len(sourcePages) > 0 {
+			b.WriteString("## Source Pages\n")
+			sortedSources := make([]string, 0, len(sourcePages))
+			for s := range sourcePages {
+				sortedSources = append(sortedSources, s)
+			}
+			sort.Strings(sortedSources)
+			for _, s := range sortedSources {
+				fmt.Fprintf(&b, "- %s\n", s)
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	// Tier breakdown.

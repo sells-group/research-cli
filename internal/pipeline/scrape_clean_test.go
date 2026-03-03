@@ -123,6 +123,37 @@ Important business details here.`
 	assert.Contains(t, result, "Important business details here")
 }
 
+func TestCleanBBBMarkdown_DoubleCookieMarkers(t *testing.T) {
+	md := `Cookies on BBB.org
+We use cookies to give users the best content
+Accept All Cookies
+Some content here
+
+cookie Preferences Modal
+Necessary cookies are required
+Accept All Cookies
+More actual content`
+
+	result := cleanBBBMarkdown(md)
+	assert.NotContains(t, result, "Accept All Cookies")
+	assert.NotContains(t, result, "Cookies on BBB.org")
+	assert.Contains(t, result, "More actual content")
+}
+
+func TestCleanBBBMarkdown_HeaderNavStrip(t *testing.T) {
+	md := `Some header
+Better Business Bureau
+Consumers | Businesses | Scam Tracker
+Search for BBB accredited businesses
+Business Profile
+Acme Corp has been in business since 2005.`
+
+	result := cleanBBBMarkdown(md)
+	assert.Contains(t, result, "Business Profile")
+	assert.Contains(t, result, "Acme Corp has been in business")
+	assert.NotContains(t, result, "Scam Tracker")
+}
+
 func TestCleanBBBMarkdown_NoBoilerplate(t *testing.T) {
 	md := `# Acme Corp
 
@@ -502,4 +533,207 @@ func TestPhoneContextScore(t *testing.T) {
 			assert.Less(t, score, tc.wantBelow)
 		})
 	}
+}
+
+// --- cleanBBBMarkdown additional coverage ---
+
+func TestCleanBBBMarkdown_NavigationMenuStrip(t *testing.T) {
+	md := `Some header content
+
+Navigation menu
+Home
+About Us
+Services
+Contact
+# Business Profile
+
+Acme Corp has been in business since 2005.
+Business Started: 1/15/2005`
+
+	result := cleanBBBMarkdown(md)
+	assert.NotContains(t, result, "Navigation menu")
+	assert.NotContains(t, result, "Home\nAbout Us")
+	assert.Contains(t, result, "Business Profile")
+	assert.Contains(t, result, "Acme Corp has been in business since 2005")
+	assert.Contains(t, result, "Business Started: 1/15/2005")
+}
+
+func TestCleanBBBMarkdown_FooterStrip(t *testing.T) {
+	md := `# Acme Corp BBB Profile
+
+Business Started: 3/10/2010
+Phone: (555) 123-4567
+BBB Rating: A+
+
+---
+BBB Business Profiles may not be reproduced for sales or promotional purposes.
+Copyright 2024 Better Business Bureau. All rights reserved.
+Terms of Use | Privacy Policy`
+
+	result := cleanBBBMarkdown(md)
+	assert.Contains(t, result, "Business Started: 3/10/2010")
+	assert.Contains(t, result, "Phone: (555) 123-4567")
+	assert.Contains(t, result, "BBB Rating: A+")
+	assert.NotContains(t, result, "BBB Business Profiles may not be reproduced")
+	assert.NotContains(t, result, "Copyright 2024")
+	assert.NotContains(t, result, "Terms of Use")
+}
+
+func TestCleanBBBMarkdown_SidebarStrip(t *testing.T) {
+	md := `# Business Profile
+
+Business Started: 5/20/2012
+Location: Dallas, TX
+
+## Industry Tip
+
+Always get multiple estimates before hiring a contractor.
+Check references and verify licensing.
+
+## More Resources
+
+Visit bbb.org for tips on finding a reputable business.
+Learn about scam prevention.
+
+## Business Details
+
+Licensed and Insured since 2012.
+Specializes in commercial construction.`
+
+	result := cleanBBBMarkdown(md)
+	assert.Contains(t, result, "Business Started: 5/20/2012")
+	assert.Contains(t, result, "Location: Dallas, TX")
+	assert.NotContains(t, result, "Always get multiple estimates")
+	assert.NotContains(t, result, "Visit bbb.org for tips")
+	assert.Contains(t, result, "Business Details")
+	assert.Contains(t, result, "Licensed and Insured since 2012")
+}
+
+// --- parseGoogleMapsMetadata edge cases ---
+
+func TestParseGoogleMapsMetadata_InvalidRatingParse(t *testing.T) {
+	// Pattern matches but rating is not a valid float.
+	meta := parseGoogleMapsMetadata("abc stars (10 reviews)")
+	assert.Nil(t, meta)
+}
+
+func TestParseGoogleMapsMetadata_InvalidCountParse(t *testing.T) {
+	// Pattern matches but count is not a valid integer.
+	meta := parseGoogleMapsMetadata("4.5 stars (abc reviews)")
+	assert.Nil(t, meta)
+}
+
+func TestParseGoogleMapsMetadata_EmptyString(t *testing.T) {
+	meta := parseGoogleMapsMetadata("")
+	assert.Nil(t, meta)
+}
+
+func TestParseGoogleMapsMetadata_RatingExactly1(t *testing.T) {
+	meta := parseGoogleMapsMetadata("1.0 stars (5 reviews)")
+	assert.NotNil(t, meta)
+	assert.InDelta(t, 1.0, meta.Rating, 0.001)
+	assert.Equal(t, 5, meta.ReviewCount)
+}
+
+func TestParseGoogleMapsMetadata_RatingExactly5(t *testing.T) {
+	meta := parseGoogleMapsMetadata("5.0 stars (50 reviews)")
+	assert.NotNil(t, meta)
+	assert.InDelta(t, 5.0, meta.Rating, 0.001)
+	assert.Equal(t, 50, meta.ReviewCount)
+}
+
+func TestParseGoogleMapsMetadata_RatingTooHigh(t *testing.T) {
+	meta := parseGoogleMapsMetadata("5.5 stars (10 reviews)")
+	assert.Nil(t, meta)
+}
+
+func TestParseGoogleMapsMetadata_RatingTooLow(t *testing.T) {
+	meta := parseGoogleMapsMetadata("0.5 stars (10 reviews)")
+	assert.Nil(t, meta)
+}
+
+func TestParsePhoneFromMarkdown_TelLink(t *testing.T) {
+	md := `Contact us: [Call Now](tel:+15551234567) for more info.`
+	phone := ParsePhoneFromMarkdown(md)
+	assert.Equal(t, "15551234567", phone)
+}
+
+func TestParsePhoneFromMarkdown_TelLinkShort(t *testing.T) {
+	// tel: link with fewer than 10 digits should fall through to inline.
+	md := `[Call](tel:555-123) or reach us at (555) 123-4567 for more information.`
+	phone := ParsePhoneFromMarkdown(md)
+	assert.Equal(t, "5551234567", phone)
+}
+
+func TestParsePhoneFromMarkdown_TooManyMatches(t *testing.T) {
+	// More than 5 phone matches — likely a directory page, should return empty.
+	md := "(555) 111-1111 (555) 222-2222 (555) 333-3333 (555) 444-4444 (555) 555-5555 (555) 666-6666"
+	phone := ParsePhoneFromMarkdown(md)
+	assert.Equal(t, "", phone)
+}
+
+func TestParsePhoneFromMarkdown_SingleMatchTooShort(t *testing.T) {
+	md := "Call us: 555-123"
+	phone := ParsePhoneFromMarkdown(md)
+	assert.Equal(t, "", phone)
+}
+
+func TestParsePhoneFromMarkdown_MultipleMatchesWithContext(t *testing.T) {
+	// Multiple phone matches — should prefer the one near "phone" keyword
+	// over one near "fax" keyword.
+	md := `For general inquiries, call us at our main line.
+
+Phone: (555) 333-4444
+
+If you need to send a fax, use our fax line: (555) 111-2222`
+	phone := ParsePhoneFromMarkdown(md)
+	// The one near "Phone" keyword should be preferred over "fax".
+	assert.Equal(t, "5553334444", phone)
+}
+
+func TestParsePhoneFromMarkdown_MultipleMatchesShortDigits(t *testing.T) {
+	// Multiple matches but some have fewer than 10 digits — those should be skipped.
+	md := `Contact: (555) 123-4567 or ext 123-456`
+	phone := ParsePhoneFromMarkdown(md)
+	assert.Equal(t, "5551234567", phone)
+}
+
+func TestParseGoogleMapsMetadata_CountParseError(t *testing.T) {
+	// Rating is valid but review count is non-numeric.
+	md := "4.5 stars · abc reviews"
+	result := parseGoogleMapsMetadata(md)
+	assert.Nil(t, result)
+}
+
+func TestParseGoogleMapsMetadata_RatingParseError(t *testing.T) {
+	// Rating is non-numeric string matching the regex group.
+	md := "N/A(100)"
+	result := parseGoogleMapsMetadata(md)
+	assert.Nil(t, result)
+}
+
+func TestParseGoogleMapsMetadata_NoMatch(t *testing.T) {
+	md := "No reviews or ratings here."
+	result := parseGoogleMapsMetadata(md)
+	assert.Nil(t, result)
+}
+
+func TestParseBBBMetadata_NoMatch(t *testing.T) {
+	md := "No BBB data here."
+	result := parseBBBMetadata(md)
+	assert.Nil(t, result)
+}
+
+func TestStripSection_NotFound(t *testing.T) {
+	md := "## About\nSome content."
+	result := stripSection(md, "Nonexistent Section")
+	assert.Equal(t, md, result)
+}
+
+func TestStripSection_WithNextHeading(t *testing.T) {
+	md := "## Reviews\nBad reviews\n## About\nGood content"
+	result := stripSection(md, "Reviews")
+	assert.Contains(t, result, "About")
+	assert.Contains(t, result, "Good content")
+	assert.NotContains(t, result, "Bad reviews")
 }

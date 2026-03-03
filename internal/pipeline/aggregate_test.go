@@ -1,13 +1,18 @@
 package pipeline
 
 import (
+	"context"
 	"regexp"
 	"testing"
 	"time"
 
+	"github.com/pashagolub/pgxmock/v4"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/sells-group/research-cli/internal/estimate"
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/pkg/ppp"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestMergeAnswers_HigherTierWins(t *testing.T) {
@@ -1155,6 +1160,10 @@ func TestParseLinkedInRange(t *testing.T) {
 		{"1,001-5,000", 1001, 5000},
 		{"invalid", 0, 0},
 		{"", 0, 0},
+		{"50-abc", 0, 0},   // non-numeric high
+		{"abc-200", 0, 0},  // non-numeric low
+		{"invalid+", 0, 0}, // non-numeric with plus
+		{"100", 0, 0},      // no range separator
 	}
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
@@ -1163,4 +1172,446 @@ func TestParseLinkedInRange(t *testing.T) {
 			assert.Equal(t, tc.wantHi, hi)
 		})
 	}
+}
+
+// --- EnrichWithRevenueEstimate Tests ---
+
+func TestEnrichWithRevenueEstimate_NilEstimator(t *testing.T) {
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "industry", Value: "Tech"},
+	}
+	result := EnrichWithRevenueEstimate(context.Background(), answers, model.Company{}, nil)
+	assert.Equal(t, answers, result)
+}
+
+func TestEnrichWithRevenueEstimate_MissingEmpCount(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	est := estimate.NewRevenueEstimator(pool)
+
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "naics_code", Value: "541512"},
+		// No employee count.
+	}
+	result := EnrichWithRevenueEstimate(context.Background(), answers, model.Company{}, est)
+	assert.Equal(t, answers, result)
+}
+
+func TestEnrichWithRevenueEstimate_MissingNAICS(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	est := estimate.NewRevenueEstimator(pool)
+
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "employees", Value: 50},
+		// No NAICS code.
+	}
+	result := EnrichWithRevenueEstimate(context.Background(), answers, model.Company{}, est)
+	assert.Equal(t, answers, result)
+}
+
+func TestEnrichWithRevenueEstimate_HighConfRevenueSkips(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	est := estimate.NewRevenueEstimator(pool)
+
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "employees", Value: 50},
+		{FieldKey: "naics_code", Value: "541512"},
+		{FieldKey: "revenue_range", Value: "$10M-$50M", Confidence: 0.85},
+	}
+	result := EnrichWithRevenueEstimate(context.Background(), answers, model.Company{State: "TX"}, est)
+	assert.Equal(t, answers, result)
+}
+
+func TestEnrichWithRevenueEstimate_EstimatorFails(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	// Query will return no rows (causes estimator to fail).
+	pool.ExpectQuery("SELECT").WillReturnRows(pgxmock.NewRows([]string{"naics", "year", "total_emp", "total_est", "total_payroll"}))
+
+	est := estimate.NewRevenueEstimator(pool)
+
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "employees", Value: 50},
+		{FieldKey: "naics_code", Value: "54"},
+	}
+	result := EnrichWithRevenueEstimate(context.Background(), answers, model.Company{State: "TX"}, est)
+	// Should return original answers (error logged but not propagated).
+	assert.Equal(t, answers, result)
+}
+
+func TestIntProximity(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		a, b int
+		want float64
+	}{
+		{"both zero", 0, 0, 1.0},
+		{"equal", 100, 100, 1.0},
+		{"close values", 100, 80, 0.8},
+		{"reversed", 80, 100, 0.8},
+		{"one zero", 0, 100, 0.0},
+		{"other zero", 100, 0, 0.0},
+		{"very different", 10, 100, 0.1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := intProximity(tc.a, tc.b)
+			assert.InDelta(t, tc.want, got, 0.01)
+		})
+	}
+}
+
+func TestAppendOrUpgrade(t *testing.T) {
+	t.Parallel()
+
+	t.Run("append new key", func(t *testing.T) {
+		t.Parallel()
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "name", Value: "Acme", Confidence: 0.9},
+		}
+		result := appendOrUpgrade(answers, "city", "Dallas", 0.8, "test")
+		assert.Len(t, result, 2)
+		assert.Equal(t, "city", result[1].FieldKey)
+	})
+
+	t.Run("upgrade higher confidence", func(t *testing.T) {
+		t.Parallel()
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "city", Value: "Austin", Confidence: 0.5},
+		}
+		result := appendOrUpgrade(answers, "city", "Dallas", 0.9, "upgraded")
+		assert.Len(t, result, 1)
+		assert.Equal(t, "Dallas", result[0].Value)
+		assert.Equal(t, 0.9, result[0].Confidence)
+	})
+
+	t.Run("skip lower confidence", func(t *testing.T) {
+		t.Parallel()
+		answers := []model.ExtractionAnswer{
+			{FieldKey: "city", Value: "Dallas", Confidence: 0.9},
+		}
+		result := appendOrUpgrade(answers, "city", "Austin", 0.5, "lower")
+		assert.Len(t, result, 1)
+		assert.Equal(t, "Dallas", result[0].Value)
+		assert.Equal(t, 0.9, result[0].Confidence)
+	})
+}
+
+// --- EnrichWithRevenueEstimate edge cases ---
+
+func TestEnrichWithRevenueEstimate_SuccessfulEstimate(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	// naicsLevels("541512") returns ["541512", "5415", "54"].
+	// The first call to queryMarketSize should succeed.
+	pool.ExpectQuery("SELECT naics, year").
+		WithArgs("541512%", "48").
+		WillReturnRows(
+			pgxmock.NewRows([]string{"naics", "year", "total_emp", "total_est", "total_payroll"}).
+				AddRow("541512", 2021, int64(500000), int64(5000), int64(30000000)),
+		)
+
+	est := estimate.NewRevenueEstimator(pool)
+
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "employees", Value: 50},
+		{FieldKey: "naics_code", Value: "541512"},
+	}
+	result := EnrichWithRevenueEstimate(context.Background(), answers, model.Company{State: "TX"}, est)
+	// Should have original 2 + revenue_estimate + revenue_confidence = 4.
+	assert.Len(t, result, 4)
+
+	// Find the added fields.
+	var hasRevEst, hasRevConf bool
+	for _, a := range result {
+		if a.FieldKey == "revenue_estimate" {
+			hasRevEst = true
+			assert.Equal(t, "CBP 2021 NAICS 541512", a.Source)
+		}
+		if a.FieldKey == "revenue_confidence" {
+			hasRevConf = true
+		}
+	}
+	assert.True(t, hasRevEst)
+	assert.True(t, hasRevConf)
+}
+
+func TestEnrichWithRevenueEstimate_ZeroEmployeeCount(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	est := estimate.NewRevenueEstimator(pool)
+
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "employee_count", Value: 0},
+		{FieldKey: "naics_code", Value: "541512"},
+	}
+	result := EnrichWithRevenueEstimate(context.Background(), answers, model.Company{}, est)
+	// empCount == 0 → returns early.
+	assert.Equal(t, answers, result)
+}
+
+func TestEnrichWithRevenueEstimate_LowConfRevenue(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	est := estimate.NewRevenueEstimator(pool)
+
+	// revenue_range exists but with LOW confidence (<0.7) — should NOT skip.
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "employees", Value: 50},
+		{FieldKey: "naics_code", Value: "541512"},
+		{FieldKey: "revenue_range", Value: "$5M-$10M", Confidence: 0.5}, // Below 0.7.
+	}
+
+	// Even with low conf revenue, empCount=50 and naics present, estimator gets called.
+	// It will fail (no DB rows), but the path into estimator is exercised.
+	pool.ExpectQuery("SELECT").WillReturnRows(pgxmock.NewRows([]string{"naics", "year", "total_emp", "total_est", "total_payroll"}))
+
+	result := EnrichWithRevenueEstimate(context.Background(), answers, model.Company{}, est)
+	// Estimator fails → returns original answers.
+	assert.Equal(t, answers, result)
+}
+
+// --- populateOwnerFromContacts edge cases ---
+
+func TestPopulateOwnerFromContacts_UnsupportedType(t *testing.T) {
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "contacts", DataType: "json"},
+		{Key: "owner_first_name", SFField: "FirstName", DataType: "string"},
+	})
+
+	// Value is an unsupported type (string instead of array).
+	result := map[string]model.FieldValue{
+		"contacts": {FieldKey: "contacts", Value: "not an array"},
+	}
+	populateOwnerFromContacts(result, fields)
+
+	_, hasOwner := result["owner_first_name"]
+	assert.False(t, hasOwner) // Should bail on default case.
+}
+
+func TestPopulateOwnerFromContacts_EmptyAnyArray(t *testing.T) {
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "contacts", DataType: "json"},
+		{Key: "owner_first_name", SFField: "FirstName", DataType: "string"},
+	})
+
+	result := map[string]model.FieldValue{
+		"contacts": {FieldKey: "contacts", Value: []any{}},
+	}
+	populateOwnerFromContacts(result, fields)
+
+	_, hasOwner := result["owner_first_name"]
+	assert.False(t, hasOwner) // Empty []any → returns early.
+}
+
+func TestPopulateOwnerFromContacts_AnyArrayUnsupportedInnerType(t *testing.T) {
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "contacts", DataType: "json"},
+		{Key: "owner_first_name", SFField: "FirstName", DataType: "string"},
+	})
+
+	// []any with unsupported inner type (not map[string]string nor map[string]any)
+	result := map[string]model.FieldValue{
+		"contacts": {FieldKey: "contacts", Value: []any{"just a string"}},
+	}
+	populateOwnerFromContacts(result, fields)
+
+	_, hasOwner := result["owner_first_name"]
+	assert.False(t, hasOwner) // Default inside inner switch → returns.
+}
+
+func TestPopulateOwnerFromContacts_MissingContactKeyValue(t *testing.T) {
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "contacts", DataType: "json"},
+		{Key: "owner_first_name", SFField: "FirstName", DataType: "string"},
+		{Key: "owner_last_name", SFField: "LastName", DataType: "string"},
+		{Key: "owner_email", SFField: "Email", DataType: "email"},
+	})
+
+	// Contact exists but "first_name" key is empty string.
+	result := map[string]model.FieldValue{
+		"contacts": {
+			FieldKey: "contacts",
+			Value:    []map[string]string{{"first_name": "", "last_name": "Doe", "email": ""}},
+		},
+	}
+	populateOwnerFromContacts(result, fields)
+
+	// Empty "first_name" → should NOT be set.
+	_, hasFirst := result["owner_first_name"]
+	assert.False(t, hasFirst)
+
+	// "last_name" is non-empty → should be set.
+	assert.Equal(t, "Doe", result["owner_last_name"].Value)
+
+	// "email" is empty → should NOT be set.
+	_, hasEmail := result["owner_email"]
+	assert.False(t, hasEmail)
+}
+
+func TestPopulateOwnerFromContacts_EmptyFieldRegistry(t *testing.T) {
+	result := map[string]model.FieldValue{
+		"contacts": {
+			FieldKey: "contacts",
+			Value:    []map[string]string{{"first_name": "Jane", "last_name": "Doe"}},
+		},
+	}
+	// Empty registry → ByKey returns nil → setIfMissing bails early.
+	emptyReg := model.NewFieldRegistry(nil)
+	populateOwnerFromContacts(result, emptyReg)
+
+	_, hasFirst := result["owner_first_name"]
+	assert.False(t, hasFirst)
+}
+
+// --- InjectLinkedInFounded edge cases ---
+
+func TestInjectLinkedInFounded_ShortFoundedString(t *testing.T) {
+	var answers []model.ExtractionAnswer
+	liData := &LinkedInData{Founded: "20"} // Less than 4 chars.
+	result := InjectLinkedInFounded(answers, liData)
+	assert.Len(t, result, 0) // Too short → returns early.
+}
+
+func TestInjectLinkedInFounded_InvalidYear(t *testing.T) {
+	var answers []model.ExtractionAnswer
+	liData := &LinkedInData{Founded: "1799-01-01"} // Before 1800.
+	result := InjectLinkedInFounded(answers, liData)
+	assert.Len(t, result, 0) // Out of range → returns early.
+}
+
+func TestInjectLinkedInFounded_FutureYear(t *testing.T) {
+	var answers []model.ExtractionAnswer
+	liData := &LinkedInData{Founded: "2035"}
+	result := InjectLinkedInFounded(answers, liData)
+	assert.Len(t, result, 0) // Above 2030 → returns early.
+}
+
+func TestInjectLinkedInFounded_ExistingZeroYearNumeric(t *testing.T) {
+	// year_founded exists with numeric value 0 → should inject.
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "year_founded", Value: 0, Confidence: 0.1},
+	}
+	liData := &LinkedInData{Founded: "2015"}
+	result := InjectLinkedInFounded(answers, liData)
+	assert.Len(t, result, 2) // 0 is not > 0, so injection proceeds.
+}
+
+func TestInjectLinkedInFounded_NonNumericFoundedString(t *testing.T) {
+	var answers []model.ExtractionAnswer
+	liData := &LinkedInData{Founded: "abcd"} // Non-numeric.
+	result := InjectLinkedInFounded(answers, liData)
+	assert.Len(t, result, 0) // toNumber fails → returns early.
+}
+
+func TestBuildFieldValues_ValidationFailure(t *testing.T) {
+	// An answer with an unregistered field key → should be skipped (no panic).
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", DataType: "string"},
+	})
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "unknown_field", Value: "test", Confidence: 0.9, Tier: 1},
+		{FieldKey: "industry", Value: "Technology", Confidence: 0.85, Tier: 1},
+	}
+
+	result := BuildFieldValues(answers, fields)
+	assert.Len(t, result, 1)
+	assert.Equal(t, "Technology", result["industry"].Value)
+}
+
+func TestBuildFieldValues_AccountNameDerivation(t *testing.T) {
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "company_name", SFField: "Name_From_Research__c", DataType: "string"},
+		{Key: "account_name", SFField: "Name", DataType: "string"},
+	})
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "company_name", Value: "Acme Corp", Confidence: 0.9, Tier: 1},
+	}
+
+	result := BuildFieldValues(answers, fields)
+	// account_name should be auto-derived from company_name.
+	assert.Contains(t, result, "account_name")
+	assert.Equal(t, "Acme Corp", result["account_name"].Value)
+}
+
+func TestBuildFieldValues_PreSeededGapFill(t *testing.T) {
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", DataType: "string"},
+		{Key: "employees", SFField: "NumberOfEmployees", DataType: "number"},
+	})
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "industry", Value: "Tech", Confidence: 0.9, Tier: 1},
+	}
+	company := model.Company{
+		PreSeeded: map[string]any{
+			"employees": 150,
+		},
+	}
+
+	result := BuildFieldValues(answers, fields, company)
+	// Industry from extraction, employees from pre-seeded.
+	assert.Equal(t, "Tech", result["industry"].Value)
+	assert.Contains(t, result, "employees")
+	assert.Equal(t, "grata_csv", result["employees"].Source)
+}
+
+func TestBuildFieldValues_PreSeededNilValue(t *testing.T) {
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", DataType: "string"},
+	})
+	company := model.Company{
+		PreSeeded: map[string]any{
+			"industry": nil,
+		},
+	}
+
+	result := BuildFieldValues(nil, fields, company)
+	assert.Empty(t, result)
+}
+
+func TestBuildFieldValues_PreSeededEmptyString(t *testing.T) {
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", DataType: "string"},
+	})
+	company := model.Company{
+		PreSeeded: map[string]any{
+			"industry": "",
+		},
+	}
+
+	result := BuildFieldValues(nil, fields, company)
+	assert.Empty(t, result)
+}
+
+func TestBuildFieldValues_AccountNameNotDerivedWhenPresent(t *testing.T) {
+	fields := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "company_name", SFField: "Name_From_Research__c", DataType: "string"},
+		{Key: "account_name", SFField: "Name", DataType: "string"},
+	})
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "company_name", Value: "Acme Corp", Confidence: 0.9, Tier: 1},
+		{FieldKey: "account_name", Value: "Acme Corporation", Confidence: 0.95, Tier: 1},
+	}
+
+	result := BuildFieldValues(answers, fields)
+	// account_name was explicitly extracted → should NOT be overridden.
+	assert.Equal(t, "Acme Corporation", result["account_name"].Value)
 }

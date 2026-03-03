@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDetectCSVFormat_SFReport(t *testing.T) {
@@ -155,4 +157,93 @@ func TestNormalizeWebsite(t *testing.T) {
 			t.Errorf("normalizeWebsite(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
+}
+
+func TestDetectCSVFormat_FileNotFound(t *testing.T) {
+	_, err := DetectCSVFormat("/nonexistent/path.csv")
+	assert.Error(t, err)
+}
+
+func TestDetectCSVFormat_EmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.csv")
+	assert.NoError(t, os.WriteFile(path, []byte(""), 0o644))
+
+	_, err := DetectCSVFormat(path)
+	assert.Error(t, err) // Can't read header
+}
+
+func TestParseSFReportCSV_FileNotFound(t *testing.T) {
+	_, err := ParseSFReportCSV("/nonexistent/path.csv")
+	assert.Error(t, err)
+}
+
+func TestParseSFReportCSV_NoDataRows(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "header_only.csv")
+	assert.NoError(t, os.WriteFile(path, []byte("Account Name,Account ID,Website\n"), 0o644))
+
+	_, err := ParseSFReportCSV(path)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no data rows")
+}
+
+func TestParseSFReportCSV_MissingRequiredColumn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "missing_col.csv")
+	// Missing "Website" column.
+	content := "Account Name,Account ID\nAcme,001ABC\n"
+	assert.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	_, err := ParseSFReportCSV(path)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "missing required column")
+}
+
+func TestParseSFReportCSV_SkipsEmptyWebsite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty_website.csv")
+	content := "Account Name,Account ID,Website\nAcme,001ABC,acme.com\nEmpty,002DEF,\n"
+	assert.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	companies, err := ParseSFReportCSV(path)
+	assert.NoError(t, err)
+	assert.Len(t, companies, 1) // Only Acme included.
+	assert.Equal(t, "001ABC", companies[0].AccountID)
+}
+
+func TestParseSFReportCSV_SkipsEmptyAccountID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty_id.csv")
+	content := "Account Name,Account ID,Website\nAcme,,acme.com\nReal,002DEF,real.com\n"
+	assert.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	companies, err := ParseSFReportCSV(path)
+	assert.NoError(t, err)
+	assert.Len(t, companies, 1)
+	assert.Equal(t, "002DEF", companies[0].AccountID)
+}
+
+func TestParseSFReportCSV_WithOwnership(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "with_ownership.csv")
+	content := "Account Name,Account ID,Website,Ownership\nAcme,001ABC,acme.com,Private\n"
+	assert.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	companies, err := ParseSFReportCSV(path)
+	assert.NoError(t, err)
+	assert.Len(t, companies, 1)
+	assert.Equal(t, "Private", companies[0].Ownership)
+}
+
+func TestParseSFReportCSV_NoValidCompanies(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "no_valid.csv")
+	// All rows have empty account ID or website.
+	content := "Account Name,Account ID,Website\nAcme,,\n"
+	assert.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	_, err := ParseSFReportCSV(path)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no valid companies")
 }

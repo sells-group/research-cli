@@ -239,3 +239,63 @@ func TestNormalizeBusinessModelAnswer_NoChange(t *testing.T) {
 		t.Errorf("business_model Source = %q, want \"t1\" (no +bm_normalized suffix)", result[0].Source)
 	}
 }
+
+func TestNormalizeBusinessModelAnswer_NonStringValue(t *testing.T) {
+	t.Parallel()
+
+	// When the business_model Value is not a string (e.g., an int from bad
+	// extraction), NormalizeBusinessModelAnswer should skip it and leave it
+	// unchanged.
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "business_model", Value: 42, Source: "t1"},
+	}
+
+	result := NormalizeBusinessModelAnswer(answers)
+
+	if result[0].Value != 42 {
+		t.Errorf("business_model Value = %v, want 42", result[0].Value)
+	}
+	if result[0].Source != "t1" {
+		t.Errorf("business_model Source = %q, want \"t1\" (unchanged)", result[0].Source)
+	}
+}
+
+func TestNormalizeBusinessModelAnswer_EmptyStringValue(t *testing.T) {
+	t.Parallel()
+
+	// When the business_model Value is an empty string, NormalizeBusinessModelAnswer
+	// should skip it without modification.
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "business_model", Value: "", Source: "t1"},
+	}
+
+	result := NormalizeBusinessModelAnswer(answers)
+
+	if result[0].Value != "" {
+		t.Errorf("business_model Value = %q, want \"\"", result[0].Value)
+	}
+	if result[0].Source != "t1" {
+		t.Errorf("business_model Source = %q, want \"t1\" (unchanged)", result[0].Source)
+	}
+}
+
+func TestNormalizeBusinessModelAnswer_UnrecognizedValue(t *testing.T) {
+	t.Parallel()
+
+	// When the business_model Value is a string that NormalizeBusinessModel
+	// cannot match to any canonical or keyword category, it returns
+	// ("Other", false). Because matched=false, NormalizeBusinessModelAnswer
+	// should leave the answer unchanged.
+	answers := []model.ExtractionAnswer{
+		{FieldKey: "business_model", Value: "XyzUnknownModel", Source: "t1"},
+	}
+
+	result := NormalizeBusinessModelAnswer(answers)
+
+	if result[0].Value != "XyzUnknownModel" {
+		t.Errorf("business_model Value = %q, want \"XyzUnknownModel\" (unchanged)", result[0].Value)
+	}
+	if result[0].Source != "t1" {
+		t.Errorf("business_model Source = %q, want \"t1\" (unchanged)", result[0].Source)
+	}
+}

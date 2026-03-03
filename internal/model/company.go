@@ -155,6 +155,7 @@ type FieldValue struct {
 	Value      any        `json:"value"`
 	Confidence float64    `json:"confidence"`
 	Source     string     `json:"source"`
+	Reasoning  string     `json:"reasoning,omitempty"`
 	Tier       int        `json:"tier"`
 	DataAsOf   *time.Time `json:"data_as_of,omitempty"`
 }

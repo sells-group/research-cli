@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -243,4 +245,215 @@ func TestClassifyPhase_AllExternalSkipsLLM(t *testing.T) {
 	assert.Len(t, index[model.PageTypeGoogleMaps], 1)
 	assert.Equal(t, 0, usage.InputTokens) // No LLM tokens used.
 	aiClient.AssertNotCalled(t, "CreateMessage", mock.Anything, mock.Anything)
+}
+
+func TestDeduplicatePages_NoDuplicates(t *testing.T) {
+	pages := []model.CrawledPage{
+		{URL: "https://example.com", Markdown: "Home page content"},
+		{URL: "https://example.com/about", Markdown: "About us page"},
+		{URL: "https://example.com/services", Markdown: "Services we offer"},
+	}
+
+	unique, dupes := deduplicatePages(pages)
+	assert.Len(t, unique, 3)
+	assert.Empty(t, dupes)
+}
+
+func TestDeduplicatePages_WithDuplicates(t *testing.T) {
+	pages := []model.CrawledPage{
+		{URL: "https://example.com", Markdown: "Shared content"},
+		{URL: "https://example.com/about", Markdown: "About us page"},
+		{URL: "https://example.com/about-us", Markdown: "Shared content"}, // Duplicate of first.
+		{URL: "https://example.com/services", Markdown: "Services page"},
+		{URL: "https://example.com/our-services", Markdown: "Services page"}, // Duplicate.
+	}
+
+	unique, dupes := deduplicatePages(pages)
+	assert.Len(t, unique, 3) // 3 unique
+	assert.Len(t, dupes, 2)  // 2 first-URLs have duplicates
+	assert.Len(t, dupes["https://example.com"], 1)
+	assert.Equal(t, "https://example.com/about-us", dupes["https://example.com"][0].URL)
+	assert.Len(t, dupes["https://example.com/services"], 1)
+}
+
+func TestDeduplicatePages_AllSame(t *testing.T) {
+	pages := []model.CrawledPage{
+		{URL: "https://example.com/a", Markdown: "same"},
+		{URL: "https://example.com/b", Markdown: "same"},
+		{URL: "https://example.com/c", Markdown: "same"},
+	}
+
+	unique, dupes := deduplicatePages(pages)
+	assert.Len(t, unique, 1)
+	assert.Len(t, dupes["https://example.com/a"], 2)
+}
+
+func TestDeduplicatePages_Empty(t *testing.T) {
+	unique, dupes := deduplicatePages(nil)
+	assert.Nil(t, unique)
+	assert.Empty(t, dupes)
+}
+
+func TestClassifyPhase_TinyPageAutoClassified(t *testing.T) {
+	ctx := context.Background()
+
+	// Page with < 100 chars markdown should be auto-classified as "other"
+	// without any LLM call.
+	pages := []model.CrawledPage{
+		{URL: "https://acme.com/stub-page", Title: "Stub", Markdown: "Short content."},
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+	// No LLM calls should be made for tiny pages.
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+
+	index, usage, err := ClassifyPhase(ctx, pages, aiClient, aiCfg)
+
+	assert.NoError(t, err)
+	assert.Len(t, index[model.PageTypeOther], 1)
+	assert.Equal(t, "https://acme.com/stub-page", index[model.PageTypeOther][0].URL)
+	assert.Equal(t, 1.0, index[model.PageTypeOther][0].Classification.Confidence)
+	assert.Equal(t, 0, usage.InputTokens)
+	aiClient.AssertNotCalled(t, "CreateMessage", mock.Anything, mock.Anything)
+}
+
+func TestClassifyPhase_URLPatternAutoClassified(t *testing.T) {
+	ctx := context.Background()
+
+	// Pages with URLs matching known patterns should be auto-classified
+	// by URL without needing LLM.
+	pages := []model.CrawledPage{
+		{URL: "https://acme.com/about", Title: "About Us", Markdown: testPageContent(0)},
+		{URL: "https://acme.com/contact", Title: "Contact", Markdown: testPageContent(1)},
+		{URL: "https://acme.com/services", Title: "Services", Markdown: testPageContent(2)},
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+	// No LLM calls expected — all auto-classified by URL pattern.
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+
+	index, usage, err := ClassifyPhase(ctx, pages, aiClient, aiCfg)
+
+	assert.NoError(t, err)
+	assert.Len(t, index[model.PageTypeAbout], 1)
+	assert.Len(t, index[model.PageTypeContact], 1)
+	assert.Len(t, index[model.PageTypeServices], 1)
+	// URL-pattern auto-classification uses confidence 0.9.
+	assert.InDelta(t, 0.9, index[model.PageTypeAbout][0].Classification.Confidence, 0.001)
+	assert.Equal(t, 0, usage.InputTokens)
+	aiClient.AssertNotCalled(t, "CreateMessage", mock.Anything, mock.Anything)
+}
+
+func TestClassifyPhase_GroupedPath(t *testing.T) {
+	ctx := context.Background()
+
+	// Create 5 pages that need LLM classification (not auto-classifiable by
+	// URL pattern or prefix, and content >= 100 chars). With > 3 pages,
+	// ClassifyPhase uses the grouped classification path.
+	pages := make([]model.CrawledPage, 5)
+	for i := 0; i < 5; i++ {
+		pages[i] = model.CrawledPage{
+			URL:      fmt.Sprintf("https://acme.com/custom-section-%d", i),
+			Title:    fmt.Sprintf("Custom %d", i),
+			Markdown: testPageContent(i),
+		}
+	}
+
+	aiClient := anthropicmocks.NewMockClient(t)
+
+	// Build the expected grouped JSON array response.
+	pageTypes := []string{"about", "services", "homepage", "contact", "other"}
+	var jsonParts []string
+	for i := 0; i < 5; i++ {
+		jsonParts = append(jsonParts,
+			fmt.Sprintf(`{"url":"https://acme.com/custom-section-%d","page_type":"%s","confidence":0.88}`, i, pageTypes[i]))
+	}
+	groupedJSON := "[" + strings.Join(jsonParts, ",") + "]"
+
+	aiClient.On("CreateMessage", mock.Anything, mock.AnythingOfType("anthropic.MessageRequest")).
+		Return(&anthropic.MessageResponse{
+			Content: []anthropic.ContentBlock{{Text: groupedJSON}},
+			Usage:   anthropic.TokenUsage{InputTokens: 300, OutputTokens: 60},
+		}, nil).Once()
+
+	aiCfg := config.AnthropicConfig{HaikuModel: "claude-haiku-4-5-20251001"}
+
+	index, usage, err := ClassifyPhase(ctx, pages, aiClient, aiCfg)
+
+	assert.NoError(t, err)
+	assert.Len(t, index[model.PageTypeAbout], 1)
+	assert.Len(t, index[model.PageTypeServices], 1)
+	assert.Len(t, index[model.PageTypeHomepage], 1)
+	assert.Len(t, index[model.PageTypeContact], 1)
+	assert.Len(t, index[model.PageTypeOther], 1)
+	assert.Equal(t, 300, usage.InputTokens)
+	assert.Equal(t, 60, usage.OutputTokens)
+	aiClient.AssertExpectations(t)
+}
+
+func TestParseGroupedClassification_ValidJSON(t *testing.T) {
+	pages := []model.CrawledPage{
+		{URL: "https://acme.com/page1"},
+		{URL: "https://acme.com/page2"},
+	}
+
+	text := `[{"url":"https://acme.com/page1","page_type":"about","confidence":0.9},{"url":"https://acme.com/page2","page_type":"services","confidence":0.85}]`
+	result := parseGroupedClassification(text, pages)
+
+	assert.Equal(t, model.PageTypeAbout, result["https://acme.com/page1"].PageType)
+	assert.InDelta(t, 0.9, result["https://acme.com/page1"].Confidence, 0.001)
+	assert.Equal(t, model.PageTypeServices, result["https://acme.com/page2"].PageType)
+}
+
+func TestParseGroupedClassification_InvalidJSON(t *testing.T) {
+	pages := []model.CrawledPage{
+		{URL: "https://acme.com/page1"},
+	}
+
+	// Completely invalid JSON should default all pages to "other".
+	result := parseGroupedClassification("not json at all", pages)
+
+	assert.Equal(t, model.PageTypeOther, result["https://acme.com/page1"].PageType)
+	assert.Equal(t, 0.0, result["https://acme.com/page1"].Confidence)
+}
+
+func TestParseGroupedClassification_InvalidPageType(t *testing.T) {
+	pages := []model.CrawledPage{
+		{URL: "https://acme.com/page1"},
+	}
+
+	text := `[{"url":"https://acme.com/page1","page_type":"nonexistent_type","confidence":0.8}]`
+	result := parseGroupedClassification(text, pages)
+
+	// Invalid page type should be normalized to "other".
+	assert.Equal(t, model.PageTypeOther, result["https://acme.com/page1"].PageType)
+}
+
+func TestParseGroupedClassification_MissingURL(t *testing.T) {
+	pages := []model.CrawledPage{
+		{URL: "https://acme.com/page1"},
+		{URL: "https://acme.com/page2"},
+	}
+
+	// Response only contains page1; page2 should retain default "other".
+	text := `[{"url":"https://acme.com/page1","page_type":"about","confidence":0.9}]`
+	result := parseGroupedClassification(text, pages)
+
+	assert.Equal(t, model.PageTypeAbout, result["https://acme.com/page1"].PageType)
+	assert.Equal(t, model.PageTypeOther, result["https://acme.com/page2"].PageType)
+	assert.Equal(t, 0.0, result["https://acme.com/page2"].Confidence)
+}
+
+func TestParseGroupedClassification_WrappedInFence(t *testing.T) {
+	pages := []model.CrawledPage{
+		{URL: "https://acme.com/page1"},
+	}
+
+	text := "```json\n[{\"url\":\"https://acme.com/page1\",\"page_type\":\"careers\",\"confidence\":0.92}]\n```"
+	result := parseGroupedClassification(text, pages)
+
+	assert.Equal(t, model.PageTypeCareers, result["https://acme.com/page1"].PageType)
+	assert.InDelta(t, 0.92, result["https://acme.com/page1"].Confidence, 0.001)
 }

@@ -75,7 +75,14 @@ internal/
     extract.go              # Phases 4-6: tiered Claude extraction
     aggregate.go            # Phase 7: merge + validate
     report.go               # Phase 8: enrichment report
-    gate.go                 # Phase 9: quality gate → SF + Notion
+    gate.go                 # Phase 9: quality gate scoring + SF write helpers
+    exporter.go             # ResultExporter interface
+    export_salesforce.go    # SF exporter (immediate + deferred modes)
+    export_notion.go        # Notion status exporter
+    export_webhook.go       # ToolJet webhook exporter (manual review)
+    export_csv.go           # CSV exporter (SF report + Grata formats)
+    export_json.go          # JSON exporter
+    export_provenance.go    # Provenance CSV exporter
   registry/
     question.go             # load Question Registry from Notion
     field.go                # load Field Registry from Notion
@@ -199,6 +206,14 @@ pkg/
 ### Confidence escalation
 - T1 answers with confidence < `confidence_escalation_threshold` (default 0.4) re-queue into T2
 - T3 gating: `"always"` or `"ambiguity_only"` (config)
+
+### ResultExporter pattern (Phase 9)
+- `ResultExporter` interface: `ExportResult(ctx, result, gate)`, `Flush(ctx)`, `Name()`
+- Default exporters (SF, Notion, Webhook) registered in `initPipeline()`
+- Per-command exporters (CSV, Provenance, JSON) added by individual commands
+- Batch commands flip SF exporter to deferred mode via `SetDeferredMode(true)`
+- `FlushExporters(ctx)` called after batch to write deferred data
+- Phase 9 calls `ComputeGateResult()` (pure scoring) → passes result to all exporters
 
 ### Fedsync — Dataset interface
 - Each of 33 datasets implements `Dataset` in `internal/fedsync/dataset/`

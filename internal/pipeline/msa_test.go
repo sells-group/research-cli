@@ -2,6 +2,52 @@ package pipeline
 
 import "testing"
 
+func TestMSAShortName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		// Curated abbreviations.
+		{"Dallas-Fort Worth-Arlington, TX", "DFW"},
+		{"New York-Newark-Jersey City, NY-NJ-PA", "NYC"},
+		{"Washington-Arlington-Alexandria, DC-VA-MD-WV", "DC"},
+		{"Minneapolis-St. Paul-Bloomington, MN-WI", "MSP"},
+		{"San Francisco-Oakland-Berkeley, CA", "SF Bay Area"},
+		{"Tampa-St. Petersburg-Clearwater, FL", "Tampa Bay"},
+		{"Los Angeles-Long Beach-Anaheim, CA", "LA"},
+		{"San Jose-Sunnyvale-Santa Clara, CA", "Silicon Valley"},
+		{"Miami-Fort Lauderdale-Pompano Beach, FL", "South Florida"},
+		{"Riverside-San Bernardino-Ontario, CA", "Inland Empire"},
+		{"Virginia Beach-Norfolk-Newport News, VA-NC", "Hampton Roads"},
+		{"Louisville/Jefferson County, KY-IN", "Louisville"},
+
+		// Fallback: first city before "-".
+		{"Atlanta-Sandy Springs-Alpharetta, GA", "Atlanta"},
+		{"Houston-The Woodlands-Sugar Land, TX", "Houston"},
+		{"Nashville-Davidson-Murfreesboro-Franklin, TN", "Nashville"},
+		{"Columbus, OH", "Columbus"},
+		{"Salt Lake City, UT", "Salt Lake City"},
+
+		// Single-city MSAs.
+		{"Pittsburgh, PA", "Pittsburgh"},
+		{"Tucson, AZ", "Tucson"},
+
+		// St. prefix handling.
+		{"St. Louis, MO-IL", "St. Louis"},
+		{"St. Cloud, MN", "St. Cloud"},
+
+		// Empty input.
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		got := MSAShortName(tt.input)
+		if got != tt.want {
+			t.Errorf("MSAShortName(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestLookupMSA(t *testing.T) {
 	tests := []struct {
 		city  string

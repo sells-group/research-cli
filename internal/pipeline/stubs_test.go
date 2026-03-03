@@ -7,6 +7,7 @@ import (
 	"github.com/sells-group/research-cli/pkg/anthropic"
 	"github.com/sells-group/research-cli/pkg/firecrawl"
 	"github.com/sells-group/research-cli/pkg/perplexity"
+	"github.com/sells-group/research-cli/pkg/salesforce"
 )
 
 func TestStubAnthropicClient_CreateMessage(t *testing.T) {
@@ -226,4 +227,99 @@ func TestStubPPPClient(t *testing.T) {
 	}
 	// Should not panic.
 	client.Close()
+}
+
+func TestStubBatchIterator_NextAndItem(t *testing.T) {
+	it := &stubBatchIterator{done: true}
+	if it.Next() {
+		t.Error("expected Next() to return false")
+	}
+	item := it.Item()
+	if item.CustomID != "" {
+		t.Errorf("expected empty custom ID, got %q", item.CustomID)
+	}
+}
+
+func TestStubFirecrawlClient_BatchScrape(t *testing.T) {
+	client := &StubFirecrawlClient{}
+	ctx := context.Background()
+
+	batchResp, err := client.BatchScrape(ctx, firecrawl.BatchScrapeRequest{
+		URLs: []string{"https://example.com"},
+	})
+	if err != nil {
+		t.Fatalf("BatchScrape() error: %v", err)
+	}
+	if !batchResp.Success {
+		t.Error("expected batch scrape success")
+	}
+
+	statusResp, err := client.GetBatchScrapeStatus(ctx, batchResp.ID)
+	if err != nil {
+		t.Fatalf("GetBatchScrapeStatus() error: %v", err)
+	}
+	if statusResp.Status != "completed" {
+		t.Errorf("expected completed, got %s", statusResp.Status)
+	}
+	if len(statusResp.Data) == 0 {
+		t.Error("expected at least one page")
+	}
+}
+
+func TestStubSalesforceClient_Collections(t *testing.T) {
+	client := &StubSalesforceClient{}
+	ctx := context.Background()
+
+	insertResults, err := client.InsertCollection(ctx, "Account", []map[string]any{
+		{"Name": "Acme"},
+		{"Name": "Beta"},
+	})
+	if err != nil {
+		t.Fatalf("InsertCollection() error: %v", err)
+	}
+	if len(insertResults) != 2 {
+		t.Errorf("expected 2 results, got %d", len(insertResults))
+	}
+	for _, r := range insertResults {
+		if !r.Success {
+			t.Errorf("expected success for %s", r.ID)
+		}
+	}
+
+	updateResults, err := client.UpdateCollection(ctx, "Account", []salesforce.CollectionRecord{
+		{ID: "001AAA", Fields: map[string]any{"Name": "Updated"}},
+	})
+	if err != nil {
+		t.Fatalf("UpdateCollection() error: %v", err)
+	}
+	if len(updateResults) != 1 {
+		t.Errorf("expected 1 result, got %d", len(updateResults))
+	}
+
+	desc, err := client.DescribeSObject(ctx, "Account")
+	if err != nil {
+		t.Fatalf("DescribeSObject() error: %v", err)
+	}
+	if desc.Name != "Account" {
+		t.Errorf("expected Account, got %s", desc.Name)
+	}
+
+	report, err := client.RunReport(ctx, "00Oxx")
+	if err != nil {
+		t.Fatalf("RunReport() error: %v", err)
+	}
+	if report == nil {
+		t.Error("expected non-nil report result")
+	}
+}
+
+func TestStubNotionClient_UpdatePage(t *testing.T) {
+	client := &StubNotionClient{}
+	page, err := client.UpdatePage(context.Background(), "page-id", nil)
+	if err != nil {
+		t.Fatalf("UpdatePage() error: %v", err)
+	}
+	if page == nil {
+		t.Error("expected non-nil page")
+	}
 }

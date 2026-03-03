@@ -2,8 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -18,226 +16,6 @@ import (
 	"github.com/sells-group/research-cli/pkg/salesforce"
 	salesforcemocks "github.com/sells-group/research-cli/pkg/salesforce/mocks"
 )
-
-func TestQualityGate_PassesAndUpdatesSF(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry", Required: true},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "Acme",
-			SalesforceID: "001ABC",
-			NotionPageID: "page-123",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Tech", Confidence: 0.9},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	sfClient.On("UpdateOne", mock.Anything, "Account", "001ABC", mock.AnythingOfType("map[string]interface {}")).
-		Return(nil)
-
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-123", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{
-			QualityScoreThreshold: 0.5,
-			QualityWeights:        config.QualityWeights{Confidence: 1.0},
-		},
-	}
-
-	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.True(t, gate.Passed)
-	assert.True(t, gate.SFUpdated)
-	assert.False(t, gate.ManualReview)
-	sfClient.AssertExpectations(t)
-	notionClient.AssertExpectations(t)
-}
-
-func TestQualityGate_FailsSendsToManualReview(t *testing.T) {
-	ctx := context.Background()
-
-	// Set up a ToolJet webhook server.
-	webhookCalled := false
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		webhookCalled = true
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer ts.Close()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry", Required: true},
-		{Key: "revenue", SFField: "AnnualRevenue", Required: true},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "Empty Co",
-			NotionPageID: "page-456",
-		},
-		FieldValues: map[string]model.FieldValue{}, // No fields found.
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-456", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{
-			QualityScoreThreshold: 0.6,
-			QualityWeights:        config.QualityWeights{Confidence: 1.0},
-		},
-		ToolJet: config.ToolJetConfig{
-			WebhookURL: ts.URL,
-		},
-	}
-
-	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.False(t, gate.Passed)
-	assert.False(t, gate.SFUpdated)
-	assert.True(t, gate.ManualReview)
-	assert.True(t, webhookCalled)
-	notionClient.AssertExpectations(t)
-}
-
-func TestQualityGate_NoSalesforceID_CreatesAccount(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry"},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "New Co",
-			URL:          "https://newco.com",
-			NotionPageID: "page-789",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Tech", Confidence: 0.9},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	// Dedup lookup — no existing account.
-	mockQueryNoMatch(sfClient)
-	// CreateAccount → InsertOne("Account", ...) returns new ID.
-	sfClient.On("InsertOne", mock.Anything, "Account", mock.AnythingOfType("map[string]interface {}")).
-		Return("001NEW", nil)
-
-	notionClient := notionmocks.NewMockClient(t)
-	// Status update + SalesforceID writeback = 2 UpdatePage calls.
-	notionClient.On("UpdatePage", mock.Anything, "page-789", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
-	}
-
-	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.True(t, gate.Passed)
-	assert.True(t, gate.SFUpdated)
-	assert.Equal(t, "001NEW", result.Company.SalesforceID)
-	sfClient.AssertExpectations(t)
-	notionClient.AssertExpectations(t)
-}
-
-func TestQualityGate_NoSFClient(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry"},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "No SF Client",
-			NotionPageID: "page-000",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Tech", Confidence: 0.9},
-		},
-	}
-
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-000", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
-	}
-
-	// Pass nil sfClient — should not panic or attempt SF operations.
-	gate, err := QualityGate(ctx, result, fields, nil, nil, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.True(t, gate.Passed)
-	assert.False(t, gate.SFUpdated)
-	notionClient.AssertExpectations(t)
-}
-
-func TestQualityGate_ContactCreation(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry", SFObject: "Account"},
-		{Key: "owner_last_name", SFField: "LastName", SFObject: "Contact"},
-		{Key: "owner_first_name", SFField: "FirstName", SFObject: "Contact"},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "Contact Co",
-			URL:          "https://contactco.com",
-			SalesforceID: "001EXIST",
-			NotionPageID: "page-contact",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry":         {FieldKey: "industry", SFField: "Industry", Value: "Finance", Confidence: 0.9},
-			"owner_last_name":  {FieldKey: "owner_last_name", SFField: "LastName", Value: "Smith", Confidence: 0.8},
-			"owner_first_name": {FieldKey: "owner_first_name", SFField: "FirstName", Value: "John", Confidence: 0.8},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	// Account update.
-	sfClient.On("UpdateOne", mock.Anything, "Account", "001EXIST", mock.AnythingOfType("map[string]interface {}")).
-		Return(nil)
-	// Contact dedup lookup — no existing contacts.
-	mockContactQueryEmpty(sfClient)
-	// Contact creation.
-	sfClient.On("InsertOne", mock.Anything, "Contact", mock.AnythingOfType("map[string]interface {}")).
-		Return("003NEW", nil)
-
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-contact", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
-	}
-
-	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.True(t, gate.Passed)
-	assert.True(t, gate.SFUpdated)
-	sfClient.AssertExpectations(t)
-	notionClient.AssertExpectations(t)
-}
 
 func TestBuildSFFields(t *testing.T) {
 	fieldValues := map[string]model.FieldValue{
@@ -320,192 +98,6 @@ func TestEnsureMinimumSFFields(t *testing.T) {
 		assert.Equal(t, "Acme Construction", fields["Name"])
 		assert.Equal(t, "https://acme-construction.com", fields["Website"])
 	})
-}
-
-func TestQualityGate_CreateAccountFails(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry"},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "Fail Co",
-			URL:          "https://failco.com",
-			NotionPageID: "page-fail",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Tech", Confidence: 0.9},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	// Dedup lookup — no existing account.
-	mockQueryNoMatch(sfClient)
-	sfClient.On("InsertOne", mock.Anything, "Account", mock.AnythingOfType("map[string]interface {}")).
-		Return("", assert.AnError)
-
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-fail", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
-	}
-
-	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.Error(t, err)
-	assert.True(t, gate.Passed) // Score passed threshold.
-	assert.False(t, gate.SFUpdated)
-	assert.Equal(t, "", result.Company.SalesforceID) // Not set on failure.
-	sfClient.AssertExpectations(t)
-}
-
-func TestQualityGate_ContactCreationFails(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry", SFObject: "Account"},
-		{Key: "owner_last_name", SFField: "LastName", SFObject: "Contact"},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "Contact Fail Co",
-			SalesforceID: "001EXIST",
-			NotionPageID: "page-cf",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry":        {FieldKey: "industry", SFField: "Industry", Value: "Tech", Confidence: 0.9},
-			"owner_last_name": {FieldKey: "owner_last_name", SFField: "LastName", Value: "Smith", Confidence: 0.8},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	// Account update succeeds.
-	sfClient.On("UpdateOne", mock.Anything, "Account", "001EXIST", mock.AnythingOfType("map[string]interface {}")).
-		Return(nil)
-	// Contact dedup lookup — no existing contacts.
-	mockContactQueryEmpty(sfClient)
-	// Contact creation fails — should be logged but not fatal.
-	sfClient.On("InsertOne", mock.Anything, "Contact", mock.AnythingOfType("map[string]interface {}")).
-		Return("", assert.AnError)
-
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-cf", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
-	}
-
-	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	// Contact failure is non-fatal.
-	assert.NoError(t, err)
-	assert.True(t, gate.Passed)
-	assert.True(t, gate.SFUpdated) // Account update succeeded.
-	sfClient.AssertExpectations(t)
-}
-
-func TestQualityGate_CreateAccount_MinimumFieldsOnly(t *testing.T) {
-	ctx := context.Background()
-
-	// No enriched fields map to SF, but ensureMinimumSFFields adds Name+Website.
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "notes", SFField: ""}, // No SF mapping.
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "Minimum Co",
-			URL:          "https://minimum.com",
-			NotionPageID: "page-min",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"notes": {FieldKey: "notes", SFField: "", Value: "some notes", Confidence: 0.9},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	// Dedup lookup — no existing account.
-	mockQueryNoMatch(sfClient)
-	var capturedFields map[string]any
-	sfClient.On("InsertOne", mock.Anything, "Account", mock.AnythingOfType("map[string]interface {}")).
-		Run(func(args mock.Arguments) {
-			capturedFields = args.Get(2).(map[string]any)
-		}).
-		Return("001MIN", nil)
-
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-min", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.0, QualityWeights: config.QualityWeights{Confidence: 1.0}}, // 0 threshold so empty fields pass.
-	}
-
-	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.True(t, gate.SFUpdated)
-	assert.Equal(t, "001MIN", result.Company.SalesforceID)
-	// Verify minimum fields were set.
-	assert.Equal(t, "Minimum Co", capturedFields["Name"])
-	assert.Equal(t, "https://minimum.com", capturedFields["Website"])
-	sfClient.AssertExpectations(t)
-}
-
-func TestQualityGate_MultipleContacts(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry", SFObject: "Account"},
-		{Key: "contacts", DataType: "json"},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "Multi Contact Co",
-			SalesforceID: "001MULTI",
-			NotionPageID: "page-multi",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Tech", Confidence: 0.9},
-			"contacts": {FieldKey: "contacts", Value: []map[string]string{
-				{"first_name": "Jane", "last_name": "Doe", "title": "CEO", "email": "jane@acme.com"},
-				{"first_name": "John", "last_name": "Smith", "title": "VP Ops"},
-				{"first_name": "Bob", "last_name": "Jones", "title": "Director"},
-			}, Confidence: 0.8},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	// Account update.
-	sfClient.On("UpdateOne", mock.Anything, "Account", "001MULTI", mock.AnythingOfType("map[string]interface {}")).
-		Return(nil)
-	// Contact dedup lookup — no existing contacts.
-	mockContactQueryEmpty(sfClient)
-	// 3 Contact creations.
-	sfClient.On("InsertOne", mock.Anything, "Contact", mock.AnythingOfType("map[string]interface {}")).
-		Return("003NEW", nil).Times(3)
-
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-multi", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.0, QualityWeights: config.QualityWeights{Confidence: 1.0}}, // Low threshold so it passes.
-	}
-
-	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.True(t, gate.Passed)
-	assert.True(t, gate.SFUpdated)
-	sfClient.AssertExpectations(t)
 }
 
 func TestExtractContactsForSF_FromContacts(t *testing.T) {
@@ -761,26 +353,6 @@ func TestWriteNotionSalesforceID(t *testing.T) {
 	})
 }
 
-// mockQueryNoMatch sets up a mock Query expectation that returns an empty result (no match).
-func mockQueryNoMatch(sfClient *salesforcemocks.MockClient) {
-	sfClient.On("Query", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("*[]salesforce.Account")).
-		Run(func(args mock.Arguments) {
-			accounts := args.Get(2).(*[]salesforce.Account)
-			*accounts = []salesforce.Account{}
-		}).
-		Return(nil)
-}
-
-// mockQueryMatch sets up a mock Query expectation that returns an existing Account.
-func mockQueryMatch(sfClient *salesforcemocks.MockClient, id, name string) {
-	sfClient.On("Query", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("*[]salesforce.Account")).
-		Run(func(args mock.Arguments) {
-			accounts := args.Get(2).(*[]salesforce.Account)
-			*accounts = []salesforce.Account{{ID: id, Name: name}}
-		}).
-		Return(nil)
-}
-
 // mockContactQueryEmpty sets up a mock Query expectation for Contact queries returning no results.
 func mockContactQueryEmpty(sfClient *salesforcemocks.MockClient) {
 	sfClient.On("Query", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("*[]salesforce.Contact")).
@@ -800,341 +372,6 @@ func mockContactQueryMatch(sfClient *salesforcemocks.MockClient, existing []sale
 			*contacts = existing
 		}).
 		Return(nil)
-}
-
-func TestQualityGate_DedupMatchUpdatesExisting(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry"},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "Acme Corp",
-			URL:          "https://acme.com",
-			NotionPageID: "page-dedup",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Tech", Confidence: 0.9},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	// Dedup lookup — existing Account found.
-	mockQueryMatch(sfClient, "001EXIST", "Acme Corporation")
-	// Should update, not create.
-	sfClient.On("UpdateOne", mock.Anything, "Account", "001EXIST", mock.AnythingOfType("map[string]interface {}")).
-		Return(nil)
-
-	notionClient := notionmocks.NewMockClient(t)
-	// Status update + SalesforceID writeback.
-	notionClient.On("UpdatePage", mock.Anything, "page-dedup", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
-	}
-
-	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.True(t, gate.Passed)
-	assert.True(t, gate.SFUpdated)
-	assert.True(t, gate.DedupMatch)
-	assert.Equal(t, "001EXIST", result.Company.SalesforceID)
-	sfClient.AssertExpectations(t)
-	notionClient.AssertExpectations(t)
-}
-
-func TestQualityGate_DedupLookupFailsGracefully(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry"},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "Flaky Co",
-			URL:          "https://flaky.com",
-			NotionPageID: "page-flaky",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Tech", Confidence: 0.9},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	// Dedup lookup fails — should still proceed with create.
-	sfClient.On("Query", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("*[]salesforce.Account")).
-		Return(assert.AnError)
-	sfClient.On("InsertOne", mock.Anything, "Account", mock.AnythingOfType("map[string]interface {}")).
-		Return("001NEW", nil)
-
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-flaky", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
-	}
-
-	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.True(t, gate.Passed)
-	assert.True(t, gate.SFUpdated)
-	assert.False(t, gate.DedupMatch) // Lookup failed, so no dedup.
-	assert.Equal(t, "001NEW", result.Company.SalesforceID)
-	sfClient.AssertExpectations(t)
-}
-
-func TestQualityGate_DedupNoURLSkipsLookup(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry"},
-	})
-
-	// Company with no URL — dedup lookup should be skipped.
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "No URL Co",
-			NotionPageID: "page-nourl",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Tech", Confidence: 0.9},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	// No Query call expected — straight to create.
-	sfClient.On("InsertOne", mock.Anything, "Account", mock.AnythingOfType("map[string]interface {}")).
-		Return("001NOURL", nil)
-
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-nourl", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
-	}
-
-	gate, err := QualityGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.True(t, gate.SFUpdated)
-	assert.False(t, gate.DedupMatch)
-	assert.Equal(t, "001NOURL", result.Company.SalesforceID)
-	sfClient.AssertExpectations(t)
-}
-
-// --- PrepareGate Tests (Deferred SF Write Mode) ---
-
-func TestPrepareGate_BuildsCreateIntent(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry"},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "New Co",
-			URL:          "https://newco.com",
-			NotionPageID: "page-prep",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Tech", Confidence: 0.9},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	// Dedup lookup — no match.
-	mockQueryNoMatch(sfClient)
-
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-prep", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
-	}
-
-	gate, intent, err := PrepareGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.True(t, gate.Passed)
-	assert.False(t, gate.SFUpdated) // No SF writes in PrepareGate.
-
-	// Verify intent.
-	assert.NotNil(t, intent)
-	assert.Equal(t, "create", intent.AccountOp)
-	assert.Equal(t, "", intent.AccountID)
-	assert.Equal(t, "Tech", intent.AccountFields["Industry"])
-	assert.Equal(t, "New Co", intent.AccountFields["Name"])
-	assert.Equal(t, "https://newco.com", intent.AccountFields["Website"])
-	assert.Equal(t, "page-prep", intent.NotionPageID)
-	assert.Same(t, result, intent.Result)
-	sfClient.AssertExpectations(t)
-}
-
-func TestPrepareGate_BuildsUpdateIntent(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry"},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "Existing Co",
-			SalesforceID: "001EXIST",
-			NotionPageID: "page-upd",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Finance", Confidence: 0.9},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	// No dedup lookup needed — already has SF ID.
-
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-upd", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
-	}
-
-	gate, intent, err := PrepareGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.True(t, gate.Passed)
-	assert.NotNil(t, intent)
-	assert.Equal(t, "update", intent.AccountOp)
-	assert.Equal(t, "001EXIST", intent.AccountID)
-	assert.Equal(t, "Finance", intent.AccountFields["Industry"])
-}
-
-func TestPrepareGate_DedupMatchBuildsUpdateIntent(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry"},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "Dup Co",
-			URL:          "https://dup.com",
-			NotionPageID: "page-dup",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Tech", Confidence: 0.9},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	// Dedup lookup finds existing account.
-	mockQueryMatch(sfClient, "001DUP", "Duplicate Corp")
-
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-dup", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.5},
-	}
-
-	gate, intent, err := PrepareGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.True(t, gate.Passed)
-	assert.True(t, gate.DedupMatch)
-	assert.NotNil(t, intent)
-	assert.Equal(t, "update", intent.AccountOp)
-	assert.Equal(t, "001DUP", intent.AccountID)
-	assert.True(t, intent.DedupMatch)
-	assert.Equal(t, "001DUP", result.Company.SalesforceID)
-}
-
-func TestPrepareGate_FailingScoreReturnsNilIntent(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry", Required: true},
-		{Key: "revenue", SFField: "AnnualRevenue", Required: true},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "Low Score Co",
-			NotionPageID: "page-low",
-		},
-		FieldValues: map[string]model.FieldValue{},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-low", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{
-			QualityScoreThreshold: 0.6,
-			QualityWeights:        config.QualityWeights{Confidence: 1.0},
-		},
-	}
-
-	gate, intent, err := PrepareGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.False(t, gate.Passed)
-	assert.Nil(t, intent) // No intent for failing score.
-}
-
-func TestPrepareGate_CollectsContacts(t *testing.T) {
-	ctx := context.Background()
-
-	fields := model.NewFieldRegistry([]model.FieldMapping{
-		{Key: "industry", SFField: "Industry", SFObject: "Account"},
-		{Key: "contacts", DataType: "json"},
-	})
-
-	result := &model.EnrichmentResult{
-		Company: model.Company{
-			Name:         "Contacts Co",
-			SalesforceID: "001CC",
-			NotionPageID: "page-cc",
-		},
-		FieldValues: map[string]model.FieldValue{
-			"industry": {FieldKey: "industry", SFField: "Industry", Value: "Tech", Confidence: 0.9},
-			"contacts": {FieldKey: "contacts", Value: []map[string]string{
-				{"first_name": "Jane", "last_name": "Doe", "title": "CEO"},
-				{"first_name": "John", "last_name": "Smith", "title": "VP"},
-			}, Confidence: 0.8},
-		},
-	}
-
-	sfClient := salesforcemocks.NewMockClient(t)
-	notionClient := notionmocks.NewMockClient(t)
-	notionClient.On("UpdatePage", mock.Anything, "page-cc", mock.Anything).
-		Return(nil, nil)
-
-	cfg := &config.Config{
-		Pipeline: config.PipelineConfig{QualityScoreThreshold: 0.0, QualityWeights: config.QualityWeights{Confidence: 1.0}},
-	}
-
-	_, intent, err := PrepareGate(ctx, result, fields, nil, sfClient, notionClient, cfg)
-
-	assert.NoError(t, err)
-	assert.NotNil(t, intent)
-	assert.Len(t, intent.Contacts, 2)
-	assert.Equal(t, "Doe", intent.Contacts[0]["LastName"])
-	assert.Equal(t, "Smith", intent.Contacts[1]["LastName"])
 }
 
 // --- FlushSFWrites Tests ---
@@ -1384,29 +621,7 @@ func TestFlushSFWrites_PartialCreateFailure(t *testing.T) {
 	sfClient.AssertExpectations(t)
 }
 
-// --- SetDeferredWrites Tests ---
-
-func TestSetDeferredWrites_CollectsIntents(t *testing.T) {
-	var collected []*SFWriteIntent
-
-	p := &Pipeline{}
-	p.SetDeferredWrites(func(intent *SFWriteIntent) {
-		collected = append(collected, intent)
-	})
-
-	assert.True(t, p.deferSFWrites)
-	assert.NotNil(t, p.onWriteIntent)
-
-	// Simulate callback.
-	p.onWriteIntent(&SFWriteIntent{AccountOp: "create"})
-	p.onWriteIntent(&SFWriteIntent{AccountOp: "update"})
-
-	assert.Len(t, collected, 2)
-	assert.Equal(t, "create", collected[0].AccountOp)
-	assert.Equal(t, "update", collected[1].AccountOp)
-}
-
-// --- Issue 1: validateRequiredFields tests ---
+// --- validateRequiredFields tests ---
 
 func TestValidateRequiredFields_AllPresent(t *testing.T) {
 	fields := model.NewFieldRegistry([]model.FieldMapping{
@@ -1457,7 +672,7 @@ func TestValidateRequiredFields_NilRegistry(t *testing.T) {
 	assert.Nil(t, missing)
 }
 
-// --- Issue 3: extractContactsForSF truncation test ---
+// --- extractContactsForSF truncation test ---
 
 func TestExtractContactsForSF_TruncatesAt3(t *testing.T) {
 	fieldValues := map[string]model.FieldValue{
@@ -1478,11 +693,314 @@ func TestExtractContactsForSF_TruncatesAt3(t *testing.T) {
 	assert.Equal(t, "Three", contacts[2]["LastName"])
 }
 
-// --- Issue 6: min completeness floor test ---
+// --- resolveOrCreateAccount Tests ---
 
-func TestQualityGate_CompletenessFloorBlocksPass(t *testing.T) {
+func TestResolveOrCreateAccount_DedupMatch(t *testing.T) {
 	ctx := context.Background()
 
+	sfClient := salesforcemocks.NewMockClient(t)
+	// FindAccountByWebsite returns a match.
+	sfClient.On("Query", mock.Anything, mock.MatchedBy(func(s string) bool {
+		return strings.Contains(s, "Account") && strings.Contains(s, "Website")
+	}), mock.Anything).Run(func(args mock.Arguments) {
+		out := args.Get(2).(*[]salesforce.Account)
+		*out = []salesforce.Account{{ID: "001EXISTING", Name: "Existing"}}
+	}).Return(nil)
+	// Update existing account.
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001EXISTING", mock.Anything).Return(nil)
+
+	notionClient := notionmocks.NewMockClient(t)
+	notionClient.On("UpdatePage", mock.Anything, "page-1", mock.Anything).Return(nil, nil)
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "Acme", URL: "https://acme.com", NotionPageID: "page-1"},
+	}
+	gate := &GateResult{Passed: true}
+	fields := map[string]any{"Industry": "Tech"}
+
+	id, err := resolveOrCreateAccount(ctx, sfClient, notionClient, result, fields, gate)
+	assert.NoError(t, err)
+	assert.Equal(t, "001EXISTING", id)
+	assert.True(t, gate.DedupMatch)
+	assert.True(t, gate.SFUpdated)
+	sfClient.AssertExpectations(t)
+}
+
+func TestResolveOrCreateAccount_CreateNew(t *testing.T) {
+	ctx := context.Background()
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	// FindAccountByWebsite returns no match.
+	sfClient.On("Query", mock.Anything, mock.MatchedBy(func(s string) bool {
+		return strings.Contains(s, "Account") && strings.Contains(s, "Website")
+	}), mock.Anything).Return(nil)
+	// CreateAccount.
+	sfClient.On("InsertOne", mock.Anything, "Account", mock.Anything).Return("001NEW", nil)
+
+	notionClient := notionmocks.NewMockClient(t)
+	notionClient.On("UpdatePage", mock.Anything, "page-1", mock.Anything).Return(nil, nil)
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "NewCo", URL: "https://newco.com", NotionPageID: "page-1"},
+	}
+	gate := &GateResult{Passed: true}
+	fields := map[string]any{"Name": "NewCo", "Website": "https://newco.com"}
+
+	id, err := resolveOrCreateAccount(ctx, sfClient, notionClient, result, fields, gate)
+	assert.NoError(t, err)
+	assert.Equal(t, "001NEW", id)
+	assert.True(t, gate.SFUpdated)
+	assert.False(t, gate.DedupMatch)
+}
+
+func TestResolveOrCreateAccount_NoURL(t *testing.T) {
+	ctx := context.Background()
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	// No URL → skip dedup → straight to create.
+	sfClient.On("InsertOne", mock.Anything, "Account", mock.Anything).Return("001DIRECT", nil)
+
+	notionClient := notionmocks.NewMockClient(t)
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "NoURL Co"},
+	}
+	gate := &GateResult{Passed: true}
+	fields := map[string]any{"Name": "NoURL Co"}
+
+	id, err := resolveOrCreateAccount(ctx, sfClient, notionClient, result, fields, gate)
+	assert.NoError(t, err)
+	assert.Equal(t, "001DIRECT", id)
+}
+
+func TestResolveOrCreateAccount_DedupLookupFails(t *testing.T) {
+	ctx := context.Background()
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	// FindAccountByWebsite fails.
+	sfClient.On("Query", mock.Anything, mock.MatchedBy(func(s string) bool {
+		return strings.Contains(s, "Account")
+	}), mock.Anything).Return(assert.AnError)
+	// Falls through to create.
+	sfClient.On("InsertOne", mock.Anything, "Account", mock.Anything).Return("001FALLBACK", nil)
+
+	notionClient := notionmocks.NewMockClient(t)
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "Acme", URL: "https://acme.com"},
+	}
+	gate := &GateResult{Passed: true}
+	fields := map[string]any{"Name": "Acme"}
+
+	id, err := resolveOrCreateAccount(ctx, sfClient, notionClient, result, fields, gate)
+	assert.NoError(t, err)
+	assert.Equal(t, "001FALLBACK", id)
+}
+
+func TestResolveOrCreateAccount_CreateFails(t *testing.T) {
+	ctx := context.Background()
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	sfClient.On("Query", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	sfClient.On("InsertOne", mock.Anything, "Account", mock.Anything).Return("", assert.AnError)
+
+	notionClient := notionmocks.NewMockClient(t)
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "FailCo", URL: "https://fail.com"},
+	}
+	gate := &GateResult{Passed: true}
+	fields := map[string]any{"Name": "FailCo"}
+
+	_, err := resolveOrCreateAccount(ctx, sfClient, notionClient, result, fields, gate)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "sf create")
+}
+
+func TestResolveOrCreateAccount_UpdateDedupFails(t *testing.T) {
+	ctx := context.Background()
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	sfClient.On("Query", mock.Anything, mock.MatchedBy(func(s string) bool {
+		return strings.Contains(s, "Account") && strings.Contains(s, "Website")
+	}), mock.Anything).Run(func(args mock.Arguments) {
+		out := args.Get(2).(*[]salesforce.Account)
+		*out = []salesforce.Account{{ID: "001EXIST", Name: "Existing"}}
+	}).Return(nil)
+	sfClient.On("UpdateOne", mock.Anything, "Account", "001EXIST", mock.Anything).
+		Return(assert.AnError)
+
+	notionClient := notionmocks.NewMockClient(t)
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "Acme", URL: "https://acme.com"},
+	}
+	gate := &GateResult{Passed: true}
+	fields := map[string]any{"Industry": "Tech"}
+
+	_, err := resolveOrCreateAccount(ctx, sfClient, notionClient, result, fields, gate)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "sf update (dedup)")
+}
+
+// --- updateNotionStatus Tests ---
+
+func TestUpdateNotionStatus_Success(t *testing.T) {
+	ctx := context.Background()
+	notionClient := notionmocks.NewMockClient(t)
+	notionClient.On("UpdatePage", mock.Anything, "page-1", mock.Anything).Return(nil, nil)
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "Acme"},
+		Score:   0.85,
+	}
+	err := updateNotionStatus(ctx, notionClient, "page-1", "Enriched", result)
+	assert.NoError(t, err)
+	notionClient.AssertExpectations(t)
+}
+
+func TestUpdateNotionStatus_Error(t *testing.T) {
+	ctx := context.Background()
+	notionClient := notionmocks.NewMockClient(t)
+	notionClient.On("UpdatePage", mock.Anything, "page-1", mock.Anything).
+		Return(nil, assert.AnError)
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "Acme"},
+	}
+	err := updateNotionStatus(ctx, notionClient, "page-1", "Enriched", result)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "update notion page")
+}
+
+// --- writeSFIDToNotion Tests ---
+
+func TestWriteSFIDToNotion_SkipsNilClient(_ *testing.T) {
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "Acme", NotionPageID: "page-1"},
+	}
+	// Should not panic.
+	writeSFIDToNotion(context.Background(), nil, result, "001ABC")
+}
+
+func TestWriteSFIDToNotion_SkipsEmptyPageID(t *testing.T) {
+	notionClient := notionmocks.NewMockClient(t)
+	// No UpdatePage call expected.
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "Acme"},
+	}
+	writeSFIDToNotion(context.Background(), notionClient, result, "001ABC")
+}
+
+// --- FlushSummary Tests ---
+
+func TestFlushSummary_LogSummary(_ *testing.T) {
+	s := &FlushSummary{
+		AccountsCreated: 2,
+		AccountsFailed:  1,
+		AccountsUpdated: 3,
+		Failures: []FlushFailure{
+			{Company: "FailCo", Op: "account_create", Error: "dup"},
+		},
+	}
+	// Should not panic.
+	s.LogSummary()
+}
+
+func TestFlushSummary_LogSummary_NoFailures(_ *testing.T) {
+	s := &FlushSummary{
+		AccountsCreated: 5,
+	}
+	s.LogSummary()
+}
+
+// --- FlushSFWrites additional edge cases ---
+
+func TestFlushSFWrites_NilIntentsFiltered(t *testing.T) {
+	ctx := context.Background()
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "Valid", SalesforceID: "001V"},
+	}
+
+	intents := []*SFWriteIntent{
+		nil,                             // Should be skipped.
+		{AccountOp: "", Result: result}, // Empty op — skipped.
+		nil,                             // Another nil.
+	}
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	notionClient := notionmocks.NewMockClient(t)
+
+	summary, err := FlushSFWrites(ctx, sfClient, notionClient, intents)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, summary.AccountsCreated)
+	assert.Equal(t, 0, summary.AccountsUpdated)
+}
+
+func TestFlushSFWrites_UpdatePartialFailure(t *testing.T) {
+	ctx := context.Background()
+
+	result1 := &model.EnrichmentResult{
+		Company: model.Company{Name: "Good", SalesforceID: "001A"},
+	}
+	result2 := &model.EnrichmentResult{
+		Company: model.Company{Name: "Bad", SalesforceID: "001B"},
+	}
+
+	intents := []*SFWriteIntent{
+		{
+			AccountOp:     "update",
+			AccountID:     "001A",
+			AccountFields: map[string]any{"Industry": "Tech"},
+			Result:        result1,
+		},
+		{
+			AccountOp:     "update",
+			AccountID:     "001B",
+			AccountFields: map[string]any{"Industry": "Finance"},
+			Result:        result2,
+		},
+	}
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	sfClient.On("UpdateCollection", mock.Anything, "Account", mock.Anything).
+		Return([]salesforce.CollectionResult{
+			{ID: "001A", Success: true},
+			{ID: "001B", Success: false, Errors: []string{"FIELD_INTEGRITY"}},
+		}, nil)
+
+	notionClient := notionmocks.NewMockClient(t)
+
+	summary, err := FlushSFWrites(ctx, sfClient, notionClient, intents)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, summary.AccountsUpdated)
+	assert.Equal(t, 1, summary.UpdatesFailed)
+	require.Len(t, summary.Failures, 1)
+	assert.Equal(t, "Bad", summary.Failures[0].Company)
+}
+
+// --- Pipeline setter tests ---
+
+func TestPipelineSetters(t *testing.T) {
+	p := &Pipeline{}
+
+	p.SetForceReExtract(true)
+	assert.True(t, p.forceReExtract)
+
+	p.SetForceReExtract(false)
+	assert.False(t, p.forceReExtract)
+
+	p.SetFedsyncPool(nil)
+	assert.Nil(t, p.fedsyncPool)
+
+	p.SetCompanyImporter(nil)
+	assert.Nil(t, p.companyImporter)
+}
+
+// --- ComputeGateResult tests ---
+
+func TestComputeGateResult_CompletenessFloorBlocksPass(t *testing.T) {
 	// 2 fields, only 1 populated → completeness = 0.5
 	fields := model.NewFieldRegistry([]model.FieldMapping{
 		{Key: "industry", SFField: "Industry", Required: true},
@@ -1514,8 +1032,7 @@ func TestQualityGate_CompletenessFloorBlocksPass(t *testing.T) {
 		},
 	}
 
-	gate, err := QualityGate(ctx, result, fields, questions, nil, nil, cfg)
-	require.NoError(t, err)
+	gate := ComputeGateResult(result, fields, questions, cfg)
 	assert.False(t, gate.Passed, "gate should fail due to completeness floor")
 }
 
@@ -1563,4 +1080,326 @@ func TestInjectGeoFields(t *testing.T) {
 		assert.Nil(t, fields["Company_MSA__c"])
 		assert.Nil(t, fields["MSA_CBSA_Code__c"])
 	})
+}
+
+// --- writeSFIDToNotion additional coverage ---
+
+func TestWriteSFIDToNotion_Success(t *testing.T) {
+	ctx := context.Background()
+	notionClient := notionmocks.NewMockClient(t)
+
+	// Expect UpdatePage to be called with the correct pageID and SF ID content.
+	notionClient.On("UpdatePage", mock.Anything, "page-abc", mock.MatchedBy(func(req *notionapi.PageUpdateRequest) bool {
+		rtProp, ok := req.Properties["SalesforceID"].(notionapi.RichTextProperty)
+		if !ok || len(rtProp.RichText) == 0 {
+			return false
+		}
+		return rtProp.RichText[0].Text.Content == "001SFID"
+	})).Return(nil, nil)
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "Acme Corp", NotionPageID: "page-abc"},
+	}
+
+	// Should call UpdatePage since notionClient != nil and PageID != "".
+	writeSFIDToNotion(ctx, notionClient, result, "001SFID")
+	notionClient.AssertExpectations(t)
+}
+
+func TestWriteSFIDToNotion_NilClient(_ *testing.T) {
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "Acme Corp", NotionPageID: "page-abc"},
+	}
+	// Should not panic with nil client.
+	writeSFIDToNotion(context.Background(), nil, result, "001SFID")
+}
+
+func TestWriteSFIDToNotion_EmptyPageID(t *testing.T) {
+	notionClient := notionmocks.NewMockClient(t)
+	// No UpdatePage call expected since PageID is empty.
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "Acme Corp", NotionPageID: ""},
+	}
+	writeSFIDToNotion(context.Background(), notionClient, result, "001SFID")
+	// Mock cleanup will assert no unexpected calls were made.
+}
+
+// --- upsertContacts additional coverage ---
+
+func TestUpsertContacts_NameMatchEmailMismatch(t *testing.T) {
+	ctx := context.Background()
+
+	// Enriched contact has an email that doesn't match, but first+last name matches.
+	enriched := []map[string]any{
+		{"FirstName": "Alice", "LastName": "Wong", "Email": "alice.new@newco.com", "Title": "CTO"},
+	}
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	// Existing contact has same name but different email.
+	mockContactQueryMatch(sfClient, []salesforce.Contact{
+		{ID: "003ALICE", FirstName: "Alice", LastName: "Wong", Email: "alice@oldco.com"},
+	})
+	// Should match by name and update existing contact.
+	sfClient.On("UpdateOne", mock.Anything, "Contact", "003ALICE", mock.AnythingOfType("map[string]interface {}")).
+		Return(nil)
+
+	res := upsertContacts(ctx, sfClient, "001ACC", enriched, "Test Co")
+	assert.Equal(t, 1, res.Updated)
+	assert.Equal(t, 0, res.Created)
+	assert.Equal(t, 0, res.Failed)
+	sfClient.AssertExpectations(t)
+}
+
+func TestUpsertContacts_UpdateFailure(t *testing.T) {
+	ctx := context.Background()
+
+	enriched := []map[string]any{
+		{"FirstName": "Bob", "LastName": "Jones", "Email": "bob@acme.com"},
+	}
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	// Existing contact matches by email.
+	mockContactQueryMatch(sfClient, []salesforce.Contact{
+		{ID: "003BOB", FirstName: "Bob", LastName: "Jones", Email: "bob@acme.com"},
+	})
+	// Update fails.
+	sfClient.On("UpdateOne", mock.Anything, "Contact", "003BOB", mock.AnythingOfType("map[string]interface {}")).
+		Return(assert.AnError)
+
+	res := upsertContacts(ctx, sfClient, "001ACC", enriched, "Test Co")
+	assert.Equal(t, 0, res.Updated)
+	assert.Equal(t, 0, res.Created)
+	assert.Equal(t, 1, res.Failed)
+	sfClient.AssertExpectations(t)
+}
+
+func TestUpsertContacts_CreateFailureAfterDedupSuccess(t *testing.T) {
+	ctx := context.Background()
+
+	// Enriched contact does not match any existing contact.
+	enriched := []map[string]any{
+		{"FirstName": "New", "LastName": "Person", "Email": "new@company.com"},
+	}
+
+	sfClient := salesforcemocks.NewMockClient(t)
+	// Dedup lookup succeeds with existing contacts (none matching).
+	mockContactQueryMatch(sfClient, []salesforce.Contact{
+		{ID: "003OTHER", FirstName: "Other", LastName: "Person", Email: "other@company.com"},
+	})
+	// Create fails.
+	sfClient.On("InsertOne", mock.Anything, "Contact", mock.AnythingOfType("map[string]interface {}")).
+		Return("", assert.AnError)
+
+	res := upsertContacts(ctx, sfClient, "001ACC", enriched, "Test Co")
+	assert.Equal(t, 0, res.Updated)
+	assert.Equal(t, 0, res.Created)
+	assert.Equal(t, 1, res.Failed)
+	sfClient.AssertExpectations(t)
+}
+
+// --- writeSFIDToNotion error path ---
+
+func TestWriteSFIDToNotion_NotionUpdateError(t *testing.T) {
+	ctx := context.Background()
+	notionClient := notionmocks.NewMockClient(t)
+	// UpdatePage returns an error.
+	notionClient.On("UpdatePage", mock.Anything, "page-err", mock.Anything).
+		Return(nil, assert.AnError)
+
+	result := &model.EnrichmentResult{
+		Company: model.Company{Name: "Acme Corp", NotionPageID: "page-err"},
+	}
+
+	// Should not panic — the error is logged but not propagated.
+	writeSFIDToNotion(ctx, notionClient, result, "001SFID")
+	notionClient.AssertExpectations(t)
+}
+
+// --- extractContactsForSF edge cases ---
+
+func TestExtractContactsForSF_AnyMapStringAny(t *testing.T) {
+	// Exercises the []any → map[string]any branch.
+	fieldValues := map[string]model.FieldValue{
+		"contacts": {
+			FieldKey: "contacts",
+			Value: []any{
+				map[string]any{
+					"first_name": "Jane",
+					"last_name":  "Doe",
+					"title":      "CEO",
+					"email":      "jane@acme.com",
+				},
+			},
+		},
+	}
+
+	contacts := extractContactsForSF(fieldValues, nil)
+	assert.Len(t, contacts, 1)
+	assert.Equal(t, "Jane", contacts[0]["FirstName"])
+	assert.Equal(t, "Doe", contacts[0]["LastName"])
+	assert.Equal(t, "CEO", contacts[0]["Title"])
+	assert.Equal(t, "jane@acme.com", contacts[0]["Email"])
+}
+
+func TestExtractContactsForSF_UnsupportedValueType(t *testing.T) {
+	// Value is not a slice → default branch returns nil.
+	fieldValues := map[string]model.FieldValue{
+		"contacts": {
+			FieldKey: "contacts",
+			Value:    "not a slice",
+		},
+	}
+
+	contacts := extractContactsForSF(fieldValues, nil)
+	assert.Nil(t, contacts)
+}
+
+func TestExtractContactsForSF_EmptyItems(t *testing.T) {
+	fieldValues := map[string]model.FieldValue{
+		"contacts": {
+			FieldKey: "contacts",
+			Value:    []map[string]string{},
+		},
+	}
+
+	contacts := extractContactsForSF(fieldValues, nil)
+	assert.Nil(t, contacts)
+}
+
+func TestExtractContactsForSF_NoLastName(t *testing.T) {
+	// Contact without LastName should be skipped since SF requires it.
+	fieldValues := map[string]model.FieldValue{
+		"contacts": {
+			FieldKey: "contacts",
+			Value: []map[string]string{
+				{"first_name": "Jane"}, // No last_name.
+			},
+		},
+	}
+
+	contacts := extractContactsForSF(fieldValues, nil)
+	assert.Nil(t, contacts)
+}
+
+// --- buildSFFieldsByObject tests ---
+
+func TestBuildSFFieldsByObject_ContactFields(t *testing.T) {
+	registry := model.NewFieldRegistry([]model.FieldMapping{
+		{Key: "industry", SFField: "Industry", SFObject: "Account"},
+		{Key: "owner_email", SFField: "Email", SFObject: "Contact"},
+		{Key: "employees", SFField: "NumberOfEmployees"},
+	})
+
+	fieldValues := map[string]model.FieldValue{
+		"industry":    {FieldKey: "industry", SFField: "Industry", Value: "Tech"},
+		"owner_email": {FieldKey: "owner_email", SFField: "Email", Value: "ceo@acme.com"},
+		"employees":   {FieldKey: "employees", SFField: "NumberOfEmployees", Value: "200"},
+	}
+
+	accountFields, contactFields := buildSFFieldsByObject(fieldValues, registry)
+
+	// Industry and employees → Account, email → Contact.
+	assert.Equal(t, "Tech", accountFields["Industry"])
+	assert.Equal(t, "200", accountFields["NumberOfEmployees"])
+	assert.Equal(t, "ceo@acme.com", contactFields["Email"])
+}
+
+func TestBuildSFFieldsByObject_EmptySFField(t *testing.T) {
+	registry := model.NewFieldRegistry(nil)
+	fieldValues := map[string]model.FieldValue{
+		"notes": {FieldKey: "notes", SFField: "", Value: "some notes"}, // No SF field.
+	}
+
+	accountFields, contactFields := buildSFFieldsByObject(fieldValues, registry)
+	assert.Empty(t, accountFields)
+	assert.Empty(t, contactFields)
+}
+
+// --- ensureMinimumSFFields tests ---
+
+func TestEnsureMinimumSFFields_FallbackFromFieldValues(t *testing.T) {
+	fields := make(map[string]any)
+	company := model.Company{URL: "https://acme.com"} // No Name.
+	fieldValues := map[string]model.FieldValue{
+		"company_name": {FieldKey: "company_name", Value: "Acme Extracted"},
+	}
+
+	ensureMinimumSFFields(fields, company, fieldValues)
+
+	assert.Equal(t, "Acme Extracted", fields["Name"])
+	assert.Equal(t, "https://acme.com", fields["Website"])
+}
+
+func TestEnsureMinimumSFFields_FallbackFromDomain(t *testing.T) {
+	fields := make(map[string]any)
+	company := model.Company{URL: "https://acme.com"} // No Name.
+	fieldValues := map[string]model.FieldValue{}      // No field values either.
+
+	ensureMinimumSFFields(fields, company, fieldValues)
+
+	// Should derive name from domain.
+	assert.NotEmpty(t, fields["Name"])
+	assert.Equal(t, "https://acme.com", fields["Website"])
+}
+
+func TestEnsureMinimumSFFields_ExistingFieldsNotOverwritten(t *testing.T) {
+	fields := map[string]any{
+		"Name":    "Already Set",
+		"Website": "https://existing.com",
+	}
+	company := model.Company{Name: "Different", URL: "https://different.com"}
+
+	ensureMinimumSFFields(fields, company, nil)
+
+	assert.Equal(t, "Already Set", fields["Name"])
+	assert.Equal(t, "https://existing.com", fields["Website"])
+}
+
+// --- injectGeoFields tests ---
+
+func TestInjectGeoFields_Nil(t *testing.T) {
+	fields := make(map[string]any)
+	injectGeoFields(fields, nil)
+	assert.Empty(t, fields)
+}
+
+func TestInjectGeoFields_AllFields(t *testing.T) {
+	fields := make(map[string]any)
+	gd := &model.GeoData{
+		Latitude:       32.7767,
+		Longitude:      -96.797,
+		MSAName:        "Dallas-Fort Worth",
+		CBSACode:       "19100",
+		Classification: "Metropolitan",
+		CentroidKM:     5.2,
+		EdgeKM:         12.8,
+		CountyFIPS:     "48113",
+	}
+
+	injectGeoFields(fields, gd)
+
+	assert.Equal(t, 32.7767, fields["Longitude_and_Lattitude__Latitude__s"])  //nolint:misspell // SF field name
+	assert.Equal(t, -96.797, fields["Longitude_and_Lattitude__Longitude__s"]) //nolint:misspell // SF field name
+	assert.Equal(t, "Dallas-Fort Worth", fields["Company_MSA__c"])
+	assert.Equal(t, "19100", fields["MSA_CBSA_Code__c"])
+	assert.Equal(t, "Metropolitan", fields["Urban_Classification__c"])
+	assert.Equal(t, 5.2, fields["Distance_to_MSA_Center_km__c"])
+	assert.Equal(t, 12.8, fields["Distance_to_MSA_Edge_km__c"])
+	assert.Equal(t, "48113", fields["County_FIPS__c"])
+}
+
+func TestInjectGeoFields_PartialData(t *testing.T) {
+	fields := make(map[string]any)
+	gd := &model.GeoData{
+		Latitude:  32.7767,
+		Longitude: -96.797,
+		// No MSA, classification, etc.
+	}
+
+	injectGeoFields(fields, gd)
+
+	assert.Equal(t, 32.7767, fields["Longitude_and_Lattitude__Latitude__s"])  //nolint:misspell // SF field name
+	assert.Equal(t, -96.797, fields["Longitude_and_Lattitude__Longitude__s"]) //nolint:misspell // SF field name
+	_, hasMSA := fields["Company_MSA__c"]
+	assert.False(t, hasMSA)
 }

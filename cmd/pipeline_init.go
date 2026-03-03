@@ -226,6 +226,13 @@ func initPipeline(ctx context.Context) (*pipelineEnv, error) {
 		}
 	}
 
+	// Register default exporters.
+	p.AddExporter(pipeline.NewSalesforceExporter(sfClient, notionClient, fields, cfg, false))
+	p.AddExporter(pipeline.NewNotionExporter(notionClient))
+	if cfg.ToolJet.WebhookURL != "" {
+		p.AddExporter(pipeline.NewWebhookExporter(cfg.ToolJet.WebhookURL))
+	}
+
 	return &pipelineEnv{
 		Store:     st,
 		Pipeline:  p,
