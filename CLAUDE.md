@@ -52,6 +52,7 @@ go run ./cmd geo backfill-adv --limit 1000               # stub + geocode ADV fi
 go run ./cmd geo backfill-5500 --limit 10000             # stub + geocode Form 5500 sponsors
 go run ./cmd geo backfill-990 --limit 10000              # stub + geocode IRS EO BMF orgs
 go run ./cmd geo backfill-fdic --limit 10000             # stub + geocode FDIC institutions
+go run ./cmd geo backfill-sba --limit 10000              # stub + geocode SBA loan borrowers
 
 # Salesforce report enrichment
 go run ./cmd sfreport --report-id 00O... --limit 5       # enrich from SF report
@@ -91,7 +92,7 @@ internal/
     migrate.go              # embed.FS migration runner → fed_data.schema_migrations
     synclog.go              # sync log tracking (start, complete, fail)
     migrations/*.sql        # 99 SQL migration files (001-093)
-    dataset/                # 33 dataset implementations
+    dataset/                # 34 dataset implementations
       interface.go          # Dataset interface, Phase, Cadence, SyncResult
       schedule.go           # ShouldRun helpers: Daily, Weekly, Monthly, Quarterly, Annual
       registry.go           # Registry: maps names → Dataset impls
@@ -104,6 +105,7 @@ internal/
       fpds.go               # SAM.gov FPDS (Phase 1, daily)
       econ_census.go        # Census Economic Census (Phase 1, annual)
       ppp.go                # SBA PPP loans (Phase 1, one-time)
+      sba_7a_504.go         # SBA 7(a)/504 loans (Phase 1, quarterly)
       form_5500.go          # DOL Form 5500 ERISA plans (Phase 1, annual)
       eo_bmf.go             # IRS Exempt Org BMF (Phase 1, monthly)
       adv_part1.go          # SEC ADV Part 1A (Phase 1B, monthly)
@@ -201,7 +203,7 @@ pkg/
 - T3 gating: `"always"` or `"ambiguity_only"` (config)
 
 ### Fedsync — Dataset interface
-- Each of 33 datasets implements `Dataset` in `internal/fedsync/dataset/`
+- Each of 34 datasets implements `Dataset` in `internal/fedsync/dataset/`
 - `ShouldRun(now, lastSync)` checks cadence (daily/weekly/monthly/quarterly/annual)
 - `Sync(ctx, pool, fetcher, tempDir)` returns `*SyncResult` with row count + metadata
 - Engine iterates registry, checks `ShouldRun()`, calls `Sync()`, records in `fed_data.sync_log`
