@@ -29,6 +29,8 @@ func NewRegistry(cfg *config.Config) *Registry {
 	r.Register(&SBA7a504{})
 	r.Register(&Form5500{})
 	r.Register(&EOBMF{})
+	r.Register(&CensusGeo{})
+	r.Register(&USAspending{cfg: cfg})
 
 	// Phase 1B: Buyer Intelligence (SEC/EDGAR)
 	r.Register(&ADVPart1{})
@@ -49,6 +51,7 @@ func NewRegistry(cfg *config.Config) *Registry {
 	r.Register(&ASM{cfg: cfg})
 	r.Register(&ECI{cfg: cfg})
 	r.Register(&FDICBankFind{})
+	r.Register(&NCEN{cfg: cfg})
 
 	// Phase 3: On-Demand
 	r.Register(&ADVPart3{cfg: cfg})

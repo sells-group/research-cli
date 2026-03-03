@@ -59,6 +59,19 @@ func (m *MultiXrefBuilder) Build(ctx context.Context) (int64, map[string]int64, 
 	return total, counts, nil
 }
 
+// AllPassSQL returns the concatenated SQL of all cross-reference passes.
+// Used by CI tests to verify that every entity-bearing dataset has at least
+// one xref pass covering its table.
+func AllPassSQL() string {
+	passes := allPasses()
+	var sb strings.Builder
+	for _, p := range passes {
+		sb.WriteString(p.sql)
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
 // allPasses returns the ordered list of cross-reference match passes.
 func allPasses() []passSpec {
 	normName := NormalizeNameSQL
@@ -73,6 +86,10 @@ func allPasses() []passSpec {
 			name: "crd_adv_form_bd",
 			sql:  directCRDSQL("adv_firms", "form_bd", "a.firm_name"),
 		},
+		{
+			name: "crd_ncen_adv",
+			sql:  crdNCENAdvSQL(),
+		},
 
 		// --- Pass group 2: Direct CIK linkage (confidence 1.0) ---
 		{
@@ -83,14 +100,51 @@ func allPasses() []passSpec {
 			name: "cik_form_d_edgar",
 			sql:  cikFormDEdgarSQL(),
 		},
+		{
+			name: "cik_ncen_edgar",
+			sql:  cikNCENEdgarSQL(),
+		},
 
-		// --- Pass group 3: Direct FDIC cert linkage (confidence 0.95) ---
+		// --- Pass group 3: Direct DUNS/UEI linkage (confidence 1.0) ---
+		{
+			name: "duns_usa_fpds",
+			sql:  directDUNSSQL(),
+		},
+		{
+			name: "uei_usa_fpds",
+			sql:  directUEISQL(),
+		},
+
+		// --- Pass group 4: Direct EIN linkage (confidence 0.95) ---
+		{
+			name: "ein_5500_edgar",
+			sql: directEINSQL(
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_ein",
+				"edgar_entities", "cik", "entity_name", "ein",
+			),
+		},
+		{
+			name: "ein_eobmf_edgar",
+			sql: directEINSQL(
+				"eo_bmf", "ein", "name", "ein",
+				"edgar_entities", "cik", "entity_name", "ein",
+			),
+		},
+		{
+			name: "ein_5500_eobmf",
+			sql: directEINSQL(
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_ein",
+				"eo_bmf", "ein", "name", "ein",
+			),
+		},
+
+		// --- Pass group 4B: Direct FDIC cert linkage (confidence 0.95) ---
 		{
 			name: "fdic_sba_bank",
 			sql:  directFDICSBASQL(),
 		},
 
-		// --- Pass group 4: Exact name + zip (confidence 0.90-0.92) ---
+		// --- Pass group 5: Exact name + zip (confidence 0.90-0.92) ---
 		{
 			name: "name_zip_fpds_ppp",
 			sql: exactNameGeoSQL(
@@ -119,6 +173,168 @@ func allPasses() []passSpec {
 			name: "name_zip_fpds_epa",
 			sql: exactNameGeoSQL(
 				"fpds_contracts", "contract_id", "vendor_name", "vendor_zip",
+				"epa_facilities", "registry_id", "fac_name", "fac_zip",
+				"zip", 0.90, normName,
+			),
+		},
+
+		// Form 5500 ↔ operational datasets
+		{
+			name: "name_zip_5500_fpds",
+			sql: exactNameGeoSQL(
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_mail_us_zip",
+				"fpds_contracts", "contract_id", "vendor_name", "vendor_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_5500_ppp",
+			sql: exactNameGeoSQL(
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_mail_us_zip",
+				"ppp_loans", "loannumber", "borrowername", "borrowerzip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_5500_osha",
+			sql: exactNameGeoSQL(
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_mail_us_zip",
+				"osha_inspections", "activity_nr", "estab_name", "site_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_5500_epa",
+			sql: exactNameGeoSQL(
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_mail_us_zip",
+				"epa_facilities", "registry_id", "fac_name", "fac_zip",
+				"zip", 0.90, normName,
+			),
+		},
+
+		// EO BMF ↔ operational datasets
+		{
+			name: "name_zip_eobmf_fpds",
+			sql: exactNameGeoSQL(
+				"eo_bmf", "ein", "name", "zip",
+				"fpds_contracts", "contract_id", "vendor_name", "vendor_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_eobmf_ppp",
+			sql: exactNameGeoSQL(
+				"eo_bmf", "ein", "name", "zip",
+				"ppp_loans", "loannumber", "borrowername", "borrowerzip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_eobmf_osha",
+			sql: exactNameGeoSQL(
+				"eo_bmf", "ein", "name", "zip",
+				"osha_inspections", "activity_nr", "estab_name", "site_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_eobmf_epa",
+			sql: exactNameGeoSQL(
+				"eo_bmf", "ein", "name", "zip",
+				"epa_facilities", "registry_id", "fac_name", "fac_zip",
+				"zip", 0.90, normName,
+			),
+		},
+
+		// FDIC ↔ operational datasets
+		{
+			name: "name_zip_fdic_fpds",
+			sql: exactNameGeoSQL(
+				"fdic_institutions", "cert", "name", "zip",
+				"fpds_contracts", "contract_id", "vendor_name", "vendor_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_fdic_ppp",
+			sql: exactNameGeoSQL(
+				"fdic_institutions", "cert", "name", "zip",
+				"ppp_loans", "loannumber", "borrowername", "borrowerzip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_fdic_osha",
+			sql: exactNameGeoSQL(
+				"fdic_institutions", "cert", "name", "zip",
+				"osha_inspections", "activity_nr", "estab_name", "site_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_fdic_epa",
+			sql: exactNameGeoSQL(
+				"fdic_institutions", "cert", "name", "zip",
+				"epa_facilities", "registry_id", "fac_name", "fac_zip",
+				"zip", 0.90, normName,
+			),
+		},
+
+		// USAspending ↔ operational datasets (+ FPDS fallback for missing DUNS/UEI)
+		{
+			name: "name_zip_usa_fpds",
+			sql: exactNameGeoSQL(
+				"usaspending_awards", "award_id", "recipient_name", "recipient_zip",
+				"fpds_contracts", "contract_id", "vendor_name", "vendor_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_usa_ppp",
+			sql: exactNameGeoSQL(
+				"usaspending_awards", "award_id", "recipient_name", "recipient_zip",
+				"ppp_loans", "loannumber", "borrowername", "borrowerzip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_usa_osha",
+			sql: exactNameGeoSQL(
+				"usaspending_awards", "award_id", "recipient_name", "recipient_zip",
+				"osha_inspections", "activity_nr", "estab_name", "site_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_usa_epa",
+			sql: exactNameGeoSQL(
+				"usaspending_awards", "award_id", "recipient_name", "recipient_zip",
+				"epa_facilities", "registry_id", "fac_name", "fac_zip",
+				"zip", 0.90, normName,
+			),
+		},
+
+		// N-CEN ↔ operational datasets (zip-based, complements existing state passes)
+		{
+			name: "name_zip_ncen_ppp",
+			sql: exactNameGeoSQL(
+				"ncen_registrants", "accession_number", "registrant_name", "zip",
+				"ppp_loans", "loannumber", "borrowername", "borrowerzip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_ncen_osha",
+			sql: exactNameGeoSQL(
+				"ncen_registrants", "accession_number", "registrant_name", "zip",
+				"osha_inspections", "activity_nr", "estab_name", "site_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_ncen_epa",
+			sql: exactNameGeoSQL(
+				"ncen_registrants", "accession_number", "registrant_name", "zip",
 				"epa_facilities", "registry_id", "fac_name", "fac_zip",
 				"zip", 0.90, normName,
 			),
@@ -181,8 +397,66 @@ func allPasses() []passSpec {
 				"zip", 0.90, normName,
 			),
 		},
+		{
+			name: "name_zip_sba_usa",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"usaspending_awards", "award_id", "recipient_name", "recipient_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_ncen",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"ncen_registrants", "accession_number", "registrant_name", "zip",
+				"zip", 0.90, normName,
+			),
+		},
 
-		// --- Pass group 5: Exact name + state (confidence 0.88) ---
+		// Cross-dataset (new ↔ new, both have zip)
+		{
+			name: "name_zip_5500_fdic",
+			sql: exactNameGeoSQL(
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_mail_us_zip",
+				"fdic_institutions", "cert", "name", "zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_5500_usa",
+			sql: exactNameGeoSQL(
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_mail_us_zip",
+				"usaspending_awards", "award_id", "recipient_name", "recipient_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_eobmf_fdic",
+			sql: exactNameGeoSQL(
+				"eo_bmf", "ein", "name", "zip",
+				"fdic_institutions", "cert", "name", "zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_eobmf_usa",
+			sql: exactNameGeoSQL(
+				"eo_bmf", "ein", "name", "zip",
+				"usaspending_awards", "award_id", "recipient_name", "recipient_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_fdic_usa",
+			sql: exactNameGeoSQL(
+				"fdic_institutions", "cert", "name", "zip",
+				"usaspending_awards", "award_id", "recipient_name", "recipient_zip",
+				"zip", 0.90, normName,
+			),
+		},
+
+		// --- Pass group 6: Exact name + state (confidence 0.88) ---
 		{
 			name: "name_state_adv_osha",
 			sql: exactNameGeoSQL(
@@ -223,6 +497,86 @@ func allPasses() []passSpec {
 				"state", 0.88, normName,
 			),
 		},
+		{
+			name: "name_state_ncen_adv",
+			sql:  nameStateNCENAdvSQL(normName),
+		},
+		{
+			name: "name_state_ncen_fpds",
+			sql:  nameStateNCENFpdsSQL(normName),
+		},
+
+		// Form 5500 ↔ hub datasets (no zip on ADV/EDGAR)
+		{
+			name: "name_state_5500_adv",
+			sql: exactNameGeoSQL(
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_mail_us_state",
+				"adv_firms", "crd_number", "firm_name", "state",
+				"state", 0.88, normName,
+			),
+		},
+		{
+			name: "name_state_5500_edgar",
+			sql: exactNameGeoSQL(
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_mail_us_state",
+				"edgar_entities", "cik", "entity_name", "state_of_business",
+				"state", 0.88, normName,
+			),
+		},
+
+		// EO BMF ↔ hub datasets
+		{
+			name: "name_state_eobmf_adv",
+			sql: exactNameGeoSQL(
+				"eo_bmf", "ein", "name", "state",
+				"adv_firms", "crd_number", "firm_name", "state",
+				"state", 0.88, normName,
+			),
+		},
+		{
+			name: "name_state_eobmf_edgar",
+			sql: exactNameGeoSQL(
+				"eo_bmf", "ein", "name", "state",
+				"edgar_entities", "cik", "entity_name", "state_of_business",
+				"state", 0.88, normName,
+			),
+		},
+
+		// FDIC ↔ hub datasets (state column is "stalp")
+		{
+			name: "name_state_fdic_adv",
+			sql: exactNameGeoSQL(
+				"fdic_institutions", "cert", "name", "stalp",
+				"adv_firms", "crd_number", "firm_name", "state",
+				"state", 0.88, normName,
+			),
+		},
+		{
+			name: "name_state_fdic_edgar",
+			sql: exactNameGeoSQL(
+				"fdic_institutions", "cert", "name", "stalp",
+				"edgar_entities", "cik", "entity_name", "state_of_business",
+				"state", 0.88, normName,
+			),
+		},
+
+		// USAspending ↔ hub datasets
+		{
+			name: "name_state_usa_adv",
+			sql: exactNameGeoSQL(
+				"usaspending_awards", "award_id", "recipient_name", "recipient_state",
+				"adv_firms", "crd_number", "firm_name", "state",
+				"state", 0.88, normName,
+			),
+		},
+		{
+			name: "name_state_usa_edgar",
+			sql: exactNameGeoSQL(
+				"usaspending_awards", "award_id", "recipient_name", "recipient_state",
+				"edgar_entities", "cik", "entity_name", "state_of_business",
+				"state", 0.88, normName,
+			),
+		},
 
 		// SBA 7(a)/504 ↔ hub datasets (name+state, no zip on ADV/EDGAR)
 		{
@@ -242,7 +596,33 @@ func allPasses() []passSpec {
 			),
 		},
 
-		// --- Pass group 6: Fuzzy name + state (confidence 0.60-0.90) ---
+		// EDGAR ↔ remaining operational datasets (previously missing)
+		{
+			name: "name_state_edgar_ppp",
+			sql: exactNameGeoSQL(
+				"edgar_entities", "cik", "entity_name", "state_of_business",
+				"ppp_loans", "loannumber", "borrowername", "borrowerstate",
+				"state", 0.88, normName,
+			),
+		},
+		{
+			name: "name_state_edgar_osha",
+			sql: exactNameGeoSQL(
+				"edgar_entities", "cik", "entity_name", "state_of_business",
+				"osha_inspections", "activity_nr", "estab_name", "site_state",
+				"state", 0.88, normName,
+			),
+		},
+		{
+			name: "name_state_edgar_epa",
+			sql: exactNameGeoSQL(
+				"edgar_entities", "cik", "entity_name", "state_of_business",
+				"epa_facilities", "registry_id", "fac_name", "fac_state",
+				"state", 0.88, normName,
+			),
+		},
+
+		// --- Pass group 7: Fuzzy name + state (confidence 0.60-0.90) ---
 		{
 			name: "fuzzy_adv_ppp",
 			sql: fuzzyNameStateSQL(
@@ -381,26 +761,13 @@ ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`,
 	)
 }
 
-// AllPassSQL returns the concatenated SQL of all cross-reference passes.
-// Used by CI tests to verify that every entity-bearing dataset has at least
-// one xref pass covering its table.
-func AllPassSQL() string {
-	passes := allPasses()
-	var sb strings.Builder
-	for _, p := range passes {
-		sb.WriteString(p.sql)
-		sb.WriteByte('\n')
-	}
-	return sb.String()
-}
-
-// directFDICSBASQL generates SQL for SBA 7(a) bank → FDIC institution direct cert matching.
-// Only matches 7(a) loans (which have bankfdicnumber) to FDIC institutions.
+// directFDICSBASQL generates SQL for matching SBA 7(a) loan bank FDIC numbers
+// to FDIC institutions by certificate number.
 func directFDICSBASQL() string {
 	return `
 INSERT INTO fed_data.entity_xref_multi
     (source_dataset, source_id, target_dataset, target_id, entity_name, match_type, confidence)
-SELECT DISTINCT ON (a.bankfdicnumber)
+SELECT DISTINCT ON (a.l2locid)
     'sba_loans',
     a.l2locid::TEXT,
     'fdic_institutions',
@@ -409,12 +776,198 @@ SELECT DISTINCT ON (a.bankfdicnumber)
     'direct_fdic_cert',
     0.95
 FROM fed_data.sba_loans a
-JOIN fed_data.fdic_institutions b ON a.bankfdicnumber = b.cert::TEXT
+JOIN fed_data.fdic_institutions b
+    ON a.bankfdicnumber = b.cert::TEXT
 WHERE a.program = '7A'
-  AND a.bankfdicnumber IS NOT NULL
-  AND a.bankfdicnumber != ''
-ORDER BY a.bankfdicnumber
+  AND a.bankfdicnumber IS NOT NULL AND a.bankfdicnumber != ''
+  AND NOT EXISTS (
+      SELECT 1 FROM fed_data.entity_xref_multi x
+      WHERE x.source_dataset = 'sba_loans' AND x.source_id = a.l2locid::TEXT
+        AND x.target_dataset = 'fdic_institutions' AND x.target_id = b.cert::TEXT
+  )
+ORDER BY a.l2locid, b.cert
 ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`
+}
+
+// directEINSQL generates SQL for direct EIN matching between two tables.
+// Normalizes EINs by stripping dashes (EDGAR stores "XX-XXXXXXX", others store "XXXXXXXXX").
+// Uses DISTINCT ON to deduplicate when a source table has multiple rows per EIN.
+func directEINSQL(
+	srcTable, srcPK, srcName, srcEIN,
+	tgtTable, tgtPK, tgtName, tgtEIN string,
+) string {
+	return fmt.Sprintf(`
+INSERT INTO fed_data.entity_xref_multi
+    (source_dataset, source_id, target_dataset, target_id, entity_name, match_type, confidence)
+SELECT DISTINCT ON (REPLACE(a.%[4]s, '-', ''))
+    '%[1]s',
+    a.%[2]s::TEXT,
+    '%[5]s',
+    b.%[6]s::TEXT,
+    a.%[3]s,
+    'direct_ein',
+    0.95
+FROM fed_data.%[1]s a
+JOIN fed_data.%[5]s b ON REPLACE(a.%[4]s, '-', '') = REPLACE(b.%[8]s, '-', '')
+WHERE a.%[4]s IS NOT NULL AND a.%[4]s != ''
+  AND b.%[8]s IS NOT NULL AND b.%[8]s != ''
+ORDER BY REPLACE(a.%[4]s, '-', '')
+ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`,
+		srcTable, srcPK, srcName, srcEIN, // 1-4
+		tgtTable, tgtPK, tgtName, tgtEIN, // 5-8
+	)
+}
+
+// directDUNSSQL generates SQL for USAspending → FPDS direct DUNS matching.
+func directDUNSSQL() string {
+	return `
+INSERT INTO fed_data.entity_xref_multi
+    (source_dataset, source_id, target_dataset, target_id, entity_name, match_type, confidence)
+SELECT DISTINCT ON (a.recipient_duns)
+    'usaspending_awards',
+    a.award_id,
+    'fpds_contracts',
+    b.contract_id,
+    a.recipient_name,
+    'direct_duns',
+    1.00
+FROM fed_data.usaspending_awards a
+JOIN fed_data.fpds_contracts b ON a.recipient_duns = b.vendor_duns
+WHERE a.recipient_duns IS NOT NULL AND a.recipient_duns != ''
+  AND b.vendor_duns IS NOT NULL AND b.vendor_duns != ''
+ORDER BY a.recipient_duns
+ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`
+}
+
+// directUEISQL generates SQL for USAspending → FPDS direct UEI matching.
+func directUEISQL() string {
+	return `
+INSERT INTO fed_data.entity_xref_multi
+    (source_dataset, source_id, target_dataset, target_id, entity_name, match_type, confidence)
+SELECT DISTINCT ON (a.recipient_uei)
+    'usaspending_awards',
+    a.award_id,
+    'fpds_contracts',
+    b.contract_id,
+    a.recipient_name,
+    'direct_uei',
+    1.00
+FROM fed_data.usaspending_awards a
+JOIN fed_data.fpds_contracts b ON a.recipient_uei = b.vendor_uei
+WHERE a.recipient_uei IS NOT NULL AND a.recipient_uei != ''
+  AND b.vendor_uei IS NOT NULL AND b.vendor_uei != ''
+ORDER BY a.recipient_uei
+ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`
+}
+
+// cikNCENEdgarSQL generates SQL for N-CEN registrant → EDGAR direct CIK matching.
+// Uses DISTINCT ON to pick the latest filing per CIK.
+func cikNCENEdgarSQL() string {
+	return `
+INSERT INTO fed_data.entity_xref_multi
+    (source_dataset, source_id, target_dataset, target_id, entity_name, match_type, confidence)
+SELECT DISTINCT ON (r.cik)
+    'ncen_registrants',
+    r.accession_number,
+    'edgar_entities',
+    e.cik,
+    r.registrant_name,
+    'direct_cik',
+    1.00
+FROM fed_data.ncen_registrants r
+JOIN fed_data.edgar_entities e ON r.cik = e.cik
+WHERE r.cik IS NOT NULL
+  AND r.cik != ''
+ORDER BY r.cik, r.filing_date DESC NULLS LAST
+ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`
+}
+
+// crdNCENAdvSQL generates SQL for N-CEN adviser → ADV firm direct CRD matching.
+// Filters to numeric CRD values only and deduplicates by adviser_crd.
+func crdNCENAdvSQL() string {
+	return `
+INSERT INTO fed_data.entity_xref_multi
+    (source_dataset, source_id, target_dataset, target_id, entity_name, match_type, confidence)
+SELECT DISTINCT ON (a.adviser_crd)
+    'ncen_advisers',
+    a.adviser_crd,
+    'adv_firms',
+    b.crd_number::TEXT,
+    a.adviser_name,
+    'direct_crd',
+    1.00
+FROM fed_data.ncen_advisers a
+JOIN fed_data.adv_firms b ON a.adviser_crd::INTEGER = b.crd_number
+WHERE a.adviser_crd IS NOT NULL
+  AND a.adviser_crd ~ '^\d+$'
+ORDER BY a.adviser_crd
+ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`
+}
+
+// nameStateNCENAdvSQL generates SQL for N-CEN registrant → ADV firm exact
+// name+state matching. Normalizes N-CEN state from "US-XX" to bare two-letter code.
+func nameStateNCENAdvSQL(normFn func(string) string) string {
+	return fmt.Sprintf(`
+INSERT INTO fed_data.entity_xref_multi
+    (source_dataset, source_id, target_dataset, target_id, entity_name, match_type, confidence)
+SELECT DISTINCT ON (r.accession_number, b.crd_number::TEXT)
+    'ncen_registrants',
+    r.accession_number,
+    'adv_firms',
+    b.crd_number::TEXT,
+    r.registrant_name,
+    'exact_name_state',
+    0.88
+FROM fed_data.ncen_registrants r
+JOIN fed_data.adv_firms b
+    ON %s = %s
+    AND REPLACE(r.state, 'US-', '') = b.state
+WHERE r.registrant_name IS NOT NULL AND r.registrant_name != ''
+  AND b.firm_name IS NOT NULL AND b.firm_name != ''
+  AND r.state IS NOT NULL AND r.state != ''
+  AND NOT EXISTS (
+      SELECT 1 FROM fed_data.entity_xref_multi x
+      WHERE x.source_dataset = 'ncen_registrants' AND x.source_id = r.accession_number
+        AND x.target_dataset = 'adv_firms' AND x.target_id = b.crd_number::TEXT
+  )
+ORDER BY r.accession_number, b.crd_number::TEXT
+ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`,
+		normFn("r.registrant_name"),
+		normFn("b.firm_name"),
+	)
+}
+
+// nameStateNCENFpdsSQL generates SQL for N-CEN registrant → FPDS contract exact
+// name+state matching. Normalizes N-CEN state from "US-XX" to bare two-letter code.
+func nameStateNCENFpdsSQL(normFn func(string) string) string {
+	return fmt.Sprintf(`
+INSERT INTO fed_data.entity_xref_multi
+    (source_dataset, source_id, target_dataset, target_id, entity_name, match_type, confidence)
+SELECT DISTINCT ON (r.accession_number, f.contract_id::TEXT)
+    'ncen_registrants',
+    r.accession_number,
+    'fpds_contracts',
+    f.contract_id::TEXT,
+    r.registrant_name,
+    'exact_name_state',
+    0.88
+FROM fed_data.ncen_registrants r
+JOIN fed_data.fpds_contracts f
+    ON %s = %s
+    AND REPLACE(r.state, 'US-', '') = f.vendor_state
+WHERE r.registrant_name IS NOT NULL AND r.registrant_name != ''
+  AND f.vendor_name IS NOT NULL AND f.vendor_name != ''
+  AND r.state IS NOT NULL AND r.state != ''
+  AND NOT EXISTS (
+      SELECT 1 FROM fed_data.entity_xref_multi x
+      WHERE x.source_dataset = 'ncen_registrants' AND x.source_id = r.accession_number
+        AND x.target_dataset = 'fpds_contracts' AND x.target_id = f.contract_id::TEXT
+  )
+ORDER BY r.accession_number, f.contract_id::TEXT
+ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`,
+		normFn("r.registrant_name"),
+		normFn("f.vendor_name"),
+	)
 }
 
 // fuzzyNameStateSQL generates SQL for fuzzy name matching with state constraint.

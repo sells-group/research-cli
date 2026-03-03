@@ -361,14 +361,6 @@ func parseSBADate(s string) *time.Time {
 	return nil
 }
 
-// nilIfEmpty returns nil for empty strings, otherwise the string pointer.
-func nilIfEmpty(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
 // parseNullFloat parses a float64, returning nil for empty or invalid input.
 func parseNullFloat(s string) *float64 {
 	s = strings.TrimSpace(s)

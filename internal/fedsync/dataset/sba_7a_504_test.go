@@ -239,7 +239,7 @@ func TestSBA7a504_NilIfEmpty(t *testing.T) {
 	assert.Nil(t, nilIfEmpty(""))
 	v := nilIfEmpty("test")
 	require.NotNil(t, v)
-	assert.Equal(t, "test", *v)
+	assert.Equal(t, "test", v)
 }
 
 func TestSBA7a504_ParseNullFloat(t *testing.T) {

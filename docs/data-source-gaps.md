@@ -8,7 +8,7 @@ Last updated: 2026-03-01
 
 ## 1. Current Coverage Summary
 
-### Fedsync Datasets (33 implementations)
+### Fedsync Datasets (34 implementations)
 
 | Phase | Dataset | Source | Cadence | Table |
 |-------|---------|--------|---------|-------|
@@ -36,6 +36,7 @@ Last updated: 2026-03-01
 | 2 | ECI | BLS Employment Cost Index | Quarterly | `fed_data.eci_data` |
 | 2 | SEC Enforcement | SEC Enforcement Actions | Monthly | `fed_data.sec_enforcement_actions` |
 | 2 | FDIC BankFind | FDIC Institution Financial Data | Weekly | `fed_data.fdic_institutions` |
+| 2 | N-CEN | SEC Form N-CEN (Investment Company Census) | Quarterly | `fed_data.ncen_registrants` |
 | 3 | ADV Part 3 | SEC Form CRS (Client Relationship Summary) | Monthly | `fed_data.adv_crs` |
 | 3 | XBRL Facts | SEC EDGAR XBRL Financial Facts | Daily | `fed_data.xbrl_facts` |
 | 3 | FRED | Federal Reserve Economic Data | Monthly | `fed_data.fred_series` |
@@ -193,12 +194,14 @@ Last updated: 2026-03-01
 - **Cadence:** Irregular
 - **Relevance:** Pre-merger Hart-Scott-Rodino filing data (public portions). Signals M&A activity in the financial services sector.
 
-#### SEC N-CEN / N-PORT (Investment Company Filings)
+#### SEC N-CEN (Investment Company Census) — DONE
 
-- **Access:** EDGAR EFTS (same access pattern as existing SEC datasets)
-- **Format:** XML
-- **Cadence:** Monthly (N-CEN) / Quarterly (N-PORT)
-- **Relevance:** Mutual fund and ETF data — identifies asset managers and their fund families. Extends current EDGAR coverage into the investment company space. Fund AUM, portfolio holdings, and expense ratios.
+- **Status:** Implemented in `internal/fedsync/dataset/ncen.go`
+- **Tables:** `fed_data.ncen_registrants`, `fed_data.ncen_funds`, `fed_data.ncen_advisers`
+- **Source:** SEC DERA quarterly ZIP files (TSV), 2018 Q3–present
+- **Data:** ~436 registrants/quarter, ~2,400 funds/quarter, ~3,800 advisers/quarter
+- **Entity Linking:** CRD numbers in adviser table, CIK in registrant table
+- **Remaining:** N-PORT (portfolio holdings) is a separate, larger dataset for Phase 2 follow-up
 
 #### SEC Regulation D (Expanded Fields)
 
@@ -447,7 +450,7 @@ New fedsync datasets using the existing `Dataset` interface in `internal/fedsync
 | 4 | **IRS Exempt Org BMF** | ~~Medium~~ | Very High | **DONE.** 1.94M rows. `eo_bmf.go` + `geo_backfill_990.go` (EIN→eo_bmf) |
 | 5 | **USAspending** | Medium | High | REST API + bulk download. Complements existing FPDS |
 | 6 | **Expanded XBRL taxonomy** | Low | High | Same source. Expand from 16 to 100+ facts. Minimal effort |
-| 7 | **SEC N-CEN / N-PORT** | Medium | Medium | EDGAR EFTS. Same access pattern as existing SEC datasets |
+| 7 | **SEC N-CEN** | ~~Medium~~ | Medium | **DONE.** 3 tables (registrants, funds, advisers). `ncen.go`. N-PORT is separate follow-up |
 
 > **Entity aggregation pattern:** Datasets #3 and #5 (NCUA, USAspending) contain entity-level records with addresses. Each should include a `geo backfill-<source>` command following the existing pattern in `cmd/geo_backfill_5500.go`, `cmd/geo_backfill_990.go`, and `cmd/geo_backfill_fdic.go`.
 
