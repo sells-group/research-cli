@@ -3,6 +3,7 @@ package dataset
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fedsync"
+	"github.com/sells-group/research-cli/internal/fedsync/resolve"
 	"github.com/sells-group/research-cli/internal/fetcher"
 )
 
@@ -433,4 +435,208 @@ func TestEngine_Run_MultipleDatasets(t *testing.T) {
 	assert.False(t, ds2.synced)
 	assert.True(t, ds3.synced)
 	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestXrefInSelection(t *testing.T) {
+	engine := &Engine{}
+
+	t.Run("xref present", func(t *testing.T) {
+		datasets := []Dataset{
+			&mockDataset{name: "fpds"},
+			&EntityXref{},
+		}
+		assert.True(t, engine.xrefInSelection(datasets))
+	})
+
+	t.Run("xref absent", func(t *testing.T) {
+		datasets := []Dataset{
+			&mockDataset{name: "fpds"},
+			&mockDataset{name: "ppp"},
+		}
+		assert.False(t, engine.xrefInSelection(datasets))
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		assert.False(t, engine.xrefInSelection(nil))
+	})
+}
+
+func TestEngine_Run_AutoTriggerXref(t *testing.T) {
+	mock, syncLog := newMockSyncLog(t)
+	mock.MatchExpectationsInOrder(false)
+
+	// An entity-bearing dataset that syncs successfully.
+	ds := &mockDataset{name: "fpds", phase: Phase1, shouldRun: true, syncRows: 10}
+	reg := &Registry{datasets: map[string]Dataset{"fpds": ds}, order: []string{"fpds"}}
+
+	// LastSuccess → never synced
+	mock.ExpectQuery("SELECT started_at FROM fed_data.sync_log").
+		WithArgs("fpds").
+		WillReturnError(errors.New("no rows in result set"))
+
+	// Start fpds sync
+	mock.ExpectQuery("INSERT INTO fed_data.sync_log").
+		WithArgs("fpds").
+		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(1)))
+	// Complete fpds sync
+	mock.ExpectExec("UPDATE fed_data.sync_log").
+		WithArgs(int64(10), pgxmock.AnyArg(), int64(1)).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	// Auto-trigger: Start entity_xref sync
+	mock.ExpectQuery("INSERT INTO fed_data.sync_log").
+		WithArgs("entity_xref").
+		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(2)))
+
+	// Stage 1: xref builder — truncate + 3 CRD-CIK passes
+	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
+	for range 3 {
+		mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+			WillReturnResult(pgxmock.NewResult("INSERT", 0))
+	}
+
+	// Stage 2: multi xref builder — truncate + 59 passes
+	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref_multi").
+		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
+	for range 59 {
+		mock.ExpectExec("INSERT INTO fed_data.entity_xref_multi").
+			WillReturnResult(pgxmock.NewResult("INSERT", 0))
+	}
+
+	// Complete entity_xref sync
+	mock.ExpectExec("UPDATE fed_data.sync_log").
+		WithArgs(int64(0), pgxmock.AnyArg(), int64(2)).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	engine := NewEngine(mock, nil, syncLog, reg, t.TempDir())
+	err := engine.Run(context.Background(), RunOpts{})
+	assert.NoError(t, err)
+	assert.True(t, ds.synced)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestEngine_Run_NoAutoTriggerWhenXrefSelected(t *testing.T) {
+	mock, syncLog := newMockSyncLog(t)
+	mock.MatchExpectationsInOrder(false)
+
+	// Entity-bearing dataset + entity_xref both selected → no auto-trigger.
+	ds := &mockDataset{name: "fpds", phase: Phase1, shouldRun: true, syncRows: 10}
+	xref := &EntityXref{}
+	reg := &Registry{
+		datasets: map[string]Dataset{"fpds": ds, "entity_xref": xref},
+		order:    []string{"fpds", "entity_xref"},
+	}
+
+	// fpds: LastSuccess → never
+	mock.ExpectQuery("SELECT started_at FROM fed_data.sync_log").
+		WithArgs("fpds").
+		WillReturnError(errors.New("no rows in result set"))
+	mock.ExpectQuery("INSERT INTO fed_data.sync_log").
+		WithArgs("fpds").
+		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(1)))
+	mock.ExpectExec("UPDATE fed_data.sync_log").
+		WithArgs(int64(10), pgxmock.AnyArg(), int64(1)).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	// entity_xref: LastSuccess → never
+	mock.ExpectQuery("SELECT started_at FROM fed_data.sync_log").
+		WithArgs("entity_xref").
+		WillReturnError(errors.New("no rows in result set"))
+	mock.ExpectQuery("INSERT INTO fed_data.sync_log").
+		WithArgs("entity_xref").
+		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(2)))
+
+	// entity_xref.Sync: Stage 1 — truncate + 3 passes
+	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref").
+		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
+	for range 3 {
+		mock.ExpectExec("INSERT INTO fed_data.entity_xref").
+			WillReturnResult(pgxmock.NewResult("INSERT", 0))
+	}
+	// Stage 2 — truncate + 59 passes
+	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref_multi").
+		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
+	for range 59 {
+		mock.ExpectExec("INSERT INTO fed_data.entity_xref_multi").
+			WillReturnResult(pgxmock.NewResult("INSERT", 0))
+	}
+
+	mock.ExpectExec("UPDATE fed_data.sync_log").
+		WithArgs(int64(0), pgxmock.AnyArg(), int64(2)).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	engine := NewEngine(mock, nil, syncLog, reg, t.TempDir())
+	err := engine.Run(context.Background(), RunOpts{})
+	assert.NoError(t, err)
+	assert.True(t, ds.synced)
+	// If auto-trigger fired, we'd have unmet expectations for a second entity_xref log entry.
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestEntityBearingDatasets(t *testing.T) {
+	// All expected entity-bearing datasets should be registered.
+	expected := []string{
+		"adv_part1", "ia_compilation", "brokercheck", "form_bd",
+		"edgar_submissions", "form_d", "ncen", "form_5500",
+		"eo_bmf", "fdic_bankfind", "usaspending", "fpds",
+		"ppp", "osha_ita", "epa_echo",
+	}
+	for _, name := range expected {
+		assert.True(t, entityBearingDatasets[name], "missing entity-bearing dataset: %s", name)
+	}
+
+	// Non-entity datasets should not be present.
+	nonEntity := []string{"entity_xref", "cbp", "qcew", "fred", "census_geo"}
+	for _, name := range nonEntity {
+		assert.False(t, entityBearingDatasets[name], "unexpected entity-bearing dataset: %s", name)
+	}
+}
+
+// TestEntityBearingDatasets_HaveXrefPasses is a CI safety net that fails when
+// a new entity-bearing dataset is added to entityBearingDatasets without
+// corresponding cross-reference passes in resolve.AllPassSQL().
+// It maps each dataset name to the fed_data table(s) it populates and asserts
+// that at least one xref pass references that table.
+func TestEntityBearingDatasets_HaveXrefPasses(t *testing.T) {
+	// Map dataset name → fed_data table name(s) that should appear in xref SQL.
+	tableMap := map[string][]string{
+		"adv_part1":         {"adv_firms"},
+		"ia_compilation":    {"adv_firms"},
+		"brokercheck":       {"brokercheck"},
+		"form_bd":           {"form_bd"},
+		"edgar_submissions": {"edgar_entities"},
+		"form_d":            {"form_d"},
+		"ncen":              {"ncen_registrants", "ncen_advisers"},
+		"form_5500":         {"form_5500"},
+		"eo_bmf":            {"eo_bmf"},
+		"fdic_bankfind":     {"fdic_institutions"},
+		"usaspending":       {"usaspending_awards"},
+		"fpds":              {"fpds_contracts"},
+		"ppp":               {"ppp_loans"},
+		"osha_ita":          {"osha_inspections"},
+		"epa_echo":          {"epa_facilities"},
+	}
+
+	allSQL := resolve.AllPassSQL()
+
+	// Every entity-bearing dataset must have at least one table covered.
+	for dsName := range entityBearingDatasets {
+		tables, ok := tableMap[dsName]
+		if !ok {
+			t.Errorf("entity-bearing dataset %q has no tableMap entry — add it to this test", dsName)
+			continue
+		}
+
+		covered := false
+		for _, tbl := range tables {
+			if strings.Contains(allSQL, "fed_data."+tbl) {
+				covered = true
+				break
+			}
+		}
+		assert.True(t, covered,
+			"entity-bearing dataset %q (tables: %v) has no xref passes — "+
+				"add cross-reference passes to resolve/multi_xref.go", dsName, tables)
+	}
 }
