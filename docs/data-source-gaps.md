@@ -121,12 +121,13 @@ Last updated: 2026-03-01
 - **Cadence:** Weekly
 - **Relevance:** IP ownership signals firm value and innovation — M&A valuation input. Assignment transfers signal ownership changes (acquisition indicator). Trademark filings for brand protection status.
 
-#### SBA 7(a) and 504 Loan Data
+#### ~~SBA 7(a) and 504 Loan Data~~ — DONE
 
-- **Access:** Bulk FOIA download
-- **Format:** CSV
+- **Access:** Bulk FOIA download via CKAN API (`data.sba.gov`)
+- **Format:** CSV (6 files: 4 for 7(a), 2 for 504)
 - **Cadence:** Quarterly
 - **Relevance:** Small business lending beyond PPP (which was one-time). Identifies firms with SBA debt — acquisition financing signal. Outstanding loan balance indicates capital structure.
+- **Implementation:** `fed_data.sba_loans` table, `sba_7a_504` dataset. Single unified table with `program` column (7A/504). 10 entity cross-reference passes including direct FDIC cert linkage for 7(a) bank matching. `geo backfill-sba` command for entity aggregation.
 
 #### CFPB Consumer Complaint Database
 
@@ -462,7 +463,7 @@ New enrichment external sources or standalone integrations:
 | 1 | **CFP Board directory** | Medium | High | Web scrape. CFP professional-to-firm mappings |
 | 2 | **PACER federal court records** | Medium | High | API with per-page cost. Litigation due diligence |
 | 3 | **CFPB complaints** | Low | Medium | Free API. Compliance risk signal |
-| 4 | **SBA 7(a)/504 loans** | Low | Medium | Bulk download. Lending data beyond PPP |
+| 4 | ~~**SBA 7(a)/504 loans**~~ | Low | Medium | **DONE** — `fed_data.sba_loans`, `sba_7a_504` dataset, quarterly via CKAN API. 10 xref passes (direct FDIC cert + name+zip/state). `geo backfill-sba` command. |
 | 5 | **OpenCorporates integration** | Medium | High | Single API for SoS entity data across all jurisdictions |
 
 ### Tier 3 — Strategic but Complex
@@ -502,5 +503,5 @@ Per-state scraper implementations:
 | **Insurance sector** | None | NAIC data, state insurance producer licenses | NIPR (commercial) or state scraping |
 | **Banking sector** | FDIC BankFind | NCUA credit unions | NCUA Call Reports |
 | **Advisory personnel** | LinkedIn (Perplexity), BrokerCheck reps | CFP Board directory, FPA/NAPFA membership | CFP Board scrape |
-| **Debt / capital structure** | PPP, SBA (historical), **Form 5500** (Schedule H plan loans) | SBA 7(a)/504, UCC filings | SBA loan data |
+| **Debt / capital structure** | PPP, **SBA 7(a)/504**, **Form 5500** (Schedule H plan loans) | UCC filings | UCC search integration |
 | **IP / innovation** | None | Patent assignments, trademark filings | USPTO API |

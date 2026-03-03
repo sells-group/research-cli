@@ -16,10 +16,10 @@ import (
 //  1. CRD-CIK matching: 3-pass strategy between ADV firms and EDGAR entities
 //     (direct sec_number, SIC-based exact name, fuzzy pg_trgm)
 //  2. Multi-dataset matching: cross-references across all entity-bearing datasets
-//     (ADV, EDGAR, BrokerCheck, Form BD, OSHA, EPA, FPDS, PPP, Form D, N-CEN,
-//     Form 5500, EO BMF, FDIC, USAspending) using direct CRD, direct CIK,
-//     direct DUNS/UEI, direct EIN, exact name+zip, exact name+state, and
-//     fuzzy name+state strategies.
+//     (ADV, EDGAR, BrokerCheck, Form BD, OSHA, EPA, FPDS, PPP, SBA 7(a)/504,
+//     Form D, N-CEN, Form 5500, EO BMF, FDIC, USAspending) using direct CRD,
+//     direct CIK, direct DUNS/UEI, direct EIN, direct FDIC cert,
+//     exact name+zip, exact name+state, and fuzzy name+state strategies.
 type EntityXref struct{}
 
 // Name implements Dataset.

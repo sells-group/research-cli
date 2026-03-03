@@ -125,7 +125,7 @@ func TestFuzzyNameStateSQL_EdgarFPDS(t *testing.T) {
 
 func TestAllPasses_Count(t *testing.T) {
 	passes := allPasses()
-	assert.Len(t, passes, 59)
+	assert.Len(t, passes, 71)
 }
 
 func TestAllPasses_UniqueNames(t *testing.T) {
@@ -158,7 +158,7 @@ func TestAllPasses_MatchTypes(t *testing.T) {
 	for _, p := range passes {
 		for _, mt := range []string{
 			"direct_crd", "direct_cik", "direct_duns", "direct_uei", "direct_ein",
-			"exact_name_zip", "exact_name_state", "fuzzy_name_state",
+			"direct_fdic_cert", "exact_name_zip", "exact_name_state", "fuzzy_name_state",
 		} {
 			quoted := "'" + mt + "'"
 			if strings.Contains(p.sql, quoted) {
@@ -171,6 +171,7 @@ func TestAllPasses_MatchTypes(t *testing.T) {
 	assert.True(t, matchTypes["direct_duns"], "missing direct_duns match type")
 	assert.True(t, matchTypes["direct_uei"], "missing direct_uei match type")
 	assert.True(t, matchTypes["direct_ein"], "missing direct_ein match type")
+	assert.True(t, matchTypes["direct_fdic_cert"], "missing direct_fdic_cert match type")
 	assert.True(t, matchTypes["exact_name_zip"], "missing exact_name_zip match type")
 	assert.True(t, matchTypes["exact_name_state"], "missing exact_name_state match type")
 	assert.True(t, matchTypes["fuzzy_name_state"], "missing fuzzy_name_state match type")
@@ -206,8 +207,8 @@ func TestMultiXrefBuilder_Build_Success(t *testing.T) {
 	builder := NewMultiXrefBuilder(mock)
 	total, counts, err := builder.Build(context.Background())
 	assert.NoError(t, err)
-	assert.Equal(t, int64(59*10), total)
-	assert.Len(t, counts, 59)
+	assert.Equal(t, int64(71*10), total)
+	assert.Len(t, counts, 71)
 	for _, c := range counts {
 		assert.Equal(t, int64(10), c)
 	}
@@ -312,9 +313,23 @@ func TestAllPassSQL(t *testing.T) {
 	assert.Contains(t, sql, "fed_data.usaspending_awards")
 	assert.Contains(t, sql, "fed_data.form_5500")
 	assert.Contains(t, sql, "fed_data.eo_bmf")
+	assert.Contains(t, sql, "fed_data.sba_loans")
 	assert.Contains(t, sql, "fed_data.brokercheck")
 	assert.Contains(t, sql, "fed_data.form_bd")
 	assert.Contains(t, sql, "fed_data.form_d")
+}
+
+func TestDirectFDICSBASQL_Content(t *testing.T) {
+	sql := directFDICSBASQL()
+	assert.Contains(t, sql, "INSERT INTO fed_data.entity_xref_multi")
+	assert.Contains(t, sql, "'sba_loans'")
+	assert.Contains(t, sql, "'fdic_institutions'")
+	assert.Contains(t, sql, "'direct_fdic_cert'")
+	assert.Contains(t, sql, "0.95")
+	assert.Contains(t, sql, "a.bankfdicnumber = b.cert::TEXT")
+	assert.Contains(t, sql, "a.program = '7A'")
+	assert.Contains(t, sql, "DISTINCT ON")
+	assert.Contains(t, sql, "ON CONFLICT")
 }
 
 func TestCIKNCENEdgarSQL_Content(t *testing.T) {

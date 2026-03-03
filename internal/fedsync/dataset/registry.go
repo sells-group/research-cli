@@ -26,6 +26,7 @@ func NewRegistry(cfg *config.Config) *Registry {
 	r.Register(&FPDS{cfg: cfg})
 	r.Register(&EconCensus{cfg: cfg})
 	r.Register(&PPP{})
+	r.Register(&SBA7a504{})
 	r.Register(&Form5500{})
 	r.Register(&EOBMF{})
 	r.Register(&CensusGeo{})

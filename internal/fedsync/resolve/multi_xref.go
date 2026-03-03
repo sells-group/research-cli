@@ -138,6 +138,12 @@ func allPasses() []passSpec {
 			),
 		},
 
+		// --- Pass group 4B: Direct FDIC cert linkage (confidence 0.95) ---
+		{
+			name: "fdic_sba_bank",
+			sql:  directFDICSBASQL(),
+		},
+
 		// --- Pass group 5: Exact name + zip (confidence 0.90-0.92) ---
 		{
 			name: "name_zip_fpds_ppp",
@@ -334,6 +340,80 @@ func allPasses() []passSpec {
 			),
 		},
 
+		// SBA 7(a)/504 ↔ operational datasets (name+zip)
+		{
+			name: "name_zip_sba_fpds",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"fpds_contracts", "contract_id", "vendor_name", "vendor_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_ppp",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"ppp_loans", "loannumber", "borrowername", "borrowerzip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_osha",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"osha_inspections", "activity_nr", "estab_name", "site_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_epa",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"epa_facilities", "registry_id", "fac_name", "fac_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_5500",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_mail_us_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_eobmf",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"eo_bmf", "ein", "name", "zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_fdic",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"fdic_institutions", "cert", "name", "zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_usa",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"usaspending_awards", "award_id", "recipient_name", "recipient_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_ncen",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"ncen_registrants", "accession_number", "registrant_name", "zip",
+				"zip", 0.90, normName,
+			),
+		},
+
 		// Cross-dataset (new ↔ new, both have zip)
 		{
 			name: "name_zip_5500_fdic",
@@ -493,6 +573,24 @@ func allPasses() []passSpec {
 			name: "name_state_usa_edgar",
 			sql: exactNameGeoSQL(
 				"usaspending_awards", "award_id", "recipient_name", "recipient_state",
+				"edgar_entities", "cik", "entity_name", "state_of_business",
+				"state", 0.88, normName,
+			),
+		},
+
+		// SBA 7(a)/504 ↔ hub datasets (name+state, no zip on ADV/EDGAR)
+		{
+			name: "name_state_sba_adv",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrstate",
+				"adv_firms", "crd_number", "firm_name", "state",
+				"state", 0.88, normName,
+			),
+		},
+		{
+			name: "name_state_sba_edgar",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrstate",
 				"edgar_entities", "cik", "entity_name", "state_of_business",
 				"state", 0.88, normName,
 			),
@@ -661,6 +759,34 @@ ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`,
 		geoJoin,              // 13
 		srcGeo,               // 14
 	)
+}
+
+// directFDICSBASQL generates SQL for matching SBA 7(a) loan bank FDIC numbers
+// to FDIC institutions by certificate number.
+func directFDICSBASQL() string {
+	return `
+INSERT INTO fed_data.entity_xref_multi
+    (source_dataset, source_id, target_dataset, target_id, entity_name, match_type, confidence)
+SELECT DISTINCT ON (a.l2locid)
+    'sba_loans',
+    a.l2locid::TEXT,
+    'fdic_institutions',
+    b.cert::TEXT,
+    a.borrname,
+    'direct_fdic_cert',
+    0.95
+FROM fed_data.sba_loans a
+JOIN fed_data.fdic_institutions b
+    ON a.bankfdicnumber = b.cert::TEXT
+WHERE a.program = '7A'
+  AND a.bankfdicnumber IS NOT NULL AND a.bankfdicnumber != ''
+  AND NOT EXISTS (
+      SELECT 1 FROM fed_data.entity_xref_multi x
+      WHERE x.source_dataset = 'sba_loans' AND x.source_id = a.l2locid::TEXT
+        AND x.target_dataset = 'fdic_institutions' AND x.target_id = b.cert::TEXT
+  )
+ORDER BY a.l2locid, b.cert
+ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`
 }
 
 // directEINSQL generates SQL for direct EIN matching between two tables.
