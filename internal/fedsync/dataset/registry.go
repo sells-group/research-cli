@@ -12,7 +12,7 @@ type Registry struct {
 	order    []string // insertion order for deterministic iteration
 }
 
-// NewRegistry creates a registry populated with all 33 datasets.
+// NewRegistry creates a registry populated with all 34 datasets.
 func NewRegistry(cfg *config.Config) *Registry {
 	r := &Registry{
 		datasets: make(map[string]Dataset),
@@ -26,6 +26,7 @@ func NewRegistry(cfg *config.Config) *Registry {
 	r.Register(&FPDS{cfg: cfg})
 	r.Register(&EconCensus{cfg: cfg})
 	r.Register(&PPP{})
+	r.Register(&SBA7a504{})
 	r.Register(&Form5500{})
 	r.Register(&EOBMF{})
 
