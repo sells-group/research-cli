@@ -28,6 +28,7 @@ func NewRegistry(cfg *config.Config) *Registry {
 	r.Register(&PPP{})
 	r.Register(&Form5500{})
 	r.Register(&EOBMF{})
+	r.Register(&CensusGeo{})
 	r.Register(&USAspending{cfg: cfg})
 
 	// Phase 1B: Buyer Intelligence (SEC/EDGAR)
