@@ -125,7 +125,7 @@ func TestFuzzyNameStateSQL_EdgarFPDS(t *testing.T) {
 
 func TestAllPasses_Count(t *testing.T) {
 	passes := allPasses()
-	assert.Len(t, passes, 15)
+	assert.Len(t, passes, 25)
 }
 
 func TestAllPasses_UniqueNames(t *testing.T) {
@@ -156,7 +156,7 @@ func TestAllPasses_MatchTypes(t *testing.T) {
 	matchTypes := make(map[string]bool)
 
 	for _, p := range passes {
-		for _, mt := range []string{"direct_crd", "direct_cik", "exact_name_zip", "exact_name_state", "fuzzy_name_state"} {
+		for _, mt := range []string{"direct_crd", "direct_cik", "direct_fdic_cert", "exact_name_zip", "exact_name_state", "fuzzy_name_state"} {
 			quoted := "'" + mt + "'"
 			if strings.Contains(p.sql, quoted) {
 				matchTypes[mt] = true
@@ -165,6 +165,7 @@ func TestAllPasses_MatchTypes(t *testing.T) {
 	}
 	assert.True(t, matchTypes["direct_crd"], "missing direct_crd match type")
 	assert.True(t, matchTypes["direct_cik"], "missing direct_cik match type")
+	assert.True(t, matchTypes["direct_fdic_cert"], "missing direct_fdic_cert match type")
 	assert.True(t, matchTypes["exact_name_zip"], "missing exact_name_zip match type")
 	assert.True(t, matchTypes["exact_name_state"], "missing exact_name_state match type")
 	assert.True(t, matchTypes["fuzzy_name_state"], "missing fuzzy_name_state match type")
@@ -200,8 +201,8 @@ func TestMultiXrefBuilder_Build_Success(t *testing.T) {
 	builder := NewMultiXrefBuilder(mock)
 	total, counts, err := builder.Build(context.Background())
 	assert.NoError(t, err)
-	assert.Equal(t, int64(15*10), total)
-	assert.Len(t, counts, 15)
+	assert.Equal(t, int64(25*10), total)
+	assert.Len(t, counts, 25)
 	for _, c := range counts {
 		assert.Equal(t, int64(10), c)
 	}
@@ -287,6 +288,36 @@ func TestMultiXrefBuilder_Build_ZeroMatches(t *testing.T) {
 		assert.Equal(t, int64(0), c)
 	}
 	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAllPassSQL(t *testing.T) {
+	sql := AllPassSQL()
+	assert.NotEmpty(t, sql)
+	assert.Contains(t, sql, "INSERT INTO fed_data.entity_xref_multi")
+	assert.Contains(t, sql, "fed_data.adv_firms")
+	assert.Contains(t, sql, "fed_data.edgar_entities")
+	assert.Contains(t, sql, "fed_data.fpds_contracts")
+	assert.Contains(t, sql, "fed_data.ppp_loans")
+	assert.Contains(t, sql, "fed_data.osha_inspections")
+	assert.Contains(t, sql, "fed_data.epa_facilities")
+	assert.Contains(t, sql, "fed_data.sba_loans")
+	assert.Contains(t, sql, "fed_data.fdic_institutions")
+	assert.Contains(t, sql, "fed_data.brokercheck")
+	assert.Contains(t, sql, "fed_data.form_bd")
+	assert.Contains(t, sql, "fed_data.form_d")
+}
+
+func TestDirectFDICSBASQL_Content(t *testing.T) {
+	sql := directFDICSBASQL()
+	assert.Contains(t, sql, "INSERT INTO fed_data.entity_xref_multi")
+	assert.Contains(t, sql, "'sba_loans'")
+	assert.Contains(t, sql, "'fdic_institutions'")
+	assert.Contains(t, sql, "'direct_fdic_cert'")
+	assert.Contains(t, sql, "0.95")
+	assert.Contains(t, sql, "a.bankfdicnumber = b.cert::TEXT")
+	assert.Contains(t, sql, "a.program = '7A'")
+	assert.Contains(t, sql, "DISTINCT ON")
+	assert.Contains(t, sql, "ON CONFLICT")
 }
 
 func TestMultiXrefBuilder_Build_VaryingCounts(t *testing.T) {

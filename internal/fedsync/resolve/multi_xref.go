@@ -3,6 +3,7 @@ package resolve
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
@@ -83,7 +84,13 @@ func allPasses() []passSpec {
 			sql:  cikFormDEdgarSQL(),
 		},
 
-		// --- Pass group 3: Exact name + zip (confidence 0.92) ---
+		// --- Pass group 3: Direct FDIC cert linkage (confidence 0.95) ---
+		{
+			name: "fdic_sba_bank",
+			sql:  directFDICSBASQL(),
+		},
+
+		// --- Pass group 4: Exact name + zip (confidence 0.90-0.92) ---
 		{
 			name: "name_zip_fpds_ppp",
 			sql: exactNameGeoSQL(
@@ -117,7 +124,65 @@ func allPasses() []passSpec {
 			),
 		},
 
-		// --- Pass group 4: Exact name + state (confidence 0.88) ---
+		// SBA 7(a)/504 ↔ operational datasets (name+zip)
+		{
+			name: "name_zip_sba_fpds",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"fpds_contracts", "contract_id", "vendor_name", "vendor_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_ppp",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"ppp_loans", "loannumber", "borrowername", "borrowerzip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_osha",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"osha_inspections", "activity_nr", "estab_name", "site_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_epa",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"epa_facilities", "registry_id", "fac_name", "fac_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_5500",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_mail_us_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_eobmf",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"eo_bmf", "ein", "name", "zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_sba_fdic",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"fdic_institutions", "cert", "name", "zip",
+				"zip", 0.90, normName,
+			),
+		},
+
+		// --- Pass group 5: Exact name + state (confidence 0.88) ---
 		{
 			name: "name_state_adv_osha",
 			sql: exactNameGeoSQL(
@@ -159,7 +224,25 @@ func allPasses() []passSpec {
 			),
 		},
 
-		// --- Pass group 5: Fuzzy name + state (confidence 0.60-0.90) ---
+		// SBA 7(a)/504 ↔ hub datasets (name+state, no zip on ADV/EDGAR)
+		{
+			name: "name_state_sba_adv",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrstate",
+				"adv_firms", "crd_number", "firm_name", "state",
+				"state", 0.88, normName,
+			),
+		},
+		{
+			name: "name_state_sba_edgar",
+			sql: exactNameGeoSQL(
+				"sba_loans", "l2locid", "borrname", "borrstate",
+				"edgar_entities", "cik", "entity_name", "state_of_business",
+				"state", 0.88, normName,
+			),
+		},
+
+		// --- Pass group 6: Fuzzy name + state (confidence 0.60-0.90) ---
 		{
 			name: "fuzzy_adv_ppp",
 			sql: fuzzyNameStateSQL(
@@ -296,6 +379,42 @@ ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`,
 		geoJoin,              // 13
 		srcGeo,               // 14
 	)
+}
+
+// AllPassSQL returns the concatenated SQL of all cross-reference passes.
+// Used by CI tests to verify that every entity-bearing dataset has at least
+// one xref pass covering its table.
+func AllPassSQL() string {
+	passes := allPasses()
+	var sb strings.Builder
+	for _, p := range passes {
+		sb.WriteString(p.sql)
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
+// directFDICSBASQL generates SQL for SBA 7(a) bank → FDIC institution direct cert matching.
+// Only matches 7(a) loans (which have bankfdicnumber) to FDIC institutions.
+func directFDICSBASQL() string {
+	return `
+INSERT INTO fed_data.entity_xref_multi
+    (source_dataset, source_id, target_dataset, target_id, entity_name, match_type, confidence)
+SELECT DISTINCT ON (a.bankfdicnumber)
+    'sba_loans',
+    a.l2locid::TEXT,
+    'fdic_institutions',
+    b.cert::TEXT,
+    a.borrname,
+    'direct_fdic_cert',
+    0.95
+FROM fed_data.sba_loans a
+JOIN fed_data.fdic_institutions b ON a.bankfdicnumber = b.cert::TEXT
+WHERE a.program = '7A'
+  AND a.bankfdicnumber IS NOT NULL
+  AND a.bankfdicnumber != ''
+ORDER BY a.bankfdicnumber
+ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`
 }
 
 // fuzzyNameStateSQL generates SQL for fuzzy name matching with state constraint.
