@@ -363,3 +363,56 @@ func TestStateVariants(t *testing.T) {
 		assert.Equal(t, tc.want, got, "stateVariants(%q)", tc.input)
 	}
 }
+
+// --- ExtractStructuredAddress additional coverage ---
+
+func TestExtractStructuredAddress_SectionHeaderPreference(t *testing.T) {
+	// Two city/state/zip matches: one far from the header, one near.
+	// The function should prefer the match closest to the section header.
+	md := `Some unrelated info about Boulder, CO 80302 is here.
+
+Much more text in between to space things out.
+
+**Business Address**
+789 Commerce Drive
+Austin, TX 78701
+
+Phone: (512) 555-1234`
+
+	street, city, state, zip, ok := ExtractStructuredAddress(md, "[bbb] Test Corp")
+	assert.True(t, ok, "should find address")
+	assert.Equal(t, "Austin", city, "should prefer match near Business Address header")
+	assert.Equal(t, "TX", state)
+	assert.Equal(t, "78701", zip)
+	assert.Equal(t, "789 Commerce Drive", street)
+}
+
+func TestExtractStructuredAddress_SuiteLine(t *testing.T) {
+	// Street address followed by a suite line continuation.
+	md := `**Principal Office**
+250 Innovation Parkway
+Suite 400
+Chicago, IL 60601
+
+Registered Agent: Jane Doe`
+
+	street, city, state, zip, ok := ExtractStructuredAddress(md, "[sos] Suite Test Corp")
+	assert.True(t, ok, "should find address")
+	assert.Equal(t, "250 Innovation Parkway, Suite 400", street, "should include suite continuation")
+	assert.Equal(t, "Chicago", city)
+	assert.Equal(t, "IL", state)
+	assert.Equal(t, "60601", zip)
+}
+
+func TestExtractStructuredAddress_EmbeddedStreet(t *testing.T) {
+	// Street address is embedded within a sentence (not a standalone line).
+	md := `The company is headquartered at 1500 Market Street
+Philadelphia, PA 19102`
+
+	street, city, state, zip, ok := ExtractStructuredAddress(md, "[sos] Embedded Test")
+	assert.True(t, ok, "should find address")
+	assert.Equal(t, "1500 Market Street", street, "should extract embedded street address")
+	assert.Equal(t, "Philadelphia", city)
+	assert.Equal(t, "PA", state)
+	assert.Equal(t, "19102", zip)
+}

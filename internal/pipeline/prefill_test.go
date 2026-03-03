@@ -1,9 +1,13 @@
 package pipeline
 
 import (
+	"context"
+	"regexp"
 	"testing"
 
+	"github.com/pashagolub/pgxmock/v4"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/sells-group/research-cli/internal/model"
 )
@@ -214,4 +218,153 @@ func TestSourcingModeQuestionFiltering(t *testing.T) {
 func TestFormatCRDSource(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "adv_filing (CRD 12345)", FormatCRDSource(12345))
+}
+
+// --- prefillFromADV tests ---
+
+func TestPrefillFromADV_NilPool(t *testing.T) {
+	t.Parallel()
+	answers, err := prefillFromADV(context.Background(), nil, 12345, []model.Question{
+		{ID: "q1", FieldKey: "aum_total"},
+	})
+	assert.NoError(t, err)
+	assert.Nil(t, answers)
+}
+
+func TestPrefillFromADV_ZeroCRD(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	answers, err := prefillFromADV(context.Background(), pool, 0, []model.Question{
+		{ID: "q1", FieldKey: "aum_total"},
+	})
+	assert.NoError(t, err)
+	assert.Nil(t, answers)
+}
+
+func TestPrefillFromADV_NoRelevantQuestions(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	answers, err := prefillFromADV(context.Background(), pool, 12345, []model.Question{
+		{ID: "q1", FieldKey: "services_offered"},
+		{ID: "q2", FieldKey: "year_founded"},
+	})
+	assert.NoError(t, err)
+	assert.Nil(t, answers)
+}
+
+func TestPrefillFromADV_CRDNotFound(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	pool.ExpectQuery(regexp.QuoteMeta("SELECT aum, num_employees, num_accounts")).
+		WithArgs(12345).
+		WillReturnRows(pgxmock.NewRows([]string{"aum", "num_employees", "num_accounts", "sec_registered", "exempt_reporting", "state_registered", "has_any_drp"}))
+
+	answers, err := prefillFromADV(context.Background(), pool, 12345, []model.Question{
+		{ID: "q1", FieldKey: "aum_total"},
+	})
+	assert.NoError(t, err)
+	assert.Nil(t, answers)
+}
+
+func TestPrefillFromADV_HappyPath(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	aum := int64(500_000_000)
+	employees := 25
+	accounts := 150
+	secReg := true
+	exempt := false
+	stateReg := false
+	drp := false
+
+	pool.ExpectQuery(regexp.QuoteMeta("SELECT aum, num_employees, num_accounts")).
+		WithArgs(12345).
+		WillReturnRows(pgxmock.NewRows([]string{"aum", "num_employees", "num_accounts", "sec_registered", "exempt_reporting", "state_registered", "has_any_drp"}).
+			AddRow(&aum, &employees, &accounts, &secReg, &exempt, &stateReg, &drp))
+
+	questions := []model.Question{
+		{ID: "q1", FieldKey: "aum_total"},
+		{ID: "q2", FieldKey: "total_employees"},
+		{ID: "q3", FieldKey: "services_offered"}, // not an ADV field — should not appear
+	}
+
+	answers, err := prefillFromADV(context.Background(), pool, 12345, questions)
+	assert.NoError(t, err)
+	require.Len(t, answers, 2)
+
+	assert.Equal(t, "aum_total", answers[0].FieldKey)
+	assert.Equal(t, int64(500_000_000), answers[0].Value)
+	assert.Equal(t, 0.9, answers[0].Confidence)
+	assert.Equal(t, "adv_filing", answers[0].Source)
+
+	assert.Equal(t, "total_employees", answers[1].FieldKey)
+	assert.Equal(t, 25, answers[1].Value)
+}
+
+func TestPrefillFromADV_MultiFieldQuestion(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	aum := int64(100_000_000)
+	employees := 10
+	accounts := 50
+	secReg := true
+	exempt := false
+	stateReg := false
+	drp := true
+
+	pool.ExpectQuery(regexp.QuoteMeta("SELECT aum, num_employees, num_accounts")).
+		WithArgs(99999).
+		WillReturnRows(pgxmock.NewRows([]string{"aum", "num_employees", "num_accounts", "sec_registered", "exempt_reporting", "state_registered", "has_any_drp"}).
+			AddRow(&aum, &employees, &accounts, &secReg, &exempt, &stateReg, &drp))
+
+	// Question with comma-separated field keys — both are ADV fields.
+	questions := []model.Question{
+		{ID: "q1", FieldKey: "total_employees, num_accounts"},
+	}
+
+	answers, err := prefillFromADV(context.Background(), pool, 99999, questions)
+	assert.NoError(t, err)
+	require.Len(t, answers, 2)
+	assert.Equal(t, "total_employees", answers[0].FieldKey)
+	assert.Equal(t, "num_accounts", answers[1].FieldKey)
+}
+
+func TestPrefillFromADV_NullColumns(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer pool.Close()
+
+	// All nullable columns returned as nil.
+	pool.ExpectQuery(regexp.QuoteMeta("SELECT aum, num_employees, num_accounts")).
+		WithArgs(12345).
+		WillReturnRows(pgxmock.NewRows([]string{"aum", "num_employees", "num_accounts", "sec_registered", "exempt_reporting", "state_registered", "has_any_drp"}).
+			AddRow(nil, nil, nil, nil, nil, nil, nil))
+
+	questions := []model.Question{
+		{ID: "q1", FieldKey: "aum_total"},
+		{ID: "q2", FieldKey: "regulatory_status"}, // derived — always returns value
+	}
+
+	answers, err := prefillFromADV(context.Background(), pool, 12345, questions)
+	assert.NoError(t, err)
+	// aum_total should be skipped (nil), regulatory_status should be "Unknown".
+	require.Len(t, answers, 1)
+	assert.Equal(t, "regulatory_status", answers[0].FieldKey)
+	assert.Equal(t, "Unknown", answers[0].Value)
 }

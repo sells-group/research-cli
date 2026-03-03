@@ -125,6 +125,26 @@ Examples:
 		}
 		defer env.Close()
 
+		// Register exporters based on output format.
+		switch csvrunFormat {
+		case "sf-report-csv":
+			outPath := csvrunOutput
+			if outPath == "" {
+				outPath = "enrichment-sfreport.csv"
+			}
+			env.Pipeline.AddExporter(pipeline.NewCSVExporter(pipeline.ExportFormatSFReport, outPath, sfReportCompanies))
+			env.Pipeline.AddExporter(pipeline.NewProvenanceCSVExporter(strings.TrimSuffix(outPath, ".csv") + "-provenance.csv"))
+		case "grata-csv":
+			outPath := csvrunOutput
+			if outPath == "" {
+				outPath = "enrichment-grata.csv"
+			}
+			env.Pipeline.AddExporter(pipeline.NewCSVExporter(pipeline.ExportFormatGrata, outPath, nil))
+			env.Pipeline.AddExporter(pipeline.NewProvenanceCSVExporter(strings.TrimSuffix(outPath, ".csv") + "-provenance.csv"))
+		default:
+			env.Pipeline.AddExporter(pipeline.NewJSONExporter(csvrunOutput))
+		}
+
 		// Process companies concurrently.
 		g, gCtx := errgroup.WithContext(ctx)
 		g.SetLimit(csvrunConcurrency)
@@ -165,29 +185,9 @@ Examples:
 			zap.Int64("failed", failed.Load()),
 		)
 
-		// Write results.
-		switch csvrunFormat {
-		case "sf-report-csv":
-			outPath := csvrunOutput
-			if outPath == "" {
-				outPath = "enrichment-sfreport.csv"
-			}
-			if err := pipeline.ExportSFReportCSV(results, sfReportCompanies, outPath); err != nil {
-				return err
-			}
-			zap.L().Info("csvrun: sf-report csv written", zap.String("path", outPath))
-		case "grata-csv":
-			outPath := csvrunOutput
-			if outPath == "" {
-				outPath = "enrichment-grata.csv"
-			}
-			if err := pipeline.ExportGrataCSV(results, outPath); err != nil {
-				return err
-			}
-		default:
-			if err := writeResults(results); err != nil {
-				return err
-			}
+		// Flush exporters (write CSV/JSON files).
+		if err := env.Pipeline.FlushExporters(ctx); err != nil {
+			return eris.Wrap(err, "csvrun: flush exporters")
 		}
 
 		// Comparison report.
@@ -273,6 +273,10 @@ func initOfflinePipeline(ctx context.Context) (*pipelineEnv, error) {
 
 	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, nil, nil, nil, nil, questions, fields)
 
+	// Register default exporters for offline mode.
+	p.AddExporter(pipeline.NewSalesforceExporter(sfClient, notionClient, fields, cfg, false))
+	p.AddExporter(pipeline.NewNotionExporter(notionClient))
+
 	return &pipelineEnv{
 		Store:     st,
 		Pipeline:  p,
@@ -347,23 +351,4 @@ func validateAPIKeys() error {
 	}
 
 	return nil
-}
-
-// writeResults writes results to the output file or stdout.
-func writeResults(results []*model.EnrichmentResult) error {
-	var w *os.File
-	if csvrunOutput != "" {
-		f, err := os.Create(csvrunOutput) // #nosec G304 -- path from CLI flag
-		if err != nil {
-			return eris.Wrap(err, "csvrun: create output file")
-		}
-		defer f.Close() //nolint:errcheck
-		w = f
-	} else {
-		w = os.Stdout
-	}
-
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(results)
 }

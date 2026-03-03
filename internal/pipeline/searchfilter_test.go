@@ -162,6 +162,8 @@ func TestURLSlug(t *testing.T) {
 		{"https://www.bbb.org/", ""},
 		{"https://www.bbb.org", ""},
 		{"not a url ://bad", ""},
+		// Path without leading slash — no LastIndex("/") match.
+		{"https://example.com/SingleSegment", "singlesegment"},
 	}
 
 	for _, tc := range tests {
@@ -223,5 +225,26 @@ func TestNormalizeName(t *testing.T) {
 	for _, tc := range tests {
 		got := normalizeName(tc.input)
 		assert.Equal(t, tc.want, got, "normalizeName(%q)", tc.input)
+	}
+}
+
+func TestFuzzyNameMatch_NormalizedEmpty(t *testing.T) {
+	// Company names that are entirely business suffixes produce an empty
+	// normalized form. fuzzyNameMatch should return false because there is
+	// no meaningful name to match against.
+	tests := []struct {
+		text        string
+		companyName string
+	}{
+		{"Some BBB profile content", "Inc."},
+		{"Filing details page", "LLC"},
+		{"Business listing", "Corp."},
+		{"State registration", "Corporation"},
+		{"More content here", "Ltd."},
+	}
+
+	for _, tc := range tests {
+		got := fuzzyNameMatch(tc.text, tc.companyName)
+		assert.False(t, got, "fuzzyNameMatch(%q, %q) should be false when normalizeName returns empty", tc.text, tc.companyName)
 	}
 }

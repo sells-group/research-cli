@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestParseGrataCSV_RealFile(t *testing.T) {
@@ -1144,4 +1145,122 @@ func TestCompareField_NAICS_Hierarchical(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTruncate(t *testing.T) {
+	assert.Equal(t, "hello", truncate("hello", 10))
+	assert.Equal(t, "hel...", truncate("hello world", 6))
+	assert.Equal(t, "he", truncate("hello", 2))
+	assert.Equal(t, "", truncate("", 5))
+	assert.Equal(t, "hello world", truncate("hello world", 11))
+}
+
+func TestContains(t *testing.T) {
+	assert.True(t, contains([]string{"a", "b", "c"}, "b"))
+	assert.False(t, contains([]string{"a", "b", "c"}, "d"))
+	assert.False(t, contains(nil, "a"))
+	assert.False(t, contains([]string{}, "a"))
+}
+
+func TestFloatStr(t *testing.T) {
+	assert.Equal(t, "", floatStr(0))
+	assert.Equal(t, "3.14", floatStr(3.14))
+	assert.Equal(t, "100", floatStr(100.0))
+}
+
+func TestIntStr(t *testing.T) {
+	assert.Equal(t, "", intStr(0))
+	assert.Equal(t, "42", intStr(42))
+	assert.Equal(t, "-1", intStr(-1))
+}
+
+func TestNumericProximity_NonNumeric(t *testing.T) {
+	t.Parallel()
+	// When either input is non-numeric, parseNumeric returns !ok and
+	// numericProximity should return 0.
+	assert.Equal(t, float64(0), numericProximity("abc", "100"))
+	assert.Equal(t, float64(0), numericProximity("100", "xyz"))
+	assert.Equal(t, float64(0), numericProximity("abc", "xyz"))
+}
+
+func TestNormalizeGrataBusinessModel(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty string returns empty", "", ""},
+		{"unrecognized returns raw input", "Underwater Basket Weaving", "Underwater Basket Weaving"},
+		{"recognized canonical returns canonical", "Services", "Services"},
+		{"recognized keyword returns canonical", "B2B Service Provider", "Services"},
+		{"manufacturer keyword", "Manufacturing Company", "Manufacturer"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := normalizeGrataBusinessModel(tc.raw)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestGetColFloat_InvalidFloat(t *testing.T) {
+	t.Parallel()
+	row := []string{"abc"}
+	colIdx := map[string]int{"Rating": 0}
+	got := getColFloat(row, colIdx, "Rating")
+	assert.Equal(t, float64(0), got)
+}
+
+func TestGetColInt_InvalidInt(t *testing.T) {
+	t.Parallel()
+	row := []string{"not-a-number"}
+	colIdx := map[string]int{"Count": 0}
+	got := getColInt(row, colIdx, "Count")
+	assert.Equal(t, 0, got)
+}
+
+func TestParseGrataCSV_AllOptionalColumns(t *testing.T) {
+	t.Parallel()
+	content := `Domain,Name,City,State,Zip Code,Mailing Address,Primary Phone,Employee Estimate,Revenue Estimate,Executive Linkedin,NAICS 6,Year Founded,Description,Primary Email,Total Review Count,Aggregate Rating,Executive First Name,Executive Last Name,Executive Title,Business Model
+acme.com,Acme Corp,DENVER,COLORADO,80202,456 Oak Ave,303-555-1234,75,$10000000,https://linkedin.com/in/acme,541511,2005,Leading tech firm,hello@acme.com,250,4.8,Alice,Smith,CEO,Services
+`
+	path := filepath.Join(t.TempDir(), "all_optional.csv")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	companies, err := ParseGrataCSV(path)
+	assert.NoError(t, err)
+	assert.Len(t, companies, 1)
+
+	c := companies[0]
+	assert.Equal(t, "https://acme.com", c.URL)
+	assert.Equal(t, "Acme Corp", c.Name)
+	assert.Equal(t, "Denver", c.City)
+	assert.Equal(t, "CO", c.State)
+	assert.Equal(t, "Denver, CO", c.Location)
+	assert.Equal(t, "80202", c.ZipCode)
+	assert.Equal(t, "456 Oak Ave", c.Street)
+
+	// Verify PreSeeded map contains all expected optional fields.
+	ps := c.PreSeeded
+	assert.NotNil(t, ps, "PreSeeded should not be nil when optional columns are present")
+
+	assert.Equal(t, "303-555-1234", ps["phone"])
+	assert.Equal(t, 75, ps["employee_count"])
+	assert.Equal(t, "$10000000", ps["revenue_range"])
+	assert.Equal(t, "https://linkedin.com/in/acme", ps["linkedin_url"])
+	assert.Equal(t, "541511", ps["naics_code"])
+	assert.Equal(t, "2005", ps["year_founded"])
+	assert.Equal(t, "Leading tech firm", ps["description"])
+	assert.Equal(t, "hello@acme.com", ps["email"])
+	assert.Equal(t, 250, ps["google_reviews_count"])
+	assert.Equal(t, 4.8, ps["google_reviews_rating"])
+	assert.Equal(t, "Alice", ps["exec_first_name"])
+	assert.Equal(t, "Smith", ps["exec_last_name"])
+	assert.Equal(t, "CEO", ps["exec_title"])
+	assert.Equal(t, "Services", ps["business_model"])
+	assert.Equal(t, "80202", ps["hq_zip"])
 }

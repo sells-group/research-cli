@@ -12,7 +12,6 @@ import (
 	"github.com/jomei/notionapi"
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/config"
 	"github.com/sells-group/research-cli/internal/model"
@@ -33,9 +32,10 @@ type GateResult struct {
 	MissingRequired []string       `json:"missing_required,omitempty"`
 }
 
-// QualityGate implements Phase 9: evaluate quality score, update Salesforce,
-// send to ToolJet for manual review if needed, and update Notion status.
-func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *model.FieldRegistry, questions []model.Question, sfClient salesforce.Client, notionClient notion.Client, cfg *config.Config) (*GateResult, error) {
+// ComputeGateResult evaluates the quality gate as a pure scoring function with
+// no I/O. Computes score, validates required fields, checks completeness floor,
+// and returns a GateResult. Does not write to SF, Notion, or webhooks.
+func ComputeGateResult(result *model.EnrichmentResult, fields *model.FieldRegistry, questions []model.Question, cfg *config.Config) *GateResult {
 	breakdown := ComputeScore(result.FieldValues, fields, questions, result.Answers, cfg.Pipeline.QualityWeights)
 	score := breakdown.Final
 	result.Score = score
@@ -47,7 +47,6 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 		Passed:         score >= threshold,
 	}
 
-	// Validate required fields before writing to SF.
 	if missing := validateRequiredFields(result.FieldValues, fields); len(missing) > 0 {
 		gate.MissingRequired = missing
 		zap.L().Warn("gate: missing required fields",
@@ -56,7 +55,6 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 		)
 	}
 
-	// Check minimum completeness floor.
 	if cfg.Pipeline.MinCompletenessThreshold > 0 && breakdown.Completeness < cfg.Pipeline.MinCompletenessThreshold {
 		gate.Passed = false
 		zap.L().Warn("gate: completeness below minimum floor",
@@ -66,135 +64,7 @@ func QualityGate(ctx context.Context, result *model.EnrichmentResult, fields *mo
 		)
 	}
 
-	// Run SF/ToolJet and Notion updates concurrently — they are independent.
-	g, gCtx := errgroup.WithContext(ctx)
-
-	var sfErr, notionErr error
-
-	// SF or ToolJet update.
-	g.Go(func() error {
-		if gate.Passed && sfClient != nil {
-			accountFields, contactFields := buildSFFieldsByObject(result.FieldValues, fields)
-			if result.Report != "" {
-				accountFields["Enrichment_Report__c"] = result.Report
-			}
-			ensureMinimumSFFields(accountFields, result.Company, result.FieldValues)
-			injectGeoFields(accountFields, result.GeoData)
-
-			accountID := result.Company.SalesforceID
-
-			if accountID != "" {
-				// Existing account — update.
-				if len(accountFields) > 0 {
-					if err := salesforce.UpdateAccount(gCtx, sfClient, accountID, accountFields); err != nil {
-						sfErr = err
-						zap.L().Error("gate: salesforce update failed",
-							zap.String("company", result.Company.Name),
-							zap.Error(err),
-						)
-						return eris.Wrap(err, "gate: sf update")
-					}
-					gate.SFUpdated = true
-				}
-			} else {
-				// No SF ID — check for existing Account by website before creating.
-				resolvedID, err := resolveOrCreateAccount(gCtx, sfClient, notionClient, result, accountFields, gate)
-				if err != nil {
-					sfErr = err
-					return eris.Wrap(err, "gate: sf resolve or create")
-				}
-				accountID = resolvedID
-			}
-
-			// Upsert Contacts — dedup by email/name, then create or update.
-			if accountID != "" {
-				contacts := extractContactsForSF(result.FieldValues, fields)
-				if contacts == nil && len(contactFields) > 0 {
-					contacts = []map[string]any{contactFields}
-				}
-				upsertContacts(gCtx, sfClient, accountID, contacts, result.Company.Name)
-			}
-		} else if !gate.Passed {
-			if cfg.ToolJet.WebhookURL != "" {
-				if err := sendToToolJet(gCtx, result, cfg.ToolJet.WebhookURL); err != nil {
-					zap.L().Warn("gate: tooljet webhook failed",
-						zap.String("company", result.Company.Name),
-						zap.Error(err),
-					)
-				} else {
-					gate.ManualReview = true
-				}
-			}
-		}
-		return nil
-	})
-
-	// Notion update.
-	g.Go(func() error {
-		if result.Company.NotionPageID != "" {
-			status := "Enriched"
-			if !gate.Passed {
-				status = "Manual Review"
-			}
-			if err := updateNotionStatus(gCtx, notionClient, result.Company.NotionPageID, status, result); err != nil {
-				notionErr = err
-				zap.L().Warn("gate: notion update failed",
-					zap.String("company", result.Company.Name),
-					zap.Error(err),
-				)
-			}
-		}
-		return nil
-	})
-
-	if err := g.Wait(); err != nil {
-		// If SF succeeded but Notion failed, log inconsistency and retry Notion once.
-		if sfErr == nil && gate.SFUpdated && notionErr != nil {
-			zap.L().Error("gate: inconsistent state — SF updated but Notion failed, retrying Notion",
-				zap.String("company", result.Company.Name),
-				zap.Error(notionErr),
-			)
-			status := "Enriched"
-			if !gate.Passed {
-				status = "Manual Review"
-			}
-			if retryErr := updateNotionStatus(ctx, notionClient, result.Company.NotionPageID, status, result); retryErr != nil {
-				zap.L().Error("gate: notion retry also failed",
-					zap.String("company", result.Company.Name),
-					zap.Error(retryErr),
-				)
-			} else {
-				notionErr = nil
-			}
-		}
-		if sfErr != nil && notionErr == nil {
-			zap.L().Error("gate: inconsistent state — Notion updated but SF failed",
-				zap.String("company", result.Company.Name),
-				zap.Error(sfErr),
-			)
-		}
-		return gate, err
-	}
-
-	// Handle case where SF didn't return an error to errgroup but Notion failed.
-	if gate.SFUpdated && notionErr != nil {
-		zap.L().Error("gate: inconsistent state — SF updated but Notion failed, retrying Notion",
-			zap.String("company", result.Company.Name),
-			zap.Error(notionErr),
-		)
-		status := "Enriched"
-		if !gate.Passed {
-			status = "Manual Review"
-		}
-		if retryErr := updateNotionStatus(ctx, notionClient, result.Company.NotionPageID, status, result); retryErr != nil {
-			zap.L().Error("gate: notion retry also failed",
-				zap.String("company", result.Company.Name),
-				zap.Error(retryErr),
-			)
-		}
-	}
-
-	return gate, nil
+	return gate
 }
 
 // validateRequiredFields checks that all registry-required fields have non-nil
@@ -623,7 +493,7 @@ func writeSFIDToNotion(ctx context.Context, notionClient notion.Client, result *
 // --- Deferred SF Write Support (Batch Mode) ---
 
 // SFWriteIntent captures a deferred Salesforce write operation for batch aggregation.
-// Built by PrepareGate, executed by FlushSFWrites.
+// Built by SalesforceExporter in deferred mode, executed by FlushSFWrites.
 type SFWriteIntent struct {
 	// AccountOp is the account operation: "create", "update", or "" (no SF write needed).
 	AccountOp string
@@ -645,151 +515,6 @@ type SFWriteIntent struct {
 
 	// Result is a back-reference to update with the resolved SF ID after flush.
 	Result *model.EnrichmentResult
-}
-
-// PrepareGate computes the quality gate score, performs dedup lookup, and builds
-// an SFWriteIntent without executing any SF writes. The Notion status update and
-// ToolJet webhook still execute immediately. Used by batch mode to aggregate
-// SF writes across many companies.
-func PrepareGate(ctx context.Context, result *model.EnrichmentResult, fields *model.FieldRegistry, questions []model.Question, sfClient salesforce.Client, notionClient notion.Client, cfg *config.Config) (*GateResult, *SFWriteIntent, error) {
-	breakdown := ComputeScore(result.FieldValues, fields, questions, result.Answers, cfg.Pipeline.QualityWeights)
-	score := breakdown.Final
-	result.Score = score
-	threshold := cfg.Pipeline.QualityScoreThreshold
-
-	gate := &GateResult{
-		Score:          score,
-		ScoreBreakdown: breakdown,
-		Passed:         score >= threshold,
-	}
-
-	// Validate required fields before writing to SF.
-	if missing := validateRequiredFields(result.FieldValues, fields); len(missing) > 0 {
-		gate.MissingRequired = missing
-		zap.L().Warn("gate: missing required fields",
-			zap.Strings("missing", missing),
-			zap.String("company", result.Company.Name),
-		)
-	}
-
-	// Check minimum completeness floor.
-	if cfg.Pipeline.MinCompletenessThreshold > 0 && breakdown.Completeness < cfg.Pipeline.MinCompletenessThreshold {
-		gate.Passed = false
-		zap.L().Warn("gate: completeness below minimum floor",
-			zap.Float64("completeness", breakdown.Completeness),
-			zap.Float64("min_threshold", cfg.Pipeline.MinCompletenessThreshold),
-			zap.String("company", result.Company.Name),
-		)
-	}
-
-	g, gCtx := errgroup.WithContext(ctx)
-
-	var intent *SFWriteIntent
-	var notionErr error
-
-	// Build SF write intent (includes dedup lookup but no writes).
-	g.Go(func() error {
-		if gate.Passed && sfClient != nil {
-			accountFields, contactFields := buildSFFieldsByObject(result.FieldValues, fields)
-			if result.Report != "" {
-				accountFields["Enrichment_Report__c"] = result.Report
-			}
-			ensureMinimumSFFields(accountFields, result.Company, result.FieldValues)
-			injectGeoFields(accountFields, result.GeoData)
-
-			intent = &SFWriteIntent{
-				AccountFields: accountFields,
-				NotionPageID:  result.Company.NotionPageID,
-				Result:        result,
-			}
-
-			accountID := result.Company.SalesforceID
-			if accountID != "" {
-				// Existing account — update.
-				intent.AccountOp = "update"
-				intent.AccountID = accountID
-			} else {
-				// No SF ID — check for existing Account by website (dedup).
-				if result.Company.URL != "" {
-					existing, findErr := salesforce.FindAccountByWebsite(gCtx, sfClient, result.Company.URL)
-					if findErr != nil {
-						zap.L().Warn("gate: dedup lookup failed, proceeding with create",
-							zap.String("company", result.Company.Name),
-							zap.Error(findErr),
-						)
-					} else if existing != nil {
-						intent.AccountOp = "update"
-						intent.AccountID = existing.ID
-						intent.DedupMatch = true
-						gate.DedupMatch = true
-						result.Company.SalesforceID = existing.ID
-						zap.L().Info("gate: dedup match found (deferred)",
-							zap.String("company", result.Company.Name),
-							zap.String("existing_sf_id", existing.ID),
-						)
-					}
-				}
-				if intent.AccountOp == "" {
-					intent.AccountOp = "create"
-				}
-			}
-
-			// Collect contacts.
-			contacts := extractContactsForSF(result.FieldValues, fields)
-			if contacts == nil && len(contactFields) > 0 {
-				contacts = []map[string]any{contactFields}
-			}
-			intent.Contacts = contacts
-		} else if !gate.Passed {
-			if cfg.ToolJet.WebhookURL != "" {
-				if err := sendToToolJet(gCtx, result, cfg.ToolJet.WebhookURL); err != nil {
-					zap.L().Warn("gate: tooljet webhook failed",
-						zap.String("company", result.Company.Name),
-						zap.Error(err),
-					)
-				} else {
-					gate.ManualReview = true
-				}
-			}
-		}
-		return nil
-	})
-
-	// Notion update (same as QualityGate).
-	g.Go(func() error {
-		if result.Company.NotionPageID != "" {
-			status := "Enriched"
-			if !gate.Passed {
-				status = "Manual Review"
-			}
-			if err := updateNotionStatus(gCtx, notionClient, result.Company.NotionPageID, status, result); err != nil {
-				notionErr = err
-				zap.L().Warn("gate: notion update failed",
-					zap.String("company", result.Company.Name),
-					zap.Error(err),
-				)
-			}
-		}
-		return nil
-	})
-
-	_ = g.Wait()
-
-	// Retry Notion on failure.
-	if notionErr != nil && result.Company.NotionPageID != "" {
-		status := "Enriched"
-		if !gate.Passed {
-			status = "Manual Review"
-		}
-		if retryErr := updateNotionStatus(ctx, notionClient, result.Company.NotionPageID, status, result); retryErr != nil {
-			zap.L().Error("gate: notion retry also failed",
-				zap.String("company", result.Company.Name),
-				zap.Error(retryErr),
-			)
-		}
-	}
-
-	return gate, intent, nil
 }
 
 // FlushFailure records a single failed SF write for error aggregation.

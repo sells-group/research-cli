@@ -199,6 +199,7 @@ func ValidateField(answer model.ExtractionAnswer, field *model.FieldMapping) *mo
 		Value:      coerced,
 		Confidence: answer.Confidence,
 		Source:     answer.SourceURL,
+		Reasoning:  answer.Reasoning,
 		Tier:       answer.Tier,
 		DataAsOf:   answer.DataAsOf,
 	}
@@ -248,6 +249,7 @@ func BuildFieldValues(answers []model.ExtractionAnswer, fields *model.FieldRegis
 					Value:      cn.Value,
 					Confidence: cn.Confidence,
 					Source:     cn.Source,
+					Reasoning:  cn.Reasoning,
 					Tier:       cn.Tier,
 				}
 			}
