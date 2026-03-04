@@ -673,58 +673,27 @@ func TestIACompilation_ParseAndLoad_XMLParsing(t *testing.T) {
 // --------------------------------------------------------------------------
 
 func TestBrokerCheck_Sync_Success(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	csvContent := "crd_number|firm_name|sec_number|main_addr_city|main_addr_state|num_branch_offices|num_registered_reps\n12345|Acme Advisors|801-12345|New York|NY|5|25\n67890|Beta Capital|801-67890|Chicago|IL|3|15\n"
-
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(mockDownloadToFileZIP(t, "firm.txt", csvContent))
-
-	bcCols := []string{"crd_number", "firm_name", "sec_number", "main_addr_city", "main_addr_state", "num_branch_offices", "num_registered_reps"}
-	expectBulkUpsert(pool, "fed_data.brokercheck", bcCols, 2)
-
+	// BrokerCheck is disabled (upstream URL returns 403).
 	ds := &BrokerCheck{}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(2), result.RowsSynced)
-	assert.NoError(t, pool.ExpectationsWereMet())
+	_, err := ds.Sync(context.Background(), nil, nil, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 func TestBrokerCheck_Sync_DownloadError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		Return(int64(0), errors.New("download failed"))
-
+	// BrokerCheck is disabled (upstream URL returns 403).
 	ds := &BrokerCheck{}
-	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
+	_, err := ds.Sync(context.Background(), nil, nil, t.TempDir())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "download")
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 func TestBrokerCheck_Sync_SkipShortRows(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	csvContent := "CRD|Firm Name|SEC Number|City|State|Offices|Reps\n12345|Short\n"
-
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(mockDownloadToFileZIP(t, "firm.txt", csvContent))
-
+	// BrokerCheck is disabled (upstream URL returns 403).
 	ds := &BrokerCheck{}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
+	_, err := ds.Sync(context.Background(), nil, nil, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 // --------------------------------------------------------------------------
@@ -732,58 +701,27 @@ func TestBrokerCheck_Sync_SkipShortRows(t *testing.T) {
 // --------------------------------------------------------------------------
 
 func TestFormBD_Sync_Success(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	csvContent := "crd_number|sec_number|firm_name|city|state|fiscal_year_end|num_reps\n11111|8-12345|Alpha Securities|Boston|MA|12|50\n22222|8-67890|Beta Brokerage|Dallas|TX|06|30\n"
-
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(mockDownloadToFileZIP(t, "bd_firm.txt", csvContent))
-
-	bdCols := []string{"crd_number", "sec_number", "firm_name", "city", "state", "fiscal_year_end", "num_reps"}
-	expectBulkUpsert(pool, "fed_data.form_bd", bdCols, 2)
-
-	ds := &FormBD{cfg: &config.Config{}}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(2), result.RowsSynced)
-	assert.NoError(t, pool.ExpectationsWereMet())
+	// FormBD is disabled (upstream URL returns 404).
+	ds := &FormBD{}
+	_, err := ds.Sync(context.Background(), nil, nil, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 func TestFormBD_Sync_DownloadError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		Return(int64(0), errors.New("download error"))
-
-	ds := &FormBD{cfg: &config.Config{}}
-	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
+	// FormBD is disabled (upstream URL returns 404).
+	ds := &FormBD{}
+	_, err := ds.Sync(context.Background(), nil, nil, t.TempDir())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "download")
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 func TestFormBD_Sync_SkipShortRows(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	csvContent := "CRD|SEC|Name|City|State|FYE|Reps\n11111|8-11111|Short\n"
-
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(mockDownloadToFileZIP(t, "bd_firm.txt", csvContent))
-
-	ds := &FormBD{cfg: &config.Config{}}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
+	// FormBD is disabled (upstream URL returns 404).
+	ds := &FormBD{}
+	_, err := ds.Sync(context.Background(), nil, nil, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 // --------------------------------------------------------------------------
@@ -791,58 +729,27 @@ func TestFormBD_Sync_SkipShortRows(t *testing.T) {
 // --------------------------------------------------------------------------
 
 func TestOSHITA_Sync_Success(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	csvContent := "activity_nr,estab_name,site_city,site_state,site_zip,naics_code,sic_code,open_date,close_case_date,case_type,safety_hlth,total_penalty\n123456789,Acme Corp,Springfield,IL,62701,523110,6211,01/15/2024,03/20/2024,R,S,5000.00\n987654321,Beta Inc,Austin,TX,78701,524210,6282,02/01/2024,,I,H,0.00\n"
-
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(mockDownloadToFileZIP(t, "severeinjury.csv", csvContent))
-
-	oshaCols := []string{"activity_nr", "estab_name", "site_city", "site_state", "site_zip", "naics_code", "sic_code", "open_date", "close_case_date", "case_type", "safety_hlth", "total_penalty"}
-	expectBulkUpsert(pool, "fed_data.osha_inspections", oshaCols, 2)
-
+	// OSHA ITA is disabled (upstream URL returns 404).
 	ds := &OSHITA{}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(2), result.RowsSynced)
-	assert.NoError(t, pool.ExpectationsWereMet())
+	_, err := ds.Sync(context.Background(), nil, nil, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 func TestOSHITA_Sync_DownloadError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		Return(int64(0), errors.New("download failed"))
-
+	// OSHA ITA is disabled (upstream URL returns 404).
 	ds := &OSHITA{}
-	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
+	_, err := ds.Sync(context.Background(), nil, nil, t.TempDir())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "download")
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 func TestOSHITA_Sync_SkipShortRows(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	csvContent := "a,b,c,d,e,f,g,h,i,j,k,l\n12345,Short Row,City\n"
-
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(mockDownloadToFileZIP(t, "severeinjury.csv", csvContent))
-
+	// OSHA ITA is disabled (upstream URL returns 404).
 	ds := &OSHITA{}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), result.RowsSynced)
+	_, err := ds.Sync(context.Background(), nil, nil, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 // --------------------------------------------------------------------------

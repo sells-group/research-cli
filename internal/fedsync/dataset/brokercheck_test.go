@@ -1,6 +1,7 @@
 package dataset
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -18,19 +19,20 @@ func TestBrokerCheck_Metadata(t *testing.T) {
 func TestBrokerCheck_ShouldRun(t *testing.T) {
 	d := &BrokerCheck{}
 
-	t.Run("nil lastSync", func(t *testing.T) {
-		assert.True(t, d.ShouldRun(time.Now(), nil))
+	t.Run("always returns false (disabled)", func(t *testing.T) {
+		assert.False(t, d.ShouldRun(time.Now(), nil))
 	})
 
-	t.Run("synced this month", func(t *testing.T) {
-		now := time.Date(2025, 6, 15, 0, 0, 0, 0, time.UTC)
-		last := time.Date(2025, 6, 3, 0, 0, 0, 0, time.UTC)
-		assert.False(t, d.ShouldRun(now, &last))
-	})
-
-	t.Run("synced last month", func(t *testing.T) {
+	t.Run("returns false even with old lastSync", func(t *testing.T) {
 		now := time.Date(2025, 6, 15, 0, 0, 0, 0, time.UTC)
 		last := time.Date(2025, 5, 20, 0, 0, 0, 0, time.UTC)
-		assert.True(t, d.ShouldRun(now, &last))
+		assert.False(t, d.ShouldRun(now, &last))
 	})
+}
+
+func TestBrokerCheck_Sync_Disabled(t *testing.T) {
+	d := &BrokerCheck{}
+	_, err := d.Sync(context.Background(), nil, nil, "")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "disabled")
 }
