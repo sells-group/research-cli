@@ -11,12 +11,11 @@ variable "dev_url" {
 env "prod" {
   url     = var.url
   dev     = var.dev_url
-  schemas = ["public", "fed_data", "geo"]
+  schemas = ["public", "fed_data"]
   src = [
     "file://internal/migrate/schema/extensions.sql",
-    "file://internal/migrate/schema/public",
-    "file://internal/migrate/schema/fed_data",
-    "file://internal/migrate/schema/geo",
+    "file://internal/migrate/schema/public.sql",
+    "file://internal/migrate/schema/fed_data.sql",
   ]
   diff {
     skip {
@@ -33,11 +32,10 @@ env "prod" {
 env "local" {
   url     = var.url
   dev     = "docker://postgis/postgis/17-3.5"
-  schemas = ["public", "fed_data", "geo"]
+  schemas = ["public", "fed_data"]
   src = [
     "file://internal/migrate/schema/extensions.sql",
-    "file://internal/migrate/schema/public",
-    "file://internal/migrate/schema/fed_data",
-    "file://internal/migrate/schema/geo",
+    "file://internal/migrate/schema/public.sql",
+    "file://internal/migrate/schema/fed_data.sql",
   ]
 }

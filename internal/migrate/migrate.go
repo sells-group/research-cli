@@ -23,7 +23,7 @@ type Options struct {
 	DevURL      string   // Dev database URL for diffing (required for Apply).
 	DryRun      bool     // Preview changes without applying.
 	AutoApprove bool     // Skip interactive approval.
-	Schemas     []string // Schemas to manage (default: public, fed_data, geo).
+	Schemas     []string // Schemas to manage (default: public, fed_data).
 	BinaryPath  string   // Path to atlas binary (default: "atlas").
 }
 
@@ -42,7 +42,7 @@ func Apply(ctx context.Context, opts Options) (*ApplyResult, error) {
 
 	schemas := opts.Schemas
 	if len(schemas) == 0 {
-		schemas = []string{"public", "fed_data", "geo"}
+		schemas = []string{"public", "fed_data"}
 	}
 
 	binaryPath := opts.BinaryPath
@@ -110,7 +110,7 @@ func Inspect(ctx context.Context, opts Options) (string, error) {
 
 	schemas := opts.Schemas
 	if len(schemas) == 0 {
-		schemas = []string{"public", "fed_data", "geo"}
+		schemas = []string{"public", "fed_data"}
 	}
 
 	binaryPath := opts.BinaryPath
@@ -138,9 +138,8 @@ func Inspect(ctx context.Context, opts Options) (string, error) {
 func buildSrcURLs() []string {
 	return []string{
 		"file://extensions.sql",
-		"file://public",
-		"file://fed_data",
-		"file://geo",
+		"file://public.sql",
+		"file://fed_data.sql",
 	}
 }
 
