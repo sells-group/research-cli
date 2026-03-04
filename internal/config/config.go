@@ -528,6 +528,8 @@ func Load() (*Config, error) {
 	v.SetDefault("geo.tiles.basemap_format", "png")
 	v.SetDefault("geo.tile_cache.max_entries", 10000)
 	v.SetDefault("geo.tile_cache.ttl_minutes", 60)
+	v.SetDefault("atlas.dev_url", "")
+	v.SetDefault("atlas.binary_path", "")
 	v.SetDefault("tiger.year", 2024)
 	v.SetDefault("tiger.temp_dir", "/tmp/tiger")
 	v.SetDefault("tiger.concurrency", 3)

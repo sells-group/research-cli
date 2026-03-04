@@ -11,12 +11,11 @@ variable "dev_url" {
 env "prod" {
   url     = var.url
   dev     = var.dev_url
-  schemas = ["public", "fed_data", "geo"]
+  schemas = ["public", "fed_data"]
   src = [
     "file://extensions.sql",
-    "file://public",
-    "file://fed_data",
-    "file://geo",
+    "file://public.sql",
+    "file://fed_data.sql",
   ]
   diff {
     skip {
@@ -33,11 +32,10 @@ env "prod" {
 env "local" {
   url     = var.url
   dev     = "docker://postgis/postgis/17-3.5"
-  schemas = ["public", "fed_data", "geo"]
+  schemas = ["public", "fed_data"]
   src = [
     "file://extensions.sql",
-    "file://public",
-    "file://fed_data",
-    "file://geo",
+    "file://public.sql",
+    "file://fed_data.sql",
   ]
 }
