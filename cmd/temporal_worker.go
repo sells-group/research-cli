@@ -53,10 +53,6 @@ var temporalFedsyncWorkerCmd = &cobra.Command{
 		}
 		defer pool.Close()
 
-		if err := fedsync.Migrate(ctx, pool); err != nil {
-			return eris.Wrap(err, "temporal-worker fedsync: migrate")
-		}
-
 		// Create temp directory.
 		tempDir := cfg.Fedsync.TempDir
 		if err := os.MkdirAll(tempDir, 0o750); err != nil {

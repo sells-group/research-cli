@@ -930,21 +930,19 @@ func TestEntityXref_Sync(t *testing.T) {
 
 	f := fetchermocks.NewMockFetcher(t)
 
-	// Stage 1: XrefBuilder.Build() — CRD-CIK cross-reference
+	// Stage 1: XrefBuilder.Build() — CRD-CIK cross-reference (2 passes)
 	pool.ExpectExec("TRUNCATE TABLE fed_data.entity_xref").
 		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
 	pool.ExpectExec("INSERT INTO fed_data.entity_xref").
 		WillReturnResult(pgxmock.NewResult("INSERT", 50))
 	pool.ExpectExec("INSERT INTO fed_data.entity_xref").
 		WillReturnResult(pgxmock.NewResult("INSERT", 30))
-	pool.ExpectExec("INSERT INTO fed_data.entity_xref").
-		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	// Stage 2: MultiXrefBuilder.Build() — multi-dataset cross-reference
 	pool.ExpectExec("TRUNCATE TABLE fed_data.entity_xref_multi").
 		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
-	// 71 match passes, each returning 2 rows.
-	for range 71 {
+	// 69 match passes, each returning 2 rows.
+	for range 69 {
 		pool.ExpectExec("INSERT INTO fed_data.entity_xref_multi").
 			WillReturnResult(pgxmock.NewResult("INSERT", 2))
 	}
@@ -952,10 +950,10 @@ func TestEntityXref_Sync(t *testing.T) {
 	ds := &EntityXref{}
 	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
 	require.NoError(t, err)
-	// 81 from CRD-CIK + 142 from multi (71 passes × 2 rows)
-	assert.Equal(t, int64(223), result.RowsSynced)
-	assert.Equal(t, int64(81), result.Metadata["crd_cik_matched"])
-	assert.Equal(t, int64(142), result.Metadata["multi_matched"])
+	// 80 from CRD-CIK + 138 from multi (69 passes × 2 rows)
+	assert.Equal(t, int64(218), result.RowsSynced)
+	assert.Equal(t, int64(80), result.Metadata["crd_cik_matched"])
+	assert.Equal(t, int64(138), result.Metadata["multi_matched"])
 }
 
 func TestEntityXref_Sync_TruncateError(t *testing.T) {

@@ -988,25 +988,3 @@ func TestEntityXref_Sync_Pass2Error(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "pass 2")
 }
-
-func TestEntityXref_Sync_Pass3Error(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	pool.ExpectExec("TRUNCATE TABLE fed_data.entity_xref").
-		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
-	pool.ExpectExec("INSERT INTO fed_data.entity_xref").
-		WillReturnResult(pgxmock.NewResult("INSERT", 10))
-	pool.ExpectExec("INSERT INTO fed_data.entity_xref").
-		WillReturnResult(pgxmock.NewResult("INSERT", 5))
-	pool.ExpectExec("INSERT INTO fed_data.entity_xref").
-		WillReturnError(errors.New("pass3 error"))
-
-	ds := &EntityXref{}
-	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "pass 3")
-}
