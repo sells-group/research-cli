@@ -54,6 +54,14 @@ func Router(h *Handlers) chi.Router {
 	r.With(BearerAuth(secret)).Post("/webhook/enrich", h.WebhookEnrich)
 	r.Get("/metrics", h.Metrics)
 
+	// Temporal workflow progress/control endpoints.
+	r.Route("/api/workflows", func(r chi.Router) {
+		r.Get("/fedsync/progress", h.FedsyncProgress)
+		r.Get("/enrichment/{runID}", h.EnrichmentProgress)
+		r.Post("/batch/pause", h.BatchPause)
+		r.Post("/batch/resume", h.BatchResume)
+	})
+
 	return r
 }
 

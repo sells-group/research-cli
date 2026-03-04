@@ -19,7 +19,7 @@ import (
 //     (ADV, EDGAR, BrokerCheck, Form BD, OSHA, EPA, FPDS, PPP, SBA 7(a)/504,
 //     Form D, N-CEN, Form 5500, EO BMF, FDIC, USAspending) using direct CRD,
 //     direct CIK, direct DUNS/UEI, direct EIN, direct FDIC cert,
-//     exact name+zip, exact name+state, and fuzzy name+state strategies.
+//     exact name+zip, and exact name+state strategies.
 type EntityXref struct{}
 
 // Name implements Dataset.

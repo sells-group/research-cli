@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -11,11 +12,14 @@ import (
 
 	"github.com/rotisserie/eris"
 	"github.com/spf13/cobra"
+	"go.temporal.io/sdk/client"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/fedsync"
 	"github.com/sells-group/research-cli/internal/fedsync/dataset"
 	"github.com/sells-group/research-cli/internal/fetcher"
+	temporalpkg "github.com/sells-group/research-cli/internal/temporal"
+	temporalfedsync "github.com/sells-group/research-cli/internal/temporal/fedsync"
 )
 
 var fedsyncSyncCmd = &cobra.Command{
@@ -36,6 +40,11 @@ Use --full to perform a full reload instead of incremental sync.`,
 		}
 
 		log := zap.L().With(zap.String("command", "fedsync.sync"))
+
+		useTemporal, _ := cmd.Flags().GetBool("temporal")
+		if useTemporal {
+			return runFedsyncViaTemporal(ctx, cmd, log)
+		}
 
 		pool, err := fedsyncPool(ctx)
 		if err != nil {
@@ -98,7 +107,69 @@ func init() {
 	fedsyncSyncCmd.Flags().String("datasets", "", "comma-separated dataset names (e.g., cbp,fpds)")
 	fedsyncSyncCmd.Flags().Bool("force", false, "ignore ShouldRun() scheduling logic")
 	fedsyncSyncCmd.Flags().Bool("full", false, "full reload instead of incremental sync")
+	fedsyncSyncCmd.Flags().Bool("temporal", false, "run via Temporal workflow instead of direct engine")
+	fedsyncSyncCmd.Flags().Bool("wait", true, "wait for Temporal workflow completion (only with --temporal)")
 	fedsyncCmd.AddCommand(fedsyncSyncCmd)
+}
+
+// runFedsyncViaTemporal starts a FedsyncRunWorkflow on Temporal.
+func runFedsyncViaTemporal(ctx context.Context, cmd *cobra.Command, log *zap.Logger) error {
+	c, err := temporalpkg.NewClient(cfg.Temporal)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	opts, err := parseSyncOpts(cmd)
+	if err != nil {
+		return err
+	}
+
+	params := temporalfedsync.RunParams{
+		Force: opts.Force,
+		Full:  opts.Full,
+	}
+	if opts.Phase != nil {
+		ps := opts.Phase.String()
+		params.Phase = &ps
+	}
+	if len(opts.Datasets) > 0 {
+		params.Datasets = opts.Datasets
+	}
+
+	log.Info("starting fedsync via Temporal",
+		zap.Any("phase", params.Phase),
+		zap.Strings("datasets", params.Datasets),
+		zap.Bool("force", params.Force),
+	)
+
+	workflowID := fmt.Sprintf("fedsync-run-%d", time.Now().UnixNano())
+	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: temporalpkg.FedsyncTaskQueue,
+	}, temporalfedsync.RunWorkflow, params)
+	if err != nil {
+		return eris.Wrap(err, "start fedsync workflow")
+	}
+
+	log.Info("fedsync workflow started",
+		zap.String("workflow_id", run.GetID()),
+		zap.String("run_id", run.GetRunID()),
+	)
+
+	wait, _ := cmd.Flags().GetBool("wait")
+	if !wait {
+		fmt.Printf("Workflow started: %s (run: %s)\n", run.GetID(), run.GetRunID())
+		return nil
+	}
+
+	var result temporalfedsync.RunResult
+	if err := run.Get(ctx, &result); err != nil {
+		return eris.Wrap(err, "fedsync workflow failed")
+	}
+
+	fmt.Printf("Fedsync complete: %d synced, %d failed\n", result.Synced, result.Failed)
+	return nil
 }
 
 // parseSyncOpts extracts dataset.RunOpts from the cobra command flags.

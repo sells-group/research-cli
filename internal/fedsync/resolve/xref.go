@@ -10,7 +10,7 @@ import (
 )
 
 // XrefBuilder builds the CRD-CIK cross-reference table by performing
-// a 3-pass matching strategy between ADV firms and EDGAR entities.
+// a 2-pass matching strategy between ADV firms and EDGAR entities.
 type XrefBuilder struct {
 	pool db.Pool
 }
@@ -20,7 +20,7 @@ func NewXrefBuilder(pool db.Pool) *XrefBuilder {
 	return &XrefBuilder{pool: pool}
 }
 
-// Build executes the 3-pass matching and rebuilds the entity_xref table.
+// Build executes the 2-pass matching and rebuilds the entity_xref table.
 // Returns the total number of cross-references created.
 func (x *XrefBuilder) Build(ctx context.Context) (int64, error) {
 	log := zap.L().With(zap.String("component", "xref_builder"))
@@ -50,15 +50,6 @@ func (x *XrefBuilder) Build(ctx context.Context) (int64, error) {
 	total += n
 	log.Info("xref pass 2 complete", zap.Int64("matched", n))
 
-	// Pass 3: Fuzzy name matching using pg_trgm similarity.
-	log.Info("xref pass 3: fuzzy name matching")
-	n, err = x.pass3Fuzzy(ctx)
-	if err != nil {
-		return total, eris.Wrap(err, "xref: pass 3 (fuzzy name)")
-	}
-	total += n
-	log.Info("xref pass 3 complete", zap.Int64("matched", n))
-
 	return total, nil
 }
 
@@ -78,16 +69,6 @@ func (x *XrefBuilder) pass2SIC(ctx context.Context) (int64, error) {
 	tag, err := x.pool.Exec(ctx, sql)
 	if err != nil {
 		return 0, eris.Wrap(err, "xref: execute pass 2")
-	}
-	return tag.RowsAffected(), nil
-}
-
-// pass3Fuzzy performs fuzzy name matching using pg_trgm similarity.
-func (x *XrefBuilder) pass3Fuzzy(ctx context.Context) (int64, error) {
-	sql := FuzzyMatchSQL()
-	tag, err := x.pool.Exec(ctx, sql)
-	if err != nil {
-		return 0, eris.Wrap(err, "xref: execute pass 3")
 	}
 	return tag.RowsAffected(), nil
 }

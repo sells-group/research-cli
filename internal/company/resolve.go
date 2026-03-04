@@ -20,10 +20,9 @@ func NewResolver(store CompanyStore) *Resolver {
 }
 
 // FindOrCreate looks up an existing company or creates a new one.
-// Uses a three-pass cascade:
+// Uses a two-pass cascade:
 //  1. Exact identifier match (domain, salesforce_id, CRD, CIK)
 //  2. Deterministic attribute match (exact name + state + city)
-//  3. Fuzzy name match (pg_trgm similarity > 0.6)
 //
 // Returns the company and whether it was newly created.
 func (r *Resolver) FindOrCreate(ctx context.Context, company model.Company) (*CompanyRecord, bool, error) {

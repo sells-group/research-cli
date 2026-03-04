@@ -13,7 +13,7 @@ import (
 
 // MultiXrefBuilder builds cross-references across all entity-bearing federal
 // datasets using multiple match strategies: direct CRD, direct CIK, exact
-// name+zip, exact name+state, and fuzzy name+state.
+// name+zip, and exact name+state.
 type MultiXrefBuilder struct {
 	pool db.Pool
 }
@@ -621,22 +621,6 @@ func allPasses() []passSpec {
 				"state", 0.88, normName,
 			),
 		},
-
-		// --- Pass group 7: Fuzzy name + state (confidence 0.60-0.90) ---
-		{
-			name: "fuzzy_adv_ppp",
-			sql: fuzzyNameStateSQL(
-				"adv_firms", "crd_number", "firm_name", "state",
-				"ppp_loans", "loannumber", "borrowername", "borrowerstate",
-			),
-		},
-		{
-			name: "fuzzy_edgar_fpds",
-			sql: fuzzyNameStateSQL(
-				"edgar_entities", "cik", "entity_name", "state_of_business",
-				"fpds_contracts", "contract_id", "vendor_name", "vendor_state",
-			),
-		},
 	}
 }
 
@@ -967,49 +951,5 @@ ORDER BY r.accession_number, f.contract_id::TEXT
 ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`,
 		normFn("r.registrant_name"),
 		normFn("f.vendor_name"),
-	)
-}
-
-// fuzzyNameStateSQL generates SQL for fuzzy name matching with state constraint.
-// Uses pg_trgm similarity > 0.6, with confidence set to the similarity score.
-func fuzzyNameStateSQL(
-	srcTable, srcPK, srcName, srcState,
-	tgtTable, tgtPK, tgtName, tgtState string,
-) string {
-	return fmt.Sprintf(`
-INSERT INTO fed_data.entity_xref_multi
-    (source_dataset, source_id, target_dataset, target_id, entity_name, match_type, confidence)
-SELECT DISTINCT ON (a.%[3]s::TEXT)
-    '%[1]s',
-    a.%[3]s::TEXT,
-    '%[5]s',
-    b.%[7]s::TEXT,
-    a.%[4]s,
-    'fuzzy_name_state',
-    similarity(UPPER(a.%[4]s), UPPER(b.%[8]s))::NUMERIC(3,2)
-FROM fed_data.%[1]s a
-JOIN fed_data.%[5]s b
-    ON similarity(UPPER(a.%[4]s), UPPER(b.%[8]s)) > 0.6
-    AND a.%[9]s = b.%[10]s
-WHERE a.%[4]s IS NOT NULL AND a.%[4]s != ''
-  AND b.%[8]s IS NOT NULL AND b.%[8]s != ''
-  AND a.%[9]s IS NOT NULL AND a.%[9]s != ''
-  AND NOT EXISTS (
-      SELECT 1 FROM fed_data.entity_xref_multi x
-      WHERE x.source_dataset = '%[1]s' AND x.source_id = a.%[3]s::TEXT
-        AND x.target_dataset = '%[5]s'
-  )
-ORDER BY a.%[3]s::TEXT, similarity(UPPER(a.%[4]s), UPPER(b.%[8]s)) DESC
-ON CONFLICT (source_dataset, source_id, target_dataset, target_id) DO NOTHING`,
-		srcTable, // 1
-		"",       // 2 (unused)
-		srcPK,    // 3
-		srcName,  // 4
-		tgtTable, // 5
-		"",       // 6 (unused)
-		tgtPK,    // 7
-		tgtName,  // 8
-		srcState, // 9
-		tgtState, // 10
 	)
 }

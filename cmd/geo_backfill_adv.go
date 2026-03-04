@@ -28,6 +28,10 @@ the scorer can use MSA-aware geo_match scoring.`,
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
+		if useTemporal, _ := cmd.Flags().GetBool("temporal"); useTemporal {
+			return runGeoBackfillViaTemporal(ctx, cmd, "adv")
+		}
+
 		pool, err := fedsyncPool(ctx)
 		if err != nil {
 			return err
@@ -258,5 +262,6 @@ func init() {
 	f.Int("batch-size", 100, "batch size for processing")
 	f.Int("concurrency", 10, "maximum parallel geocode calls")
 	f.Bool("skip-msa", false, "skip MSA association step")
+	f.Bool("temporal", false, "run via Temporal workflow")
 	geoCmd.AddCommand(geoBackfillADVCmd)
 }

@@ -176,7 +176,7 @@ func (d *ADVPart2) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, te
 type brochureMapping struct {
 	CRDNumber   int
 	BrochureID  string
-	DateFiled   string
+	DateFiled   time.Time
 	PDFFileName string
 }
 
@@ -224,7 +224,10 @@ func parseBrochureMapping(path string) ([]brochureMapping, error) {
 			continue
 		}
 
-		dateFiled := trimQuotes(getCol(record, colIdx, "datefiled"))
+		dateFiled, err := time.Parse("01/02/2006", trimQuotes(getCol(record, colIdx, "datefiled")))
+		if err != nil {
+			continue // skip rows with unparseable dates
+		}
 
 		result = append(result, brochureMapping{
 			CRDNumber:   crd,
