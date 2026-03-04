@@ -1,7 +1,6 @@
 package migrate
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -212,23 +211,12 @@ func TestInspect_InvalidBinary(t *testing.T) {
 }
 
 func TestEmbeddedSchemaFS(t *testing.T) {
-	// Verify the embedded filesystem contains expected directories.
-	expectedDirs := []string{"schema/public", "schema/fed_data", "schema/geo"}
-	for _, dir := range expectedDirs {
-		entries, err := fs.ReadDir(schemaFS, dir)
-		if err != nil {
-			t.Errorf("failed to read embedded dir %s: %v", dir, err)
-			continue
-		}
-		if len(entries) == 0 {
-			t.Errorf("embedded dir %s is empty", dir)
-		}
-	}
-
-	// Verify key files exist.
+	// Verify key files exist in the embedded filesystem.
 	expectedFiles := []string{
 		"schema/extensions.sql",
 		"schema/atlas.hcl",
+		"schema/public.sql",
+		"schema/fed_data.sql",
 	}
 	for _, f := range expectedFiles {
 		data, err := schemaFS.ReadFile(f)
@@ -271,15 +259,13 @@ func TestWriteSchemaToTemp(t *testing.T) {
 		t.Fatal("extensions.sql is empty")
 	}
 
-	// Verify subdirectories exist.
-	for _, sub := range []string{"public", "fed_data", "geo"} {
-		entries, err := os.ReadDir(filepath.Join(dir, sub))
+	// Verify consolidated schema files exist.
+	for _, name := range []string{"public.sql", "fed_data.sql"} {
+		info, err := os.Stat(filepath.Join(dir, name))
 		if err != nil {
-			t.Errorf("read subdir %s: %v", sub, err)
-			continue
-		}
-		if len(entries) == 0 {
-			t.Errorf("subdir %s is empty", sub)
+			t.Errorf("missing %s: %v", name, err)
+		} else if info.Size() == 0 {
+			t.Errorf("%s is empty", name)
 		}
 	}
 }
@@ -288,9 +274,8 @@ func TestBuildSrcURLs(t *testing.T) {
 	urls := buildSrcURLs()
 	expected := []string{
 		"file://extensions.sql",
-		"file://public",
-		"file://fed_data",
-		"file://geo",
+		"file://public.sql",
+		"file://fed_data.sql",
 	}
 	if len(urls) != len(expected) {
 		t.Fatalf("expected %d URLs, got %d", len(expected), len(urls))
@@ -336,22 +321,12 @@ func TestCopyEmbeddedSchema(t *testing.T) {
 	}
 
 	// Verify key files.
-	for _, name := range []string{"atlas.hcl", "extensions.sql"} {
+	for _, name := range []string{"atlas.hcl", "extensions.sql", "public.sql", "fed_data.sql"} {
 		info, err := os.Stat(filepath.Join(dir, name))
 		if err != nil {
 			t.Errorf("missing %s: %v", name, err)
 		} else if info.Size() == 0 {
 			t.Errorf("%s is empty", name)
-		}
-	}
-
-	// Verify subdirectories have files.
-	for _, sub := range []string{"public", "fed_data", "geo"} {
-		entries, err := os.ReadDir(filepath.Join(dir, sub))
-		if err != nil {
-			t.Errorf("read subdir %s: %v", sub, err)
-		} else if len(entries) == 0 {
-			t.Errorf("subdir %s is empty", sub)
 		}
 	}
 }
