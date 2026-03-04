@@ -47,16 +47,6 @@ func (m *errMatchStore) UpsertMatch(_ context.Context, _ *Match) error {
 	return m.upsertErr
 }
 
-// errGetMatchesStore wraps mockStore but returns an error on GetMatches.
-type errGetMatchesStore struct {
-	mockStore
-	getMatchesErr error
-}
-
-func (m *errGetMatchesStore) GetMatches(_ context.Context, _ int64) ([]Match, error) {
-	return nil, m.getMatchesErr
-}
-
 // --- FDIC tests ---
 
 func TestLinker_MatchFDIC_Found(t *testing.T) {
@@ -747,141 +737,6 @@ func TestLinker_MatchNameState_QueryError(t *testing.T) {
 	require.NoError(t, pool.ExpectationsWereMet())
 }
 
-// --- Fuzzy name tests ---
-
-func TestLinker_MatchFuzzyName(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := newMockStore()
-
-	pool.ExpectQuery(`SELECT cik, entity_name, similarity`).
-		WithArgs("Acme Corporation", "TX").
-		WillReturnRows(pgxmock.NewRows([]string{"cik", "entity_name", "sim"}).
-			AddRow("0002222222", "ACME CORP", 0.75))
-
-	l := NewLinker(pool, ms)
-	matched, err := l.matchFuzzyName(context.Background(), 1, "Acme Corporation", "TX")
-	require.NoError(t, err)
-	assert.Equal(t, 1, matched)
-	assert.Len(t, ms.matches[1], 1)
-	assert.Equal(t, "fuzzy_name", ms.matches[1][0].MatchType)
-	assert.Equal(t, 0.75, *ms.matches[1][0].Confidence)
-	require.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestLinker_MatchFuzzyName_LowSimilarity(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := newMockStore()
-
-	// When state is empty, matchFuzzyName only passes name (1 arg).
-	pool.ExpectQuery(`SELECT cik, entity_name, similarity`).
-		WithArgs("Banana Inc").
-		WillReturnRows(pgxmock.NewRows([]string{"cik", "entity_name", "sim"}).
-			AddRow("0003333333", "Something Else", 0.3))
-
-	l := NewLinker(pool, ms)
-	matched, err := l.matchFuzzyName(context.Background(), 1, "Banana Inc", "")
-	require.NoError(t, err)
-	assert.Equal(t, 0, matched)
-	assert.Empty(t, ms.matches[1])
-	require.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestLinker_MatchFuzzyName_NoMatch(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := newMockStore()
-
-	// With state="CA", 2 args are passed.
-	pool.ExpectQuery(`SELECT cik, entity_name, similarity`).
-		WithArgs("XYZ LLC", "CA").
-		WillReturnRows(pgxmock.NewRows([]string{"cik", "entity_name", "sim"}))
-
-	l := NewLinker(pool, ms)
-	matched, err := l.matchFuzzyName(context.Background(), 1, "XYZ LLC", "CA")
-	require.NoError(t, err)
-	assert.Equal(t, 0, matched)
-	require.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestLinker_MatchFuzzyName_SkipsAlreadyMatched(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := newMockStore()
-	// Pre-populate an edgar_entities match.
-	ms.matches[1] = []Match{{CompanyID: 1, MatchedSource: "edgar_entities", MatchedKey: "111"}}
-
-	l := NewLinker(pool, ms)
-	matched, err := l.matchFuzzyName(context.Background(), 1, "Already Matched Corp", "CA")
-	require.NoError(t, err)
-	assert.Equal(t, 0, matched)
-	// Pool should have no expectations since we skip early.
-	require.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestLinker_MatchFuzzyName_GetMatchesError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := &errGetMatchesStore{
-		mockStore:     *newMockStore(),
-		getMatchesErr: errors.New("get matches failed"),
-	}
-
-	l := NewLinker(pool, ms)
-	_, err = l.matchFuzzyName(context.Background(), 1, "Some Corp", "CA")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "get matches failed")
-	require.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestLinker_MatchFuzzyName_UpsertError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := &errMatchStore{mockStore: *newMockStore(), upsertErr: errors.New("upsert failed")}
-
-	pool.ExpectQuery(`SELECT cik, entity_name, similarity`).
-		WithArgs("Upsert Fail", "NY").
-		WillReturnRows(pgxmock.NewRows([]string{"cik", "entity_name", "sim"}).
-			AddRow("0007777777", "UPSERT FAIL INC", 0.8))
-
-	l := NewLinker(pool, ms)
-	_, err = l.matchFuzzyName(context.Background(), 1, "Upsert Fail", "NY")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "upsert failed")
-	require.NoError(t, pool.ExpectationsWereMet())
-}
-
-func TestLinker_MatchFuzzyName_QueryError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	ms := newMockStore()
-
-	pool.ExpectQuery(`SELECT cik, entity_name, similarity`).
-		WithArgs("Error Corp", "FL").
-		WillReturnError(assert.AnError)
-
-	l := NewLinker(pool, ms)
-	_, err = l.matchFuzzyName(context.Background(), 1, "Error Corp", "FL")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "fuzzy query")
-	require.NoError(t, pool.ExpectationsWereMet())
-}
-
 // --- LinkFedData integration tests ---
 
 func TestLinker_LinkFedData_FullCascade(t *testing.T) {
@@ -923,13 +778,6 @@ func TestLinker_LinkFedData_FullCascade(t *testing.T) {
 		WithArgs("Test Advisors", "TX").
 		WillReturnRows(pgxmock.NewRows([]string{"cik", "entity_name"}))
 
-	// Pass 3: Fuzzy match — already matched edgar, but let's check it skips
-	// (matchFuzzyName checks existing matches; after pass 2 returns 0, no edgar match exists
-	// unless pass 1 added one, which it doesn't for edgar — only adv_firms + fdic_institutions)
-	pool.ExpectQuery(`SELECT cik, entity_name, similarity`).
-		WithArgs("Test Advisors", "TX").
-		WillReturnRows(pgxmock.NewRows([]string{"cik", "entity_name", "sim"}))
-
 	l := NewLinker(pool, ms)
 	matched, err := l.LinkFedData(context.Background(), 10)
 	require.NoError(t, err)
@@ -963,11 +811,6 @@ func TestLinker_LinkFedData_EINIdentifiers(t *testing.T) {
 		WithArgs("Foundation Inc", "CA").
 		WillReturnRows(pgxmock.NewRows([]string{"cik", "entity_name"}))
 
-	// Pass 3: Fuzzy match
-	pool.ExpectQuery(`SELECT cik, entity_name, similarity`).
-		WithArgs("Foundation Inc", "CA").
-		WillReturnRows(pgxmock.NewRows([]string{"cik", "entity_name", "sim"}))
-
 	l := NewLinker(pool, ms)
 	matched, err := l.LinkFedData(context.Background(), 60)
 	require.NoError(t, err)
@@ -1000,11 +843,6 @@ func TestLinker_LinkFedData_EINMatchErrors(t *testing.T) {
 	pool.ExpectQuery(`SELECT cik, entity_name FROM fed_data\.edgar_entities`).
 		WithArgs("Error EIN Corp", "TX").
 		WillReturnRows(pgxmock.NewRows([]string{"cik", "entity_name"}))
-
-	// Pass 3: Fuzzy
-	pool.ExpectQuery(`SELECT cik, entity_name, similarity`).
-		WithArgs("Error EIN Corp", "TX").
-		WillReturnRows(pgxmock.NewRows([]string{"cik", "entity_name", "sim"}))
 
 	l := NewLinker(pool, ms)
 	matched, err := l.LinkFedData(context.Background(), 70)
@@ -1042,11 +880,6 @@ func TestLinker_LinkFedData_MatchErrorsContinue(t *testing.T) {
 		WithArgs("Flaky Corp", "FL").
 		WillReturnError(assert.AnError)
 
-	// Pass 3: fuzzy name query
-	pool.ExpectQuery(`SELECT cik, entity_name, similarity`).
-		WithArgs("Flaky Corp", "FL").
-		WillReturnError(assert.AnError)
-
 	l := NewLinker(pool, ms)
 	matched, err := l.LinkFedData(context.Background(), 40)
 	require.NoError(t, err) // errors are logged, not returned
@@ -1060,20 +893,14 @@ func TestLinker_LinkFedData_NameOnlyNoState(t *testing.T) {
 	defer pool.Close()
 
 	ms := newMockStore()
-	// Has name but no state — skips pass 2 (name+state), goes to pass 3 (fuzzy).
+	// Has name but no state — skips pass 2 (name+state requires both).
 	ms.companies[50] = &CompanyRecord{ID: 50, Name: "Stateless Inc", State: ""}
 	ms.identifiers[50] = []Identifier{}
-
-	// Pass 3: fuzzy name (no state, so 1 arg).
-	pool.ExpectQuery(`SELECT cik, entity_name, similarity`).
-		WithArgs("Stateless Inc").
-		WillReturnRows(pgxmock.NewRows([]string{"cik", "entity_name", "sim"}).
-			AddRow("0006666666", "STATELESS INC", 0.85))
 
 	l := NewLinker(pool, ms)
 	matched, err := l.LinkFedData(context.Background(), 50)
 	require.NoError(t, err)
-	assert.Equal(t, 1, matched)
+	assert.Equal(t, 0, matched)
 	require.NoError(t, pool.ExpectationsWereMet())
 }
 
@@ -1091,9 +918,6 @@ func TestLinker_LinkFedData_NoIdentifiers(t *testing.T) {
 		WithArgs("Solo Corp", "NY").
 		WillReturnRows(pgxmock.NewRows([]string{"cik", "entity_name"}).
 			AddRow("0005555555", "Solo Corp"))
-
-	// Pass 3: Fuzzy — already matched in pass 2 so skips
-	// (matchFuzzyName sees edgar_entities in existing matches)
 
 	l := NewLinker(pool, ms)
 	matched, err := l.LinkFedData(context.Background(), 20)
