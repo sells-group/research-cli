@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/fedsync"
 	"github.com/sells-group/research-cli/internal/scorer"
 )
 
@@ -73,8 +72,8 @@ func runFunnel(cmd *cobra.Command, _ []string) error {
 	}
 	defer pool.Close()
 
-	if err := fedsync.Migrate(ctx, pool); err != nil {
-		return eris.Wrap(err, "funnel: migrate")
+	if err := ensureSchema(ctx); err != nil {
+		return eris.Wrap(err, "funnel: ensure schema")
 	}
 
 	// Parse flags.

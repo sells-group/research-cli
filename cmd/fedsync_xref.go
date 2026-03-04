@@ -31,8 +31,8 @@ Stage 2: Multi-dataset matching across ADV, EDGAR, BrokerCheck, Form BD, OSHA,
 		}
 		defer pool.Close()
 
-		if err := fedsync.Migrate(ctx, pool); err != nil {
-			return eris.Wrap(err, "fedsync xref: migrate")
+		if err := ensureSchema(ctx); err != nil {
+			return eris.Wrap(err, "fedsync xref: ensure schema")
 		}
 
 		f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{

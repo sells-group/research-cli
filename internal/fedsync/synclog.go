@@ -1,3 +1,4 @@
+// Package fedsync provides federal data sync tracking and orchestration.
 package fedsync
 
 import (

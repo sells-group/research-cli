@@ -101,111 +101,8 @@ func (s *PostgresStore) Pool() db.Pool {
 	return s.pool
 }
 
-const postgresMigration = `
-CREATE TABLE IF NOT EXISTS runs (
-	id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-	company    JSONB NOT NULL,
-	status     TEXT NOT NULL DEFAULT 'queued',
-	result     JSONB,
-	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS run_phases (
-	id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-	run_id     TEXT NOT NULL REFERENCES runs(id),
-	name       TEXT NOT NULL,
-	status     TEXT NOT NULL DEFAULT 'running',
-	result     JSONB,
-	started_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS crawl_cache (
-	id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-	company_url TEXT NOT NULL UNIQUE,
-	pages       JSONB NOT NULL,
-	crawled_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-	expires_at  TIMESTAMPTZ NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
-CREATE INDEX IF NOT EXISTS idx_run_phases_run_id ON run_phases(run_id);
-CREATE INDEX IF NOT EXISTS idx_crawl_cache_company_url ON crawl_cache(company_url);
-CREATE INDEX IF NOT EXISTS idx_crawl_cache_expires_at ON crawl_cache(expires_at);
-CREATE INDEX IF NOT EXISTS idx_crawl_cache_url_expires ON crawl_cache(company_url, expires_at DESC);
-
-CREATE TABLE IF NOT EXISTS linkedin_cache (
-	id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-	domain     TEXT NOT NULL UNIQUE,
-	data       JSONB NOT NULL,
-	cached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-	expires_at TIMESTAMPTZ NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_linkedin_cache_domain ON linkedin_cache(domain);
-CREATE INDEX IF NOT EXISTS idx_linkedin_cache_expires_at ON linkedin_cache(expires_at);
-
-CREATE TABLE IF NOT EXISTS scrape_cache (
-	id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-	url_hash   TEXT NOT NULL UNIQUE,
-	content    JSONB NOT NULL,
-	cached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-	expires_at TIMESTAMPTZ NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_scrape_cache_url_hash ON scrape_cache(url_hash);
-CREATE INDEX IF NOT EXISTS idx_scrape_cache_expires_at ON scrape_cache(expires_at);
-
-CREATE TABLE IF NOT EXISTS checkpoints (
-	company_id TEXT PRIMARY KEY,
-	phase      TEXT NOT NULL,
-	data       JSONB NOT NULL,
-	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS dead_letter_queue (
-	id             TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-	company        JSONB NOT NULL,
-	error          TEXT NOT NULL,
-	error_type     TEXT NOT NULL DEFAULT 'transient',
-	failed_phase   TEXT,
-	retry_count    INTEGER NOT NULL DEFAULT 0,
-	max_retries    INTEGER NOT NULL DEFAULT 3,
-	next_retry_at  TIMESTAMPTZ NOT NULL,
-	created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-	last_failed_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_dlq_error_type ON dead_letter_queue(error_type);
-CREATE INDEX IF NOT EXISTS idx_dlq_next_retry ON dead_letter_queue(next_retry_at);
-
--- v2: structured error tracking
-ALTER TABLE runs ADD COLUMN IF NOT EXISTS error JSONB;
-CREATE INDEX IF NOT EXISTS idx_runs_error_category ON runs ((error->>'category'));
-
-CREATE TABLE IF NOT EXISTS field_provenance (
-	id                   BIGSERIAL PRIMARY KEY,
-	run_id               TEXT REFERENCES runs(id),
-	company_url          VARCHAR(500) NOT NULL,
-	field_key            VARCHAR(100) NOT NULL,
-	winner_source        VARCHAR(50),
-	winner_value         TEXT,
-	raw_confidence       NUMERIC(4,3),
-	effective_confidence NUMERIC(4,3),
-	data_as_of           TIMESTAMPTZ,
-	threshold            NUMERIC(3,2),
-	threshold_met        BOOLEAN NOT NULL DEFAULT FALSE,
-	attempts             JSONB,
-	premium_cost_usd     NUMERIC(8,4) DEFAULT 0,
-	previous_value       TEXT,
-	previous_run_id      TEXT,
-	value_changed        BOOLEAN DEFAULT FALSE,
-	created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_field_provenance_run ON field_provenance(run_id);
-CREATE INDEX IF NOT EXISTS idx_field_provenance_company ON field_provenance(company_url, field_key);
-`
+// postgresMigration is no longer needed — schema is managed by Atlas
+// via the internal/migrate package. See `research-cli migrate`.
 
 // Ping implements Store.
 func (s *PostgresStore) Ping(ctx context.Context) error {
@@ -214,9 +111,9 @@ func (s *PostgresStore) Ping(ctx context.Context) error {
 }
 
 // Migrate implements Store.
-func (s *PostgresStore) Migrate(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, postgresMigration)
-	return eris.Wrap(err, "postgres: migrate")
+// Schema is now managed by Atlas (internal/migrate). This is a no-op for Postgres.
+func (s *PostgresStore) Migrate(_ context.Context) error {
+	return nil
 }
 
 // Close implements Store.

@@ -43,9 +43,9 @@ Use --full to perform a full reload instead of incremental sync.`,
 		}
 		defer pool.Close()
 
-		// Ensure migrations are current.
-		if err := fedsync.Migrate(ctx, pool); err != nil {
-			return eris.Wrap(err, "fedsync sync: migrate")
+		// Ensure schema is current via Atlas.
+		if err := ensureSchema(ctx); err != nil {
+			return eris.Wrap(err, "fedsync sync: ensure schema")
 		}
 
 		// Parse flags.
