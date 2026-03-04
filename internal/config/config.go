@@ -39,6 +39,13 @@ type Config struct {
 	Retry      RetryConfig      `yaml:"retry" mapstructure:"retry"`
 	Circuit    CircuitConfig    `yaml:"circuit" mapstructure:"circuit"`
 	Monitoring MonitoringConfig `yaml:"monitoring" mapstructure:"monitoring"`
+	Atlas      AtlasConfig      `yaml:"atlas" mapstructure:"atlas"`
+}
+
+// AtlasConfig configures the Atlas declarative schema management.
+type AtlasConfig struct {
+	DevURL     string `yaml:"dev_url" mapstructure:"dev_url"`
+	BinaryPath string `yaml:"binary_path" mapstructure:"binary_path"`
 }
 
 // MonitoringConfig configures production monitoring and alerting.

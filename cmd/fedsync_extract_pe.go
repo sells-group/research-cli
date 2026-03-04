@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/sells-group/research-cli/internal/fedsync"
 	"github.com/sells-group/research-cli/internal/fedsync/peextract"
 	"github.com/sells-group/research-cli/internal/scrape"
 	"github.com/sells-group/research-cli/pkg/anthropic"
@@ -83,9 +82,9 @@ func runExtractPE(cmd *cobra.Command, _ []string) error {
 	}
 	defer pool.Close()
 
-	// Run migrations.
-	if err := fedsync.Migrate(ctx, pool); err != nil {
-		return eris.Wrap(err, "fedsync extract-pe: migrate")
+	// Ensure schema is current via Atlas.
+	if err := ensureSchema(ctx); err != nil {
+		return eris.Wrap(err, "fedsync extract-pe: ensure schema")
 	}
 
 	// Parse flags.

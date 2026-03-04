@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sells-group/research-cli/internal/analysis"
-	"github.com/sells-group/research-cli/internal/geospatial"
 )
 
 var geoAnalyzeStatusCmd = &cobra.Command{
@@ -27,12 +26,9 @@ var geoAnalyzeStatusCmd = &cobra.Command{
 		}
 		defer pool.Close()
 
-		// Ensure tables exist before querying.
-		if err := geospatial.Migrate(ctx, pool); err != nil {
-			return eris.Wrap(err, "geo analyze status: geo migrate")
-		}
-		if err := analysis.Migrate(ctx, pool); err != nil {
-			return eris.Wrap(err, "geo analyze status: analysis migrate")
+		// Ensure schema is current via Atlas.
+		if err := ensureSchema(ctx); err != nil {
+			return eris.Wrap(err, "geo analyze status: ensure schema")
 		}
 
 		alog := analysis.NewLog(pool)
