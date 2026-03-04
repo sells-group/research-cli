@@ -40,12 +40,19 @@ type Config struct {
 	Circuit    CircuitConfig    `yaml:"circuit" mapstructure:"circuit"`
 	Monitoring MonitoringConfig `yaml:"monitoring" mapstructure:"monitoring"`
 	Atlas      AtlasConfig      `yaml:"atlas" mapstructure:"atlas"`
+	Temporal   TemporalConfig   `yaml:"temporal" mapstructure:"temporal"`
 }
 
 // AtlasConfig configures the Atlas declarative schema management.
 type AtlasConfig struct {
 	DevURL     string `yaml:"dev_url" mapstructure:"dev_url"`
 	BinaryPath string `yaml:"binary_path" mapstructure:"binary_path"`
+}
+
+// TemporalConfig configures the Temporal.io workflow engine connection.
+type TemporalConfig struct {
+	HostPort  string `yaml:"host_port" mapstructure:"host_port"`
+	Namespace string `yaml:"namespace" mapstructure:"namespace"`
 }
 
 // MonitoringConfig configures production monitoring and alerting.
@@ -557,6 +564,8 @@ func Load() (*Config, error) {
 	v.SetDefault("retry.dlq_max_retries", 3)
 	v.SetDefault("circuit.failure_threshold", 5)
 	v.SetDefault("circuit.reset_timeout_secs", 30)
+	v.SetDefault("temporal.host_port", "localhost:7233")
+	v.SetDefault("temporal.namespace", "research-cli")
 	v.SetDefault("monitoring.enabled", false)
 	v.SetDefault("monitoring.check_interval_secs", 300)
 	v.SetDefault("monitoring.lookback_window_hours", 24)
