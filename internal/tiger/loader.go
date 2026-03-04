@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rotisserie/eris"
@@ -76,19 +78,38 @@ func Load(ctx context.Context, pool db.Pool, opts LoadOptions) error {
 		products = Products
 	}
 
-	// Split into national and per-state products.
-	var national, perState []Product
+	// Split products into three categories.
+	var national, perState, perCounty []Product
 	for _, p := range products {
-		if p.National {
+		switch {
+		case p.National:
 			national = append(national, p)
-		} else {
+		case p.PerCounty:
+			perCounty = append(perCounty, p)
+		default:
 			perState = append(perState, p)
 		}
 	}
 
+	// All per-state and per-county products need state child tables.
+	allPerState := append(perState, perCounty...)
+
+	// Prepare template tables and create parent tables before loading any data.
+	if !opts.DryRun {
+		if err := PrepareTemplates(ctx, pool); err != nil {
+			return eris.Wrap(err, "tiger: prepare templates")
+		}
+		if err := CreateParentTables(ctx, pool, products); err != nil {
+			return eris.Wrap(err, "tiger: create parent tables")
+		}
+	}
+
+	// Cache table columns for filtering shapefile data to valid target columns.
+	colCache := &columnCache{pool: pool}
+
 	// Load national products first (sequentially).
 	for _, p := range national {
-		if err := loadProduct(ctx, pool, p, "", "us", opts); err != nil {
+		if err := loadProduct(ctx, pool, p, "", "us", opts, colCache); err != nil {
 			return eris.Wrapf(err, "tiger: load national product %s", p.Name)
 		}
 	}
@@ -102,7 +123,7 @@ func Load(ctx context.Context, pool db.Pool, opts LoadOptions) error {
 		}
 	}
 
-	// Load per-state products in parallel.
+	// Load per-state products (PLACE, COUSUB) in parallel.
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(opts.Concurrency)
 
@@ -111,7 +132,7 @@ func Load(ctx context.Context, pool db.Pool, opts LoadOptions) error {
 
 		// Create state-partitioned tables before loading data.
 		if !opts.DryRun {
-			if err := CreateStateTables(ctx, pool, stateAbbr, perState); err != nil {
+			if err := CreateStateTables(ctx, pool, stateAbbr, allPerState); err != nil {
 				return eris.Wrapf(err, "tiger: create state tables for %s", stateAbbr)
 			}
 		}
@@ -120,7 +141,7 @@ func Load(ctx context.Context, pool db.Pool, opts LoadOptions) error {
 			stAbbr := stateAbbr
 			stFIPS := fips
 			g.Go(func() error {
-				return loadProduct(gCtx, pool, p, stAbbr, stFIPS, opts)
+				return loadProduct(gCtx, pool, p, stAbbr, stFIPS, opts, colCache)
 			})
 		}
 	}
@@ -134,6 +155,138 @@ func Load(ctx context.Context, pool db.Pool, opts LoadOptions) error {
 		zap.Int("products", len(perState)),
 	)
 
+	// Load per-county products (EDGES, FACES, ADDR, FEATNAMES).
+	// Each county file is downloaded and appended to the state child table.
+	if len(perCounty) > 0 {
+		for _, stateAbbr := range states {
+			stateFIPS := FIPSCodes[stateAbbr]
+
+			countyFIPS, err := CountyFIPSForState(ctx, pool, stateFIPS)
+			if err != nil {
+				return eris.Wrapf(err, "tiger: get county FIPS for %s", stateAbbr)
+			}
+
+			log.Info("loading per-county products",
+				zap.String("state", stateAbbr),
+				zap.Int("counties", len(countyFIPS)),
+				zap.Int("products", len(perCounty)),
+			)
+
+			// Check incremental — skip entire state if already loaded.
+			if opts.Incremental {
+				allLoaded := true
+				for _, p := range perCounty {
+					loaded, chkErr := isLoaded(ctx, pool, stateFIPS, p.Table, opts.Year)
+					if chkErr != nil {
+						return chkErr
+					}
+					if !loaded {
+						allLoaded = false
+						break
+					}
+				}
+				if allLoaded {
+					log.Debug("per-county products already loaded, skipping", zap.String("state", stateAbbr))
+					continue
+				}
+			}
+
+			// Truncate state child tables before loading per-county data.
+			if !opts.DryRun {
+				for _, p := range perCounty {
+					if err := TruncateTable(ctx, pool, p, stateAbbr); err != nil {
+						log.Warn("truncate failed (table may be empty)", zap.Error(err))
+					}
+				}
+			}
+
+			// Download and load each county file, parallelized across counties.
+			cg, cgCtx := errgroup.WithContext(ctx)
+			cg.SetLimit(opts.Concurrency)
+
+			for _, p := range perCounty {
+				start := time.Now()
+				var totalRows int64
+				var failedCounties atomic.Int32
+
+				for _, cFIPS := range countyFIPS {
+					countyFIPSVal := cFIPS
+					g2 := func() error {
+						url := DownloadURL(p, opts.Year, countyFIPSVal)
+						destDir := fmt.Sprintf("%s/%s/%s/%s", opts.TempDir, stateFIPS, strings.ToLower(p.Name), countyFIPSVal)
+						shpPath, dlErr := Download(cgCtx, url, destDir)
+						if dlErr != nil {
+							log.Warn("skipping county: download failed",
+								zap.String("product", p.Name), zap.String("county", countyFIPSVal), zap.Error(dlErr))
+							failedCounties.Add(1)
+							return nil
+						}
+
+						result, parseErr := ParseShapefile(shpPath, p)
+						if parseErr != nil {
+							log.Warn("skipping county: parse failed",
+								zap.String("product", p.Name), zap.String("county", countyFIPSVal), zap.Error(parseErr))
+							failedCounties.Add(1)
+							return nil
+						}
+
+						if opts.DryRun || len(result.Rows) == 0 {
+							return nil
+						}
+
+						// Rename, set statefp, and compute derived columns before filtering.
+						result = RenameColumns(result, p.Table)
+						result = SetStateFIPS(result, stateFIPS)
+						result = ComputeDerivedColumns(result, p.Table)
+
+						// Filter to columns that exist in the target table.
+						validCols, colErr := colCache.get(cgCtx, p.Table)
+						if colErr != nil {
+							return colErr
+						}
+						filtered := FilterToTable(result, validCols)
+
+						n, copyErr := BulkLoad(cgCtx, pool, p, stateAbbr, filtered.Columns, filtered.Rows, opts.BatchSize)
+						if copyErr != nil {
+							return copyErr
+						}
+						totalRows += n
+						return nil
+					}
+					cg.Go(g2)
+				}
+
+				if err := cg.Wait(); err != nil {
+					return err
+				}
+
+				if fc := failedCounties.Load(); fc > 0 {
+					log.Warn("some counties failed for product",
+						zap.String("product", p.Name), zap.String("state", stateAbbr), zap.Int32("failed", fc))
+				}
+
+				duration := time.Since(start)
+				if !opts.DryRun {
+					if recErr := recordLoad(ctx, pool, stateFIPS, stateAbbr, p.Table, opts.Year, int(totalRows), int(duration.Milliseconds())); recErr != nil {
+						log.Warn("failed to record load status", zap.Error(recErr))
+					}
+				}
+
+				log.Info("per-county product loaded",
+					zap.String("product", p.Name),
+					zap.String("state", stateAbbr),
+					zap.Int64("rows", totalRows),
+					zap.Int("counties", len(countyFIPS)),
+					zap.Duration("duration", duration),
+				)
+
+				// Reset errgroup for next product.
+				cg, cgCtx = errgroup.WithContext(ctx)
+				cg.SetLimit(opts.Concurrency)
+			}
+		}
+	}
+
 	// Populate lookup tables.
 	if !opts.DryRun {
 		if err := PopulateLookups(ctx, pool); err != nil {
@@ -145,8 +298,35 @@ func Load(ctx context.Context, pool db.Pool, opts LoadOptions) error {
 	return nil
 }
 
+// columnCache caches table column sets to avoid repeated DB queries.
+type columnCache struct {
+	pool  db.Pool
+	mu    sync.Mutex
+	cache map[string]map[string]bool
+}
+
+func (c *columnCache) get(ctx context.Context, tableName string) (map[string]bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.cache == nil {
+		c.cache = make(map[string]map[string]bool)
+	}
+	if cols, ok := c.cache[tableName]; ok {
+		return cols, nil
+	}
+
+	cols, err := TableColumns(ctx, c.pool, tableName)
+	if err != nil {
+		return nil, err
+	}
+	c.cache[tableName] = cols
+	return cols, nil
+}
+
 // loadProduct downloads, parses, and loads a single product for a given state.
-func loadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, stateFIPS string, opts LoadOptions) error {
+// Used for national and per-state products; per-county products use inline logic in Load.
+func loadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, stateFIPS string, opts LoadOptions, colCache *columnCache) error {
 	log := zap.L().With(
 		zap.String("component", "tiger.loader"),
 		zap.String("product", product.Name),
@@ -154,7 +334,7 @@ func loadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, 
 	)
 
 	tableName := product.Table
-	if !product.National && stateAbbr != "" {
+	if (product.PerState || product.PerCounty) && stateAbbr != "" {
 		tableName = fmt.Sprintf("%s_%s", strings.ToLower(stateAbbr), product.Table)
 	}
 
@@ -182,18 +362,31 @@ func loadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, 
 
 	log.Info("shapefile downloaded", zap.String("path", shpPath))
 
-	// Parse shapefile.
-	rows, err := ParseShapefile(shpPath, product)
+	// Parse shapefile — reads all columns from the file.
+	result, err := ParseShapefile(shpPath, product)
 	if err != nil {
 		return eris.Wrapf(err, "tiger: parse %s for %s", product.Name, stateAbbr)
 	}
 
-	log.Info("shapefile parsed", zap.Int("rows", len(rows)))
+	log.Info("shapefile parsed", zap.Int("rows", len(result.Rows)))
 
 	if opts.DryRun {
-		log.Info("dry run — skipping load", zap.Int("rows", len(rows)))
+		log.Info("dry run — skipping load", zap.Int("rows", len(result.Rows)))
 		return nil
 	}
+
+	// Rename columns (e.g., zcta5ce20 → zcta5ce), set statefp for products
+	// that omit it, and compute derived columns (e.g., cntyidfp) before filtering.
+	result = RenameColumns(result, product.Table)
+	result = SetStateFIPS(result, stateFIPS)
+	result = ComputeDerivedColumns(result, product.Table)
+
+	// Filter to columns that exist in the target table.
+	validCols, colErr := colCache.get(ctx, product.Table)
+	if colErr != nil {
+		return colErr
+	}
+	filtered := FilterToTable(result, validCols)
 
 	// Truncate existing data before reload.
 	if err := TruncateTable(ctx, pool, product, stateAbbr); err != nil {
@@ -202,7 +395,7 @@ func loadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, 
 	}
 
 	// Bulk load via COPY.
-	loaded, err := BulkLoad(ctx, pool, product, stateAbbr, rows, opts.BatchSize)
+	loaded, err := BulkLoad(ctx, pool, product, stateAbbr, filtered.Columns, filtered.Rows, opts.BatchSize)
 	if err != nil {
 		return err
 	}

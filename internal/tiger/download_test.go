@@ -3,11 +3,13 @@ package tiger
 import (
 	"archive/zip"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -63,6 +65,11 @@ func TestDownload_Resumable(t *testing.T) {
 }
 
 func TestDownload_ServerError(t *testing.T) {
+	// Use fast backoffs for testing so retries don't cause timeout.
+	orig := retryBackoffs
+	retryBackoffs = []time.Duration{10 * time.Millisecond, 20 * time.Millisecond}
+	t.Cleanup(func() { retryBackoffs = orig })
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -124,6 +131,121 @@ func TestFindFileByExt(t *testing.T) {
 
 	_, err = findFileByExt(dir, ".prj")
 	assert.Error(t, err)
+}
+
+func TestDownload_TabularProduct_DBFOnly(t *testing.T) {
+	// Create a ZIP containing only a .dbf file (no .shp).
+	// This simulates tabular products like ADDR/FEATNAMES.
+	zipContent := createTestZIP(t, map[string]string{
+		"test.dbf": "fake dbf data",
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(zipContent)
+	}))
+	defer srv.Close()
+
+	destDir := t.TempDir()
+	path, err := Download(context.Background(), srv.URL+"/tl_2024_12086_addr.zip", destDir)
+
+	require.NoError(t, err)
+	assert.Contains(t, path, ".dbf", "should fall back to .dbf when no .shp found")
+	assert.FileExists(t, path)
+}
+
+func TestDownload_NotFoundError(t *testing.T) {
+	// Use fast backoffs for testing.
+	orig := retryBackoffs
+	retryBackoffs = []time.Duration{10 * time.Millisecond, 20 * time.Millisecond}
+	t.Cleanup(func() { retryBackoffs = orig })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	destDir := t.TempDir()
+	_, err := Download(context.Background(), srv.URL+"/notfound.zip", destDir)
+	assert.Error(t, err)
+}
+
+func TestIsRetryable(t *testing.T) {
+	tests := []struct {
+		msg      string
+		expected bool
+	}{
+		{"download returned status 403", true},
+		{"download returned status 429", true},
+		{"download returned status 500", true},
+		{"download returned status 503", true},
+		{"not a valid ZIP", true},
+		{"download returned status 404", false},
+		{"connection refused", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.msg, func(t *testing.T) {
+			err := fmt.Errorf("%s", tc.msg)
+			assert.Equal(t, tc.expected, isRetryable(err))
+		})
+	}
+}
+
+func TestValidateZIP_Valid(t *testing.T) {
+	zipContent := createTestZIP(t, map[string]string{
+		"test.shp": "fake shapefile data",
+	})
+
+	zipPath := filepath.Join(t.TempDir(), "valid.zip")
+	require.NoError(t, os.WriteFile(zipPath, zipContent, 0o644))
+
+	err := validateZIP(zipPath)
+	assert.NoError(t, err)
+}
+
+func TestValidateZIP_Invalid(t *testing.T) {
+	zipPath := filepath.Join(t.TempDir(), "invalid.zip")
+	require.NoError(t, os.WriteFile(zipPath, []byte("not zip content"), 0o644))
+
+	err := validateZIP(zipPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ZIP magic bytes")
+}
+
+func TestValidateZIP_Empty(t *testing.T) {
+	zipPath := filepath.Join(t.TempDir(), "empty.zip")
+	require.NoError(t, os.WriteFile(zipPath, []byte{}, 0o644))
+
+	err := validateZIP(zipPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read magic bytes")
+}
+
+func TestDownload_InvalidCachedZIP(t *testing.T) {
+	// Create a valid ZIP that the server will return.
+	zipContent := createTestZIP(t, map[string]string{
+		"test.shp": "fake shapefile data",
+		"test.dbf": "fake dbf data",
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(zipContent)
+	}))
+	defer srv.Close()
+
+	destDir := t.TempDir()
+	zipName := "tl_2024_12_edges.zip"
+
+	// Pre-create an invalid ZIP at the expected path.
+	invalidZipPath := filepath.Join(destDir, zipName)
+	require.NoError(t, os.WriteFile(invalidZipPath, []byte("not a zip file"), 0o644))
+
+	// Download should detect the invalid cached ZIP, re-download, and succeed.
+	shpPath, err := Download(context.Background(), srv.URL+"/"+zipName, destDir)
+	require.NoError(t, err)
+	assert.Contains(t, shpPath, ".shp")
+	assert.FileExists(t, shpPath)
 }
 
 // createTestZIP creates a ZIP file in memory with the given files.

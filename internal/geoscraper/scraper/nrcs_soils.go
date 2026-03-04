@@ -66,10 +66,11 @@ func (n *NRCSSoils) Sync(ctx context.Context, pool db.Pool, ft fetcher.Fetcher, 
 		return nil, eris.Wrap(err, "nrcs_soils: find .shp file")
 	}
 
-	rows, err := tiger.ParseShapefile(shpPath, nrcsProduct)
+	result, err := tiger.ParseShapefile(shpPath, nrcsProduct)
 	if err != nil {
 		return nil, eris.Wrap(err, "nrcs_soils: parse shapefile")
 	}
+	result = filterToProductColumns(result, nrcsProduct)
 
 	var totalRows int64
 	var batch [][]any
@@ -91,7 +92,7 @@ func (n *NRCSSoils) Sync(ctx context.Context, pool db.Pool, ft fetcher.Fetcher, 
 		return nil
 	}
 
-	for _, shpRow := range rows {
+	for _, shpRow := range result.Rows {
 		row, ok := newSoilRow(shpRow)
 		if !ok {
 			continue

@@ -98,6 +98,7 @@ const (
 	SystemGooglePlace = "google_place"
 	SystemFDIC        = "fdic"
 	SystemSBALoan     = "sba_loan"
+	SystemNCUA        = "ncua"
 )
 
 // Address is a physical address for a company.

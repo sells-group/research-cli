@@ -74,10 +74,11 @@ func (f *FCCTowers) Sync(ctx context.Context, pool db.Pool, ft fetcher.Fetcher, 
 	}
 
 	// Parse shapefile.
-	rows, err := tiger.ParseShapefile(shpPath, fccTowerProduct)
+	result, err := tiger.ParseShapefile(shpPath, fccTowerProduct)
 	if err != nil {
 		return nil, eris.Wrap(err, "fcc_towers: parse shapefile")
 	}
+	result = filterToProductColumns(result, fccTowerProduct)
 
 	// Batch and upsert.
 	var totalRows int64
@@ -100,7 +101,7 @@ func (f *FCCTowers) Sync(ctx context.Context, pool db.Pool, ft fetcher.Fetcher, 
 		return nil
 	}
 
-	for _, shpRow := range rows {
+	for _, shpRow := range result.Rows {
 		row, ok := newTowerRow(shpRow)
 		if !ok {
 			continue

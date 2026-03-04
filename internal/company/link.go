@@ -2,6 +2,7 @@ package company
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/rotisserie/eris"
@@ -62,6 +63,14 @@ func (l *Linker) LinkFedData(ctx context.Context, companyID int64) (int, error) 
 			n, err := l.matchFDIC(ctx, companyID, id.Identifier)
 			if err != nil {
 				log.Warn("link: FDIC match failed", zap.Error(err))
+				continue
+			}
+			matched += n
+		}
+		if id.System == SystemNCUA {
+			n, err := l.matchNCUA(ctx, companyID, id.Identifier)
+			if err != nil {
+				log.Warn("link: NCUA match failed", zap.Error(err))
 				continue
 			}
 			matched += n
@@ -242,6 +251,86 @@ func (l *Linker) matchNameState(ctx context.Context, companyID int64, name, stat
 		matched++
 	}
 	return matched, rows.Err()
+}
+
+func (l *Linker) matchFuzzyName(ctx context.Context, companyID int64, name, state string) (int, error) {
+	// Only fuzzy match if we haven't already matched this company to EDGAR.
+	existing, err := l.store.GetMatches(ctx, companyID)
+	if err != nil {
+		return 0, err
+	}
+	for _, m := range existing {
+		if m.MatchedSource == "edgar_entities" {
+			return 0, nil // already matched
+		}
+	}
+
+	query := `
+		SELECT cik, entity_name, similarity(entity_name, $1) AS sim
+		FROM fed_data.edgar_entities
+		WHERE entity_name %% $1`
+	args := []any{name}
+	argIdx := 2
+
+	if state != "" {
+		query += fmt.Sprintf(` AND state_of_incorp = $%d`, argIdx)
+		args = append(args, state)
+		argIdx++
+	}
+	_ = argIdx
+
+	query += ` ORDER BY sim DESC LIMIT 1`
+
+	var cik, entityName string
+	var sim float64
+	err = l.pool.QueryRow(ctx, query, args...).Scan(&cik, &entityName, &sim)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 0, nil
+		}
+		return 0, eris.Wrap(err, "link: fuzzy query")
+	}
+
+	if sim < 0.6 {
+		return 0, nil
+	}
+
+	m := &Match{
+		CompanyID:     companyID,
+		MatchedSource: "edgar_entities",
+		MatchedKey:    cik,
+		MatchType:     "fuzzy_name",
+		Confidence:    ptrFloat(sim),
+	}
+	if err := l.store.UpsertMatch(ctx, m); err != nil {
+		return 0, err
+	}
+	return 1, nil
+}
+
+func (l *Linker) matchNCUA(ctx context.Context, companyID int64, cuNumber string) (int, error) {
+	var cuName string
+	err := l.pool.QueryRow(ctx,
+		`SELECT cu_name FROM fed_data.ncua_call_reports WHERE cu_number = $1 ORDER BY cycle_date DESC LIMIT 1`, cuNumber).
+		Scan(&cuName)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 0, nil
+		}
+		return 0, eris.Wrap(err, "link: query ncua_call_reports")
+	}
+
+	m := &Match{
+		CompanyID:     companyID,
+		MatchedSource: "ncua_call_reports",
+		MatchedKey:    cuNumber,
+		MatchType:     "direct_ncua_charter",
+		Confidence:    ptrFloat(1.0),
+	}
+	if err := l.store.UpsertMatch(ctx, m); err != nil {
+		return 0, err
+	}
+	return 1, nil
 }
 
 func (l *Linker) matchEOBMF(ctx context.Context, companyID int64, ein string) (int, error) {

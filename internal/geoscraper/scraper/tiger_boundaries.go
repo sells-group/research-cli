@@ -131,10 +131,12 @@ func (t *TIGERBoundaries) downloadAndLoad(ctx context.Context, pool db.Pool, def
 		return 0, eris.Wrapf(err, "download %s", def.name)
 	}
 
-	rawRows, err := tiger.ParseShapefile(shpPath, def.product)
+	result, err := tiger.ParseShapefile(shpPath, def.product)
 	if err != nil {
 		return 0, eris.Wrapf(err, "parse %s shapefile", def.name)
 	}
+
+	result = filterToProductColumns(result, def.product)
 
 	var totalRows int64
 	var batch [][]any
@@ -156,7 +158,7 @@ func (t *TIGERBoundaries) downloadAndLoad(ctx context.Context, pool db.Pool, def
 		return nil
 	}
 
-	for _, raw := range rawRows {
+	for _, raw := range result.Rows {
 		row := def.buildRow(raw)
 		batch = append(batch, row)
 		if len(batch) >= tigerBatchSize {

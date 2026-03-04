@@ -52,6 +52,7 @@ func NewRegistry(cfg *config.Config) *Registry {
 	r.Register(&ECI{cfg: cfg})
 	r.Register(&FDICBankFind{})
 	r.Register(&NCEN{cfg: cfg})
+	r.Register(&NCUACallReports{})
 
 	// Phase 3: On-Demand
 	r.Register(&ADVPart3{cfg: cfg})
