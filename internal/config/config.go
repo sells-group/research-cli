@@ -39,14 +39,7 @@ type Config struct {
 	Retry      RetryConfig      `yaml:"retry" mapstructure:"retry"`
 	Circuit    CircuitConfig    `yaml:"circuit" mapstructure:"circuit"`
 	Monitoring MonitoringConfig `yaml:"monitoring" mapstructure:"monitoring"`
-	Atlas      AtlasConfig      `yaml:"atlas" mapstructure:"atlas"`
 	Temporal   TemporalConfig   `yaml:"temporal" mapstructure:"temporal"`
-}
-
-// AtlasConfig configures the Atlas declarative schema management.
-type AtlasConfig struct {
-	DevURL     string `yaml:"dev_url" mapstructure:"dev_url"`
-	BinaryPath string `yaml:"binary_path" mapstructure:"binary_path"`
 }
 
 // TemporalConfig configures the Temporal.io workflow engine connection.
@@ -531,8 +524,6 @@ func Load() (*Config, error) {
 	v.SetDefault("geo.tiles.basemap_format", "png")
 	v.SetDefault("geo.tile_cache.max_entries", 10000)
 	v.SetDefault("geo.tile_cache.ttl_minutes", 60)
-	v.SetDefault("atlas.dev_url", "")
-	v.SetDefault("atlas.binary_path", "")
 	v.SetDefault("tiger.year", 2024)
 	v.SetDefault("tiger.temp_dir", "/tmp/tiger")
 	v.SetDefault("tiger.concurrency", 3)
