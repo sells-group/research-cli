@@ -18,6 +18,7 @@ import (
 	temporalenrich "github.com/sells-group/research-cli/internal/temporal/enrichment"
 	temporalfedsync "github.com/sells-group/research-cli/internal/temporal/fedsync"
 	temporalgeo "github.com/sells-group/research-cli/internal/temporal/geo"
+	temporaltigerload "github.com/sells-group/research-cli/internal/temporal/tigerload"
 
 	"github.com/sells-group/research-cli/internal/company"
 	"github.com/sells-group/research-cli/internal/geo"
@@ -147,9 +148,23 @@ var temporalGeoWorkerCmd = &cobra.Command{
 
 		activities := temporalgeo.NewActivities(pool, cs, gcClient, assoc, cfg)
 
+		// Tiger load dependencies.
+		tigerTempDir := cfg.Tiger.TempDir
+		if tigerTempDir == "" {
+			tigerTempDir = "/tmp/tiger"
+		}
+		if err := os.MkdirAll(tigerTempDir, 0o750); err != nil {
+			return eris.Wrapf(err, "create tiger temp dir %s", tigerTempDir)
+		}
+		tigerActivities := temporaltigerload.NewActivities(pool, tigerTempDir, cfg)
+
 		w := worker.New(c, temporalpkg.GeoTaskQueue, worker.Options{})
 		w.RegisterWorkflow(temporalgeo.BackfillWorkflow)
 		w.RegisterActivity(activities)
+		// Tiger load workflows/activities.
+		w.RegisterWorkflow(temporaltigerload.Workflow)
+		w.RegisterWorkflow(temporaltigerload.TigerStateWorkflow)
+		w.RegisterActivity(tigerActivities)
 
 		zap.L().Info("starting geo temporal worker",
 			zap.String("task_queue", temporalpkg.GeoTaskQueue),

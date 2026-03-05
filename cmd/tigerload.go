@@ -27,6 +27,22 @@ Use --states to restrict to specific states, --tables for specific products.`,
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
+		// Show status requires DB pool.
+		showStatus, _ := cmd.Flags().GetBool("status")
+		if showStatus {
+			pool, err := fedsyncPool(ctx)
+			if err != nil {
+				return err
+			}
+			defer pool.Close()
+			return printTigerStatus(ctx, pool)
+		}
+
+		// Temporal dispatch if --temporal.
+		if useTemporal, _ := cmd.Flags().GetBool("temporal"); useTemporal {
+			return runTigerLoadViaTemporal(ctx, cmd)
+		}
+
 		pool, err := fedsyncPool(ctx)
 		if err != nil {
 			return err
@@ -34,12 +50,6 @@ Use --states to restrict to specific states, --tables for specific products.`,
 		defer pool.Close()
 
 		log := zap.L().With(zap.String("command", "tigerload"))
-
-		// Show status and exit if --status flag is set.
-		showStatus, _ := cmd.Flags().GetBool("status")
-		if showStatus {
-			return printTigerStatus(ctx, pool)
-		}
 
 		// Ensure schema is current via Atlas.
 		if err := ensureSchema(ctx); err != nil {
@@ -108,6 +118,7 @@ func init() {
 	tigerloadCmd.Flags().Bool("dry-run", false, "download and validate without loading")
 	tigerloadCmd.Flags().Int("concurrency", 0, "parallel state downloads (default: from config or 3)")
 	tigerloadCmd.Flags().Bool("status", false, "show current TIGER data load status")
+	tigerloadCmd.Flags().Bool("temporal", false, "run via Temporal workflow")
 	rootCmd.AddCommand(tigerloadCmd)
 }
 
