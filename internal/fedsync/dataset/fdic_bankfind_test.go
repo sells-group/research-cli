@@ -82,13 +82,13 @@ func TestFDICBankFind_Sync_Institutions(t *testing.T) {
 	f := fetchermocks.NewMockFetcher(t)
 
 	instResp := fdicInstitutionResponse(
-		map[string]any{"CERT": float64(12345), "REPNM": "First National Bank", "ACTIVE": float64(1), "ASSET": float64(500000000)},
-		map[string]any{"CERT": float64(67890), "REPNM": "Community Trust", "ACTIVE": float64(1), "ASSET": float64(200000000)},
+		map[string]any{"CERT": float64(12345), "NAME": "First National Bank", "ACTIVE": float64(1), "ASSET": float64(500000000)},
+		map[string]any{"CERT": float64(67890), "NAME": "Community Trust", "ACTIVE": float64(1), "ASSET": float64(200000000)},
 	)
 
 	// Institutions page
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
-		return strings.Contains(url, "financials")
+		return strings.Contains(url, "institutions")
 	})).Return(jsonBody(t, instResp), nil).Once()
 
 	// Branches page (empty)
@@ -116,13 +116,13 @@ func TestFDICBankFind_Sync_Branches(t *testing.T) {
 
 	// Empty institutions
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
-		return strings.Contains(url, "financials")
+		return strings.Contains(url, "institutions")
 	})).Return(jsonBody(t, emptyFDICResponse()), nil).Once()
 
 	branchResp := fdicBranchResponse(
-		map[string]any{"UNINUMBR": float64(1), "CERT": float64(12345), "INSTNAME": "First National", "OFFNAME": "Main Office", "LATITUDE": float64(30.267), "LONGITUDE": float64(-97.743)},
-		map[string]any{"UNINUMBR": float64(2), "CERT": float64(12345), "INSTNAME": "First National", "OFFNAME": "Downtown Branch", "LATITUDE": float64(30.271), "LONGITUDE": float64(-97.740)},
-		map[string]any{"UNINUMBR": float64(3), "CERT": float64(67890), "INSTNAME": "Community Trust", "OFFNAME": "HQ", "LATITUDE": float64(32.776), "LONGITUDE": float64(-96.797)},
+		map[string]any{"UNINUM": float64(1), "CERT": float64(12345), "NAME": "First National", "OFFNAME": "Main Office", "LATITUDE": float64(30.267), "LONGITUDE": float64(-97.743)},
+		map[string]any{"UNINUM": float64(2), "CERT": float64(12345), "NAME": "First National", "OFFNAME": "Downtown Branch", "LATITUDE": float64(30.271), "LONGITUDE": float64(-97.740)},
+		map[string]any{"UNINUM": float64(3), "CERT": float64(67890), "NAME": "Community Trust", "OFFNAME": "HQ", "LATITUDE": float64(32.776), "LONGITUDE": float64(-96.797)},
 	)
 
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
@@ -150,7 +150,7 @@ func TestFDICBankFind_Sync_Pagination(t *testing.T) {
 	// Build a full page of institutions (fdicPageSize = 10000).
 	page1Records := make([]map[string]any, fdicPageSize)
 	for i := range page1Records {
-		page1Records[i] = map[string]any{"CERT": float64(i + 1), "REPNM": "Bank"}
+		page1Records[i] = map[string]any{"CERT": float64(i + 1), "NAME": "Bank"}
 	}
 	page1 := fdicResponse{}
 	page1.Meta.Total = fdicPageSize + 50
@@ -160,7 +160,7 @@ func TestFDICBankFind_Sync_Pagination(t *testing.T) {
 
 	page2Records := make([]map[string]any, 50)
 	for i := range page2Records {
-		page2Records[i] = map[string]any{"CERT": float64(fdicPageSize + i + 1), "REPNM": "Bank"}
+		page2Records[i] = map[string]any{"CERT": float64(fdicPageSize + i + 1), "NAME": "Bank"}
 	}
 	page2 := fdicResponse{}
 	page2.Meta.Total = fdicPageSize + 50
@@ -170,12 +170,12 @@ func TestFDICBankFind_Sync_Pagination(t *testing.T) {
 
 	// Page 1: contains "offset=0"
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
-		return strings.Contains(url, "financials") && strings.Contains(url, "offset=0")
+		return strings.Contains(url, "institutions") && strings.Contains(url, "offset=0")
 	})).Return(jsonBody(t, page1), nil).Once()
 
 	// Page 2: contains "offset=10000"
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
-		return strings.Contains(url, "financials") && strings.Contains(url, "offset=10000")
+		return strings.Contains(url, "institutions") && strings.Contains(url, "offset=10000")
 	})).Return(jsonBody(t, page2), nil).Once()
 
 	// Empty branches
@@ -207,7 +207,7 @@ func TestFDICBankFind_Sync_EmptyResponse(t *testing.T) {
 
 	// Both institutions and branches return empty
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
-		return strings.Contains(url, "financials")
+		return strings.Contains(url, "institutions")
 	})).Return(jsonBody(t, emptyFDICResponse()), nil).Once()
 
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
@@ -230,7 +230,7 @@ func TestFDICBankFind_Sync_DownloadError(t *testing.T) {
 	f := fetchermocks.NewMockFetcher(t)
 
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
-		return strings.Contains(url, "financials")
+		return strings.Contains(url, "institutions")
 	})).Return(nil, errors.New("network timeout")).Once()
 
 	d := &FDICBankFind{}
@@ -267,7 +267,7 @@ func TestFDICBankFind_Sync_MalformedJSON(t *testing.T) {
 	f := fetchermocks.NewMockFetcher(t)
 
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
-		return strings.Contains(url, "financials")
+		return strings.Contains(url, "institutions")
 	})).Return(io.NopCloser(strings.NewReader(`{invalid json`)), nil).Once()
 
 	d := &FDICBankFind{}
@@ -279,7 +279,7 @@ func TestFDICBankFind_Sync_MalformedJSON(t *testing.T) {
 func TestFDICBankFind_ParseInstitutions(t *testing.T) {
 	m := map[string]any{
 		"CERT":            float64(12345),
-		"REPNM":           "First National Bank",
+		"NAME":            "First National Bank",
 		"ACTIVE":          float64(1),
 		"INACTIVE":        float64(0),
 		"ADDRESS":         "123 Main St",
@@ -424,9 +424,9 @@ func TestFDICBankFind_ParseInstitutions(t *testing.T) {
 
 func TestFDICBankFind_ParseBranches(t *testing.T) {
 	m := map[string]any{
-		"UNINUMBR":        float64(99001),
+		"UNINUM":          float64(99001),
 		"CERT":            float64(12345),
-		"INSTNAME":        "First National Bank",
+		"NAME":            "First National Bank",
 		"OFFNAME":         "Downtown Branch",
 		"OFFNUM":          "002",
 		"FI_UNINUM":       "12345",
@@ -497,9 +497,9 @@ func TestFDICBankFind_ParseInstitution_NilFields(t *testing.T) {
 func TestFDICBankFind_ParseBranch_NilFields(t *testing.T) {
 	// Map with explicit nil values.
 	m := map[string]any{
-		"UNINUMBR":  nil,
+		"UNINUM":    nil,
 		"CERT":      nil,
-		"INSTNAME":  nil,
+		"NAME":      nil,
 		"LATITUDE":  nil,
 		"LONGITUDE": nil,
 	}
@@ -618,7 +618,7 @@ func TestFDICBankFind_Sync_BranchDownloadError(t *testing.T) {
 
 	// Institutions succeed (empty)
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
-		return strings.Contains(url, "financials")
+		return strings.Contains(url, "institutions")
 	})).Return(jsonBody(t, emptyFDICResponse()), nil).Once()
 
 	// Branches fail
@@ -640,10 +640,10 @@ func TestFDICBankFind_Sync_InstitutionUpsertError(t *testing.T) {
 	f := fetchermocks.NewMockFetcher(t)
 
 	instResp := fdicInstitutionResponse(
-		map[string]any{"CERT": float64(1), "REPNM": "Bank"},
+		map[string]any{"CERT": float64(1), "NAME": "Bank"},
 	)
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
-		return strings.Contains(url, "financials")
+		return strings.Contains(url, "institutions")
 	})).Return(jsonBody(t, instResp), nil).Once()
 
 	// BulkUpsert will fail at Begin
@@ -664,12 +664,12 @@ func TestFDICBankFind_Sync_BranchUpsertError(t *testing.T) {
 
 	// Empty institutions
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
-		return strings.Contains(url, "financials")
+		return strings.Contains(url, "institutions")
 	})).Return(jsonBody(t, emptyFDICResponse()), nil).Once()
 
 	// Branches with data
 	branchResp := fdicBranchResponse(
-		map[string]any{"UNINUMBR": float64(1), "CERT": float64(1), "INSTNAME": "Bank"},
+		map[string]any{"UNINUM": float64(1), "CERT": float64(1), "NAME": "Bank"},
 	)
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
 		return strings.Contains(url, "locations")
@@ -693,13 +693,13 @@ func TestFDICBankFind_Sync_BranchPagination(t *testing.T) {
 
 	// Empty institutions
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
-		return strings.Contains(url, "financials")
+		return strings.Contains(url, "institutions")
 	})).Return(jsonBody(t, emptyFDICResponse()), nil).Once()
 
 	// Branch page 1 (full page)
 	page1Records := make([]map[string]any, fdicPageSize)
 	for i := range page1Records {
-		page1Records[i] = map[string]any{"UNINUMBR": float64(i + 1), "CERT": float64(1), "INSTNAME": "Bank"}
+		page1Records[i] = map[string]any{"UNINUM": float64(i + 1), "CERT": float64(1), "NAME": "Bank"}
 	}
 	page1 := fdicResponse{}
 	page1.Meta.Total = fdicPageSize + 10
@@ -710,7 +710,7 @@ func TestFDICBankFind_Sync_BranchPagination(t *testing.T) {
 	// Branch page 2 (partial)
 	page2Records := make([]map[string]any, 10)
 	for i := range page2Records {
-		page2Records[i] = map[string]any{"UNINUMBR": float64(fdicPageSize + i + 1), "CERT": float64(1), "INSTNAME": "Bank"}
+		page2Records[i] = map[string]any{"UNINUM": float64(fdicPageSize + i + 1), "CERT": float64(1), "NAME": "Bank"}
 	}
 	page2 := fdicResponse{}
 	page2.Meta.Total = fdicPageSize + 10
@@ -749,7 +749,7 @@ func TestFDICBankFind_Sync_BranchContextCancellation(t *testing.T) {
 
 	// Institutions succeed (empty)
 	f.EXPECT().Download(mock.Anything, mock.MatchedBy(func(url string) bool {
-		return strings.Contains(url, "financials")
+		return strings.Contains(url, "institutions")
 	})).Return(jsonBody(t, emptyFDICResponse()), nil).Once()
 
 	// Cancel context after institutions but branches will see it

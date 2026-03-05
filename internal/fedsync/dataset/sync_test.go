@@ -930,21 +930,19 @@ func TestEntityXref_Sync(t *testing.T) {
 
 	f := fetchermocks.NewMockFetcher(t)
 
-	// Stage 1: XrefBuilder.Build() — CRD-CIK cross-reference
+	// Stage 1: XrefBuilder.Build() — CRD-CIK cross-reference (2 passes)
 	pool.ExpectExec("TRUNCATE TABLE fed_data.entity_xref").
 		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
 	pool.ExpectExec("INSERT INTO fed_data.entity_xref").
 		WillReturnResult(pgxmock.NewResult("INSERT", 50))
 	pool.ExpectExec("INSERT INTO fed_data.entity_xref").
 		WillReturnResult(pgxmock.NewResult("INSERT", 30))
-	pool.ExpectExec("INSERT INTO fed_data.entity_xref").
-		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	// Stage 2: MultiXrefBuilder.Build() — multi-dataset cross-reference
 	pool.ExpectExec("TRUNCATE TABLE fed_data.entity_xref_multi").
 		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
-	// 71 match passes, each returning 2 rows.
-	for range 71 {
+	// 69 match passes, each returning 2 rows.
+	for range 69 {
 		pool.ExpectExec("INSERT INTO fed_data.entity_xref_multi").
 			WillReturnResult(pgxmock.NewResult("INSERT", 2))
 	}
@@ -952,10 +950,10 @@ func TestEntityXref_Sync(t *testing.T) {
 	ds := &EntityXref{}
 	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
 	require.NoError(t, err)
-	// 81 from CRD-CIK + 142 from multi (71 passes × 2 rows)
-	assert.Equal(t, int64(223), result.RowsSynced)
-	assert.Equal(t, int64(81), result.Metadata["crd_cik_matched"])
-	assert.Equal(t, int64(142), result.Metadata["multi_matched"])
+	// 80 from CRD-CIK + 138 from multi (69 passes × 2 rows)
+	assert.Equal(t, int64(218), result.RowsSynced)
+	assert.Equal(t, int64(80), result.Metadata["crd_cik_matched"])
+	assert.Equal(t, int64(138), result.Metadata["multi_matched"])
 }
 
 func TestEntityXref_Sync_TruncateError(t *testing.T) {
@@ -1659,33 +1657,11 @@ func TestEconCensus_UpsertRows_Error(t *testing.T) {
 // =====================================================================
 
 func TestBrokerCheck_Sync_MidBatchFlush(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	// Generate 5002 pipe-delimited rows to trigger mid-batch flush at 5000.
-	var sb strings.Builder
-	sb.WriteString("CRD|Firm Name|SEC Number|City|State|Offices|Reps\n")
-	for i := 1; i <= 5002; i++ {
-		fmt.Fprintf(&sb, "%d|Firm %d|801-%d|City|NY|1|10\n", i, i, i)
-	}
-
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(mockDownloadToFileZIP(t, "firm.txt", sb.String()))
-
-	bcCols := []string{"crd_number", "firm_name", "sec_number", "main_addr_city", "main_addr_state", "num_branch_offices", "num_registered_reps"}
-	// First batch of 5000
-	expectBulkUpsert(pool, "fed_data.brokercheck", bcCols, 5000)
-	// Final batch of 2
-	expectBulkUpsert(pool, "fed_data.brokercheck", bcCols, 2)
-
+	// BrokerCheck is disabled (upstream URL returns 403). Verify Sync returns disabled error.
 	ds := &BrokerCheck{}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(5002), result.RowsSynced)
-	assert.NoError(t, pool.ExpectationsWereMet())
+	_, err := ds.Sync(context.Background(), nil, nil, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 // =====================================================================
@@ -1693,30 +1669,11 @@ func TestBrokerCheck_Sync_MidBatchFlush(t *testing.T) {
 // =====================================================================
 
 func TestFormBD_Sync_MidBatchFlush(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	var sb strings.Builder
-	sb.WriteString("CRD|SEC|Name|City|State|FYE|Reps\n")
-	for i := 1; i <= 5002; i++ {
-		fmt.Fprintf(&sb, "%d|8-%d|Firm %d|City|ST|12|%d\n", i, i, i, i)
-	}
-
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(mockDownloadToFileZIP(t, "bd_firm.txt", sb.String()))
-
-	bdCols := []string{"crd_number", "sec_number", "firm_name", "city", "state", "fiscal_year_end", "num_reps"}
-	expectBulkUpsert(pool, "fed_data.form_bd", bdCols, 5000)
-	expectBulkUpsert(pool, "fed_data.form_bd", bdCols, 2)
-
-	ds := &FormBD{cfg: &config.Config{}}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(5002), result.RowsSynced)
-	assert.NoError(t, pool.ExpectationsWereMet())
+	// FormBD is disabled (upstream URL returns 404). Verify Sync returns disabled error.
+	ds := &FormBD{}
+	_, err := ds.Sync(context.Background(), nil, nil, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 // =====================================================================
@@ -1724,30 +1681,11 @@ func TestFormBD_Sync_MidBatchFlush(t *testing.T) {
 // =====================================================================
 
 func TestOSHITA_Sync_MidBatchFlush(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	var sb strings.Builder
-	sb.WriteString("activity_nr,estab_name,site_city,site_state,site_zip,naics_code,sic_code,open_date,close_case_date,case_type,safety_hlth,total_penalty\n")
-	for i := 1; i <= 5002; i++ {
-		fmt.Fprintf(&sb, "%d,Firm %d,City,ST,12345,523110,6211,01/01/2024,,R,S,%d.00\n", 100000000+i, i, i*10)
-	}
-
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(mockDownloadToFileZIP(t, "severeinjury.csv", sb.String()))
-
-	oshaCols := []string{"activity_nr", "estab_name", "site_city", "site_state", "site_zip", "naics_code", "sic_code", "open_date", "close_case_date", "case_type", "safety_hlth", "total_penalty"}
-	expectBulkUpsert(pool, "fed_data.osha_inspections", oshaCols, 5000)
-	expectBulkUpsert(pool, "fed_data.osha_inspections", oshaCols, 2)
-
+	// OSHA ITA is disabled (upstream URL returns 404). Verify Sync returns disabled error.
 	ds := &OSHITA{}
-	result, err := ds.Sync(context.Background(), pool, f, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, int64(5002), result.RowsSynced)
-	assert.NoError(t, pool.ExpectationsWereMet())
+	_, err := ds.Sync(context.Background(), nil, nil, t.TempDir())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 // =====================================================================
@@ -2452,25 +2390,11 @@ func TestHoldings13F_ParseHoldingsXML_MidBatchFlush(t *testing.T) {
 // =====================================================================
 
 func TestBrokerCheck_Sync_UpsertError(t *testing.T) {
-	pool, err := pgxmock.NewPool()
-	require.NoError(t, err)
-	defer pool.Close()
-
-	f := fetchermocks.NewMockFetcher(t)
-
-	// 2 data rows (pipe delimited, 7 fields required: crd|name|sec|city|state|branches|reps)
-	csvContent := "crd_number|firm_name|sec_number|city|state|num_branch|num_reps\n1001|Firm A|SEC001|NYC|NY|5|100\n1002|Firm B|SEC002|LA|CA|3|50\n"
-	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		mockDownloadToFileZIP(t, "data.txt", csvContent),
-	)
-
-	// BulkUpsert fails
-	pool.ExpectBegin().WillReturnError(errors.New("db error"))
-
+	// BrokerCheck is disabled (upstream URL returns 403). Verify Sync returns disabled error.
 	ds := &BrokerCheck{}
-	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
+	_, err := ds.Sync(context.Background(), nil, nil, t.TempDir())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "brokercheck")
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 func TestEPAECHO_Sync_UpsertError(t *testing.T) {

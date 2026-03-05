@@ -16,8 +16,9 @@ const defaultBatchSize = 50000
 
 // BulkLoad loads parsed rows into a tiger_data table using COPY protocol.
 // For per-state products, loads into tiger_data.{st}_{table}.
+// Columns specifies the target column names; rows must match that order.
 // Batches in chunks of batchSize rows (0 = default 50,000).
-func BulkLoad(ctx context.Context, pool db.Pool, product Product, stateAbbr string, rows [][]any, batchSize int) (int64, error) {
+func BulkLoad(ctx context.Context, pool db.Pool, product Product, stateAbbr string, columns []string, rows [][]any, batchSize int) (int64, error) {
 	if len(rows) == 0 {
 		return 0, nil
 	}
@@ -27,14 +28,8 @@ func BulkLoad(ctx context.Context, pool db.Pool, product Product, stateAbbr stri
 	}
 
 	tableName := product.Table
-	if !product.National && stateAbbr != "" {
+	if (product.PerState || product.PerCounty) && stateAbbr != "" {
 		tableName = fmt.Sprintf("%s_%s", strings.ToLower(stateAbbr), product.Table)
-	}
-
-	columns := make([]string, len(product.Columns))
-	copy(columns, product.Columns)
-	if product.GeomType != "" {
-		columns = append(columns, "the_geom")
 	}
 
 	log := zap.L().With(
@@ -75,7 +70,7 @@ func BulkLoad(ctx context.Context, pool db.Pool, product Product, stateAbbr stri
 // TruncateTable truncates a tiger_data table before reloading.
 func TruncateTable(ctx context.Context, pool db.Pool, product Product, stateAbbr string) error {
 	tableName := product.Table
-	if !product.National && stateAbbr != "" {
+	if (product.PerState || product.PerCounty) && stateAbbr != "" {
 		tableName = fmt.Sprintf("%s_%s", strings.ToLower(stateAbbr), product.Table)
 	}
 

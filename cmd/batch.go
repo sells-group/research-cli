@@ -14,6 +14,7 @@ import (
 	"github.com/jomei/notionapi"
 	"github.com/rotisserie/eris"
 	"github.com/spf13/cobra"
+	"go.temporal.io/sdk/client"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -21,6 +22,8 @@ import (
 	"github.com/sells-group/research-cli/internal/pipeline"
 	"github.com/sells-group/research-cli/internal/resilience"
 	"github.com/sells-group/research-cli/internal/store"
+	temporalpkg "github.com/sells-group/research-cli/internal/temporal"
+	temporalenrich "github.com/sells-group/research-cli/internal/temporal/enrichment"
 	"github.com/sells-group/research-cli/pkg/notion"
 )
 
@@ -36,6 +39,10 @@ var batchCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
+
+		if useTemporal, _ := cmd.Flags().GetBool("temporal"); useTemporal {
+			return runBatchViaTemporal(ctx, cmd)
+		}
 
 		env, err := initPipeline(ctx)
 		if err != nil {
@@ -265,12 +272,75 @@ var reEnrichCmd = &cobra.Command{
 
 func init() {
 	batchCmd.Flags().IntVar(&batchLimit, "limit", 100, "max number of leads to process")
+	batchCmd.Flags().Bool("temporal", false, "run via Temporal workflow")
 	batchCmd.AddCommand(retryFailedCmd)
 	retryFailedCmd.Flags().IntVar(&batchLimit, "limit", 50, "max number of DLQ entries to retry")
 	batchCmd.AddCommand(reEnrichCmd)
 	reEnrichCmd.Flags().IntVar(&reEnrichDays, "days", 90, "re-enrich companies older than this many days")
 	reEnrichCmd.Flags().IntVar(&reEnrichLimit, "limit", 50, "max number of stale companies to re-enrich")
 	rootCmd.AddCommand(batchCmd)
+}
+
+// runBatchViaTemporal starts a BatchEnrichWorkflow on Temporal.
+func runBatchViaTemporal(ctx context.Context, _ *cobra.Command) error {
+	c, err := temporalpkg.NewClient(cfg.Temporal)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	// Still need to query Notion for leads.
+	env, err := initPipeline(ctx)
+	if err != nil {
+		return err
+	}
+	defer env.Close()
+
+	var leads []notionapi.Page
+	leads, err = notion.QueryQueuedLeads(ctx, env.Notion, cfg.Notion.LeadDB)
+	if err != nil {
+		return eris.Wrap(err, "query queued leads")
+	}
+
+	if len(leads) == 0 {
+		zap.L().Info("no queued leads found")
+		return nil
+	}
+
+	if batchLimit > 0 && len(leads) > batchLimit {
+		leads = leads[:batchLimit]
+	}
+
+	// Convert leads to companies.
+	companies := make([]model.Company, len(leads))
+	for i, lead := range leads {
+		companies[i] = leadToCompany(lead)
+	}
+
+	workflowID := fmt.Sprintf("batch-enrich-%d", time.Now().UnixNano())
+	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: temporalpkg.EnrichmentTaskQueue,
+	}, temporalenrich.BatchEnrichWorkflow, temporalenrich.BatchEnrichParams{
+		Companies:   companies,
+		Concurrency: cfg.Batch.MaxConcurrentCompanies,
+	})
+	if err != nil {
+		return eris.Wrap(err, "start batch enrich workflow")
+	}
+
+	zap.L().Info("batch enrich workflow started",
+		zap.String("workflow_id", run.GetID()),
+		zap.Int("companies", len(companies)),
+	)
+
+	var result temporalenrich.BatchEnrichResult
+	if err := run.Get(ctx, &result); err != nil {
+		return eris.Wrap(err, "batch enrich workflow failed")
+	}
+
+	fmt.Printf("Batch complete: %d succeeded, %d failed\n", result.Succeeded, result.Failed)
+	return nil
 }
 
 func leadToCompany(page notionapi.Page) model.Company {

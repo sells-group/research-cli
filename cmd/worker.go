@@ -20,7 +20,7 @@ var workerCmd = &cobra.Command{
 		ctx := rootCmd.Context()
 
 		// Connect to Temporal.
-		tc, err := tmprl.NewClient(cfg.Fedsync)
+		tc, err := tmprl.NewClient(cfg.Temporal)
 		if err != nil {
 			return eris.Wrap(err, "worker: create temporal client")
 		}
@@ -51,13 +51,13 @@ var workerCmd = &cobra.Command{
 		}
 
 		// Create and configure worker.
-		w := worker.New(tc, tmprl.TaskQueue, worker.Options{})
+		w := worker.New(tc, tmprl.ADVDocumentQueue, worker.Options{})
 		w.RegisterWorkflow(tmprl.ADVDocumentSyncWorkflow)
 		w.RegisterActivity(activities)
 
 		zap.L().Info("starting temporal worker",
-			zap.String("task_queue", tmprl.TaskQueue),
-			zap.String("host_port", cfg.Fedsync.TemporalHostPort),
+			zap.String("task_queue", tmprl.ADVDocumentQueue),
+			zap.String("host_port", cfg.Temporal.HostPort),
 		)
 
 		// Run blocks until interrupted.

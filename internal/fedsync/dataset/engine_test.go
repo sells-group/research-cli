@@ -488,18 +488,18 @@ func TestEngine_Run_AutoTriggerXref(t *testing.T) {
 		WithArgs("entity_xref").
 		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(2)))
 
-	// Stage 1: xref builder — truncate + 3 CRD-CIK passes
+	// Stage 1: xref builder — truncate + 2 CRD-CIK passes
 	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref").
 		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
-	for range 3 {
+	for range 2 {
 		mock.ExpectExec("INSERT INTO fed_data.entity_xref").
 			WillReturnResult(pgxmock.NewResult("INSERT", 0))
 	}
 
-	// Stage 2: multi xref builder — truncate + 71 passes
+	// Stage 2: multi xref builder — truncate + 69 passes
 	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref_multi").
 		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
-	for range 71 {
+	for range 69 {
 		mock.ExpectExec("INSERT INTO fed_data.entity_xref_multi").
 			WillReturnResult(pgxmock.NewResult("INSERT", 0))
 	}
@@ -550,14 +550,14 @@ func TestEngine_Run_NoAutoTriggerWhenXrefSelected(t *testing.T) {
 	// entity_xref.Sync: Stage 1 — truncate + 3 passes
 	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref").
 		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
-	for range 3 {
+	for range 2 {
 		mock.ExpectExec("INSERT INTO fed_data.entity_xref").
 			WillReturnResult(pgxmock.NewResult("INSERT", 0))
 	}
-	// Stage 2 — truncate + 71 passes
+	// Stage 2 — truncate + 69 passes
 	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref_multi").
 		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
-	for range 71 {
+	for range 69 {
 		mock.ExpectExec("INSERT INTO fed_data.entity_xref_multi").
 			WillReturnResult(pgxmock.NewResult("INSERT", 0))
 	}

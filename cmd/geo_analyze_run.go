@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/analysis"
-	"github.com/sells-group/research-cli/internal/geospatial"
 )
 
 var geoAnalyzeRunCmd = &cobra.Command{
@@ -36,12 +35,9 @@ Use --force to skip validation checks.`,
 		}
 		defer pool.Close()
 
-		// Ensure geo + analysis migrations are current.
-		if err := geospatial.Migrate(ctx, pool); err != nil {
-			return eris.Wrap(err, "geo analyze run: geo migrate")
-		}
-		if err := analysis.Migrate(ctx, pool); err != nil {
-			return eris.Wrap(err, "geo analyze run: analysis migrate")
+		// Ensure schema is current via Atlas.
+		if err := ensureSchema(ctx); err != nil {
+			return eris.Wrap(err, "geo analyze run: ensure schema")
 		}
 
 		opts, err := parseAnalyzeRunOpts(cmd)

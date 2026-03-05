@@ -130,16 +130,15 @@ func (s *PostgresStore) GetCompanyByDomain(ctx context.Context, domain string) (
 	return c, nil
 }
 
-// SearchCompaniesByName finds companies by trigram similarity on name.
+// SearchCompaniesByName finds companies by exact case-insensitive name match.
 func (s *PostgresStore) SearchCompaniesByName(ctx context.Context, name string, limit int) ([]CompanyRecord, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT `+companyColumns+`
-		FROM companies
-		WHERE name % $1
-		ORDER BY similarity(name, $1) DESC
+		FROM companies c
+		WHERE LOWER(c.name) = LOWER($1)
 		LIMIT $2`, name, limit)
 	if err != nil {
 		return nil, eris.Wrap(err, "company: search by name")

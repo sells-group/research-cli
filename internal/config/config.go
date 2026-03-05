@@ -39,6 +39,20 @@ type Config struct {
 	Retry      RetryConfig      `yaml:"retry" mapstructure:"retry"`
 	Circuit    CircuitConfig    `yaml:"circuit" mapstructure:"circuit"`
 	Monitoring MonitoringConfig `yaml:"monitoring" mapstructure:"monitoring"`
+	Atlas      AtlasConfig      `yaml:"atlas" mapstructure:"atlas"`
+	Temporal   TemporalConfig   `yaml:"temporal" mapstructure:"temporal"`
+}
+
+// AtlasConfig configures the Atlas declarative schema management.
+type AtlasConfig struct {
+	DevURL     string `yaml:"dev_url" mapstructure:"dev_url"`
+	BinaryPath string `yaml:"binary_path" mapstructure:"binary_path"`
+}
+
+// TemporalConfig configures the Temporal.io workflow engine connection.
+type TemporalConfig struct {
+	HostPort  string `yaml:"host_port" mapstructure:"host_port"`
+	Namespace string `yaml:"namespace" mapstructure:"namespace"`
 }
 
 // MonitoringConfig configures production monitoring and alerting.
@@ -148,21 +162,19 @@ type WaterfallConfig struct {
 
 // FedsyncConfig configures the federal data sync pipeline.
 type FedsyncConfig struct {
-	DatabaseURL       string    `yaml:"database_url" mapstructure:"database_url"`
-	TempDir           string    `yaml:"temp_dir" mapstructure:"temp_dir"`
-	SAMKey            string    `yaml:"sam_api_key" mapstructure:"sam_api_key"`
-	FREDKey           string    `yaml:"fred_api_key" mapstructure:"fred_api_key"`
-	BLSKey            string    `yaml:"bls_api_key" mapstructure:"bls_api_key"`
-	CensusKey         string    `yaml:"census_api_key" mapstructure:"census_api_key"`
-	FCCBDCKey         string    `yaml:"fcc_bdc_key" mapstructure:"fcc_bdc_key"`
-	EDGARUserAgent    string    `yaml:"edgar_user_agent" mapstructure:"edgar_user_agent"`
-	N8NWebhook        string    `yaml:"n8n_webhook_url" mapstructure:"n8n_webhook_url"`
-	MistralKey        string    `yaml:"mistral_api_key" mapstructure:"mistral_api_key"`
-	MistralModel      string    `yaml:"mistral_ocr_model" mapstructure:"mistral_ocr_model"`
-	OCR               OCRConfig `yaml:"ocr" mapstructure:"ocr"`
-	DoclingURL        string    `yaml:"docling_url" mapstructure:"docling_url"`
-	TemporalHostPort  string    `yaml:"temporal_host_port" mapstructure:"temporal_host_port"`
-	TemporalNamespace string    `yaml:"temporal_namespace" mapstructure:"temporal_namespace"`
+	DatabaseURL    string    `yaml:"database_url" mapstructure:"database_url"`
+	TempDir        string    `yaml:"temp_dir" mapstructure:"temp_dir"`
+	SAMKey         string    `yaml:"sam_api_key" mapstructure:"sam_api_key"`
+	FREDKey        string    `yaml:"fred_api_key" mapstructure:"fred_api_key"`
+	BLSKey         string    `yaml:"bls_api_key" mapstructure:"bls_api_key"`
+	CensusKey      string    `yaml:"census_api_key" mapstructure:"census_api_key"`
+	FCCBDCKey      string    `yaml:"fcc_bdc_key" mapstructure:"fcc_bdc_key"`
+	EDGARUserAgent string    `yaml:"edgar_user_agent" mapstructure:"edgar_user_agent"`
+	N8NWebhook     string    `yaml:"n8n_webhook_url" mapstructure:"n8n_webhook_url"`
+	MistralKey     string    `yaml:"mistral_api_key" mapstructure:"mistral_api_key"`
+	MistralModel   string    `yaml:"mistral_ocr_model" mapstructure:"mistral_ocr_model"`
+	OCR            OCRConfig `yaml:"ocr" mapstructure:"ocr"`
+	DoclingURL     string    `yaml:"docling_url" mapstructure:"docling_url"`
 }
 
 // OCRConfig configures PDF text extraction.
@@ -495,8 +507,6 @@ func Load() (*Config, error) {
 	v.SetDefault("fedsync.ocr.provider", "local")
 	v.SetDefault("fedsync.ocr.pdftotext_path", "pdftotext")
 	v.SetDefault("fedsync.docling_url", "http://localhost:5001")
-	v.SetDefault("fedsync.temporal_host_port", "localhost:7233")
-	v.SetDefault("fedsync.temporal_namespace", "default")
 	v.SetDefault("discovery.google_places_rate_limit", 10.0)
 	v.SetDefault("discovery.max_candidates_per_run", 10000)
 	v.SetDefault("discovery.ppp_min_approval", 150000.0)
@@ -520,6 +530,8 @@ func Load() (*Config, error) {
 	v.SetDefault("geo.tiles.basemap_format", "png")
 	v.SetDefault("geo.tile_cache.max_entries", 10000)
 	v.SetDefault("geo.tile_cache.ttl_minutes", 60)
+	v.SetDefault("atlas.dev_url", "")
+	v.SetDefault("atlas.binary_path", "")
 	v.SetDefault("tiger.year", 2024)
 	v.SetDefault("tiger.temp_dir", "/tmp/tiger")
 	v.SetDefault("tiger.concurrency", 3)
@@ -556,6 +568,8 @@ func Load() (*Config, error) {
 	v.SetDefault("retry.dlq_max_retries", 3)
 	v.SetDefault("circuit.failure_threshold", 5)
 	v.SetDefault("circuit.reset_timeout_secs", 30)
+	v.SetDefault("temporal.host_port", "localhost:7233")
+	v.SetDefault("temporal.namespace", "research-cli")
 	v.SetDefault("monitoring.enabled", false)
 	v.SetDefault("monitoring.check_interval_secs", 300)
 	v.SetDefault("monitoring.lookback_window_hours", 24)

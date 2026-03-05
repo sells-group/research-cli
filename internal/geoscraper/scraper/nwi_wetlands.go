@@ -101,14 +101,15 @@ func (n *NWIWetlands) Sync(ctx context.Context, pool db.Pool, ft fetcher.Fetcher
 			continue
 		}
 
-		rows, err := tiger.ParseShapefile(shpPath, nwiProduct)
+		result, err := tiger.ParseShapefile(shpPath, nwiProduct)
 		if err != nil {
 			log.Warn("nwi_wetlands: parse shapefile failed, skipping state",
 				zap.String("state", state), zap.Error(err))
 			continue
 		}
+		result = filterToProductColumns(result, nwiProduct)
 
-		for _, shpRow := range rows {
+		for _, shpRow := range result.Rows {
 			row, ok := newWetlandRow(shpRow)
 			if !ok {
 				continue

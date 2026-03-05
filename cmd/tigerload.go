@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/sells-group/research-cli/internal/fedsync"
 	"github.com/sells-group/research-cli/internal/tiger"
 )
 
@@ -42,9 +41,9 @@ Use --states to restrict to specific states, --tables for specific products.`,
 			return printTigerStatus(ctx, pool)
 		}
 
-		// Ensure migrations are current (creates tiger_data schema + extension).
-		if err := fedsync.Migrate(ctx, pool); err != nil {
-			return eris.Wrap(err, "tigerload: migrate")
+		// Ensure schema is current via Atlas.
+		if err := ensureSchema(ctx); err != nil {
+			return eris.Wrap(err, "tigerload: ensure schema")
 		}
 
 		// Parse flags.

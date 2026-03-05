@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// EncodeWKB converts a go-shp geometry to EWKB bytes with SRID 4326.
+// EncodeWKB converts a go-shp geometry to EWKB bytes with SRID 4269 (NAD83).
 // Returns nil, nil for unsupported or nil shapes.
 func EncodeWKB(shape shp.Shape) ([]byte, error) {
 	if shape == nil {
@@ -19,7 +19,7 @@ func EncodeWKB(shape shp.Shape) ([]byte, error) {
 
 	switch s := shape.(type) {
 	case *shp.Point:
-		g = geom.NewPointFlat(geom.XY, []float64{s.X, s.Y}).SetSRID(4326)
+		g = geom.NewPointFlat(geom.XY, []float64{s.X, s.Y}).SetSRID(4269)
 
 	case *shp.PolyLine:
 		g = polyLineToMultiLineString(s)
@@ -49,7 +49,7 @@ func polyLineToMultiLineString(pl *shp.PolyLine) geom.T {
 		return nil
 	}
 
-	mls := geom.NewMultiLineString(geom.XY).SetSRID(4326)
+	mls := geom.NewMultiLineString(geom.XY).SetSRID(4269)
 
 	for i := int32(0); i < pl.NumParts; i++ {
 		start := pl.Parts[i]
@@ -84,7 +84,7 @@ func polygonToMultiPolygon(p *shp.Polygon) geom.T {
 		return nil
 	}
 
-	mp := geom.NewMultiPolygon(geom.XY).SetSRID(4326)
+	mp := geom.NewMultiPolygon(geom.XY).SetSRID(4269)
 
 	for i := int32(0); i < p.NumParts; i++ {
 		start := p.Parts[i]

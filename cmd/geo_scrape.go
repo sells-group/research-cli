@@ -44,9 +44,9 @@ Use --force to ignore ShouldRun() scheduling logic.`,
 		}
 		defer pool.Close()
 
-		// Ensure geo migrations are current.
-		if err := geospatial.Migrate(ctx, pool); err != nil {
-			return eris.Wrap(err, "geo scrape: migrate")
+		// Ensure schema is current via Atlas.
+		if err := ensureSchema(ctx); err != nil {
+			return eris.Wrap(err, "geo scrape: ensure schema")
 		}
 
 		// Parse flags.

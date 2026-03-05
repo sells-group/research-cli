@@ -3,25 +3,50 @@
 package tiger
 
 import (
+	"context"
 	"fmt"
 	"sort"
+
+	"github.com/rotisserie/eris"
+
+	"github.com/sells-group/research-cli/internal/db"
 )
 
 // Product describes a TIGER/Line shapefile product.
 type Product struct {
-	Name     string   // e.g., "EDGES"
-	Table    string   // target table without state prefix, e.g., "edges"
-	National bool     // true = single national file, false = per-state
-	Columns  []string // DB columns (without geom)
-	GeomType string   // "POINT", "LINESTRING", "POLYGON", "MULTIPOLYGON"
+	Name          string   // e.g., "EDGES"
+	Table         string   // target table without state prefix, e.g., "edges"
+	FileKey       string   // filename component in Census URL (defaults to Table if empty)
+	TemplateTable string   // tiger schema template table name (defaults to Table)
+	National      bool     // true = single national file
+	PerState      bool     // true = one file per state (2-digit FIPS)
+	PerCounty     bool     // true = one file per county (5-digit FIPS)
+	Columns       []string // DB columns (without geom) — used for documentation; actual columns come from tiger.* templates
+	GeomType      string   // "POINT", "LINESTRING", "POLYGON", "MULTIPOLYGON"
+}
+
+// ParseResult holds the parsed shapefile data and discovered column names.
+type ParseResult struct {
+	Columns []string // column names from the shapefile (lowercase)
+	Rows    [][]any  // row data in column order; geometry appended last if present
+}
+
+// Template returns the tiger schema template table name for this product.
+func (p Product) Template() string {
+	if p.TemplateTable != "" {
+		return p.TemplateTable
+	}
+	return p.Table
 }
 
 // Products lists all TIGER/Line products required for geocoding.
 var Products = []Product{
 	{
-		Name:     "STATE",
-		Table:    "state_all",
-		National: true,
+		Name:          "STATE",
+		Table:         "state_all",
+		FileKey:       "state",
+		TemplateTable: "state",
+		National:      true,
 		Columns: []string{
 			"region", "division", "statefp", "statens", "geoid", "stusps",
 			"name", "lsad", "mtfcc", "funcstat", "aland", "awater",
@@ -30,9 +55,11 @@ var Products = []Product{
 		GeomType: "MULTIPOLYGON",
 	},
 	{
-		Name:     "COUNTY",
-		Table:    "county_all",
-		National: true,
+		Name:          "COUNTY",
+		Table:         "county_all",
+		FileKey:       "county",
+		TemplateTable: "county",
+		National:      true,
 		Columns: []string{
 			"statefp", "countyfp", "countyns", "geoid", "name", "namelsad",
 			"lsad", "classfp", "mtfcc", "csafp", "cbsafp", "metdivfp",
@@ -43,7 +70,7 @@ var Products = []Product{
 	{
 		Name:     "PLACE",
 		Table:    "place",
-		National: true,
+		PerState: true,
 		Columns: []string{
 			"statefp", "placefp", "placens", "geoid", "name", "namelsad",
 			"lsad", "classfp", "pcicbsa", "pcinecta", "mtfcc", "funcstat",
@@ -54,7 +81,7 @@ var Products = []Product{
 	{
 		Name:     "COUSUB",
 		Table:    "cousub",
-		National: true,
+		PerState: true,
 		Columns: []string{
 			"statefp", "countyfp", "cousubfp", "cousubns", "geoid", "name",
 			"namelsad", "lsad", "classfp", "mtfcc", "cnectafp", "nectafp",
@@ -65,6 +92,7 @@ var Products = []Product{
 	{
 		Name:     "ZCTA520",
 		Table:    "zcta5",
+		FileKey:  "zcta520",
 		National: true,
 		Columns: []string{
 			"zcta5ce20", "geoid20", "classfp20", "mtfcc20", "funcstat20",
@@ -73,9 +101,9 @@ var Products = []Product{
 		GeomType: "MULTIPOLYGON",
 	},
 	{
-		Name:     "EDGES",
-		Table:    "edges",
-		National: false,
+		Name:      "EDGES",
+		Table:     "edges",
+		PerCounty: true,
 		Columns: []string{
 			"tlid", "statefp", "countyfp", "fullname", "smtyp", "mtfcc",
 			"lwflag", "offsetl", "offsetr", "tfidl", "tfidr", "zipl", "zipr",
@@ -83,9 +111,9 @@ var Products = []Product{
 		GeomType: "MULTILINESTRING",
 	},
 	{
-		Name:     "FACES",
-		Table:    "faces",
-		National: false,
+		Name:      "FACES",
+		Table:     "faces",
+		PerCounty: true,
 		Columns: []string{
 			"tfid", "statefp00", "countyfp00", "tractce00", "blkgrpce00",
 			"blockce00", "cousubfp00", "submcdfp00", "conctyfp00", "placefp00",
@@ -96,9 +124,9 @@ var Products = []Product{
 		GeomType: "MULTIPOLYGON",
 	},
 	{
-		Name:     "ADDR",
-		Table:    "addr",
-		National: false,
+		Name:      "ADDR",
+		Table:     "addr",
+		PerCounty: true,
 		Columns: []string{
 			"tlid", "fromhn", "tohn", "side", "zip", "plus4", "fromtyp",
 			"totyp", "fromarmid", "toarmid", "aodo", "statefp",
@@ -106,9 +134,9 @@ var Products = []Product{
 		GeomType: "",
 	},
 	{
-		Name:     "FEATNAMES",
-		Table:    "featnames",
-		National: false,
+		Name:      "FEATNAMES",
+		Table:     "featnames",
+		PerCounty: true,
 		Columns: []string{
 			"tlid", "fullname", "name", "predirabrv", "pretypabrv",
 			"prequalabr", "sufdirabrv", "suftypabrv", "sufqualabr", "predir",
@@ -171,17 +199,24 @@ func ProductByName(name string) (Product, bool) {
 }
 
 // DownloadURL builds the Census Bureau download URL for a TIGER/Line shapefile.
-// National products use tl_{year}_us_{table}.zip; per-state use tl_{year}_{fips}_{table}.zip.
-func DownloadURL(product Product, year int, stateFIPS string) string {
+// National products use tl_{year}_us_{filekey}.zip.
+// Per-state products use tl_{year}_{stateFIPS}_{filekey}.zip.
+// Per-county products use tl_{year}_{countyFIPS}_{filekey}.zip (5-digit FIPS).
+// FileKey defaults to Table when not explicitly set (they differ for state_all, county_all, zcta5).
+func DownloadURL(product Product, year int, fips string) string {
+	fileKey := product.FileKey
+	if fileKey == "" {
+		fileKey = product.Table
+	}
 	if product.National {
 		return fmt.Sprintf(
 			"https://www2.census.gov/geo/tiger/TIGER%d/%s/tl_%d_us_%s.zip",
-			year, product.Name, year, product.Table,
+			year, product.Name, year, fileKey,
 		)
 	}
 	return fmt.Sprintf(
 		"https://www2.census.gov/geo/tiger/TIGER%d/%s/tl_%d_%s_%s.zip",
-		year, product.Name, year, stateFIPS, product.Table,
+		year, product.Name, year, fips, fileKey,
 	)
 }
 
@@ -206,13 +241,46 @@ func AllStateAbbrs() []string {
 	return abbrs
 }
 
-// PerStateProducts returns products with National=false.
+// PerStateProducts returns products loaded per-state (PerState or PerCounty).
 func PerStateProducts() []Product {
 	var out []Product
 	for _, p := range Products {
-		if !p.National {
+		if p.PerState || p.PerCounty {
 			out = append(out, p)
 		}
 	}
 	return out
+}
+
+// PerCountyProducts returns products with PerCounty=true.
+func PerCountyProducts() []Product {
+	var out []Product
+	for _, p := range Products {
+		if p.PerCounty {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// CountyFIPSForState queries tiger_data.county_all to get 5-digit FIPS codes for a state.
+func CountyFIPSForState(ctx context.Context, pool db.Pool, stateFIPS string) ([]string, error) {
+	rows, err := pool.Query(ctx,
+		"SELECT statefp || countyfp FROM tiger_data.county_all WHERE statefp = $1 ORDER BY countyfp",
+		stateFIPS,
+	)
+	if err != nil {
+		return nil, eris.Wrapf(err, "tiger: query county FIPS for state %s", stateFIPS)
+	}
+	defer rows.Close()
+
+	var codes []string
+	for rows.Next() {
+		var fips string
+		if err := rows.Scan(&fips); err != nil {
+			return nil, eris.Wrap(err, "tiger: scan county FIPS")
+		}
+		codes = append(codes, fips)
+	}
+	return codes, rows.Err()
 }

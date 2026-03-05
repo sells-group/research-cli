@@ -8,6 +8,49 @@ import (
 	"github.com/sells-group/research-cli/internal/tiger"
 )
 
+// filterToProductColumns reorders a ParseResult to match the exact column order
+// defined in the product's Columns list (with the_geom appended if applicable).
+// This ensures buildRow functions can use hardcoded index positions matching
+// the product definition.
+func filterToProductColumns(result *tiger.ParseResult, p tiger.Product) *tiger.ParseResult {
+	// Build source column index map.
+	srcIdx := make(map[string]int, len(result.Columns))
+	for i, col := range result.Columns {
+		srcIdx[col] = i
+	}
+
+	// Build target column order: product.Columns + optional the_geom.
+	targetCols := make([]string, 0, len(p.Columns)+1)
+	targetCols = append(targetCols, p.Columns...)
+	if p.GeomType != "" {
+		targetCols = append(targetCols, "the_geom")
+	}
+
+	// Map target positions to source positions.
+	mapping := make([]int, len(targetCols))
+	for i, col := range targetCols {
+		idx, ok := srcIdx[col]
+		if !ok {
+			mapping[i] = -1 // column not in source
+		} else {
+			mapping[i] = idx
+		}
+	}
+
+	newRows := make([][]any, len(result.Rows))
+	for i, row := range result.Rows {
+		newRow := make([]any, len(targetCols))
+		for j, srcI := range mapping {
+			if srcI >= 0 && srcI < len(row) {
+				newRow[j] = row[srcI]
+			}
+		}
+		newRows[i] = newRow
+	}
+
+	return &tiger.ParseResult{Columns: targetCols, Rows: newRows}
+}
+
 // tigerGeoSource is the source identifier for all TIGER geo scrapers.
 const tigerGeoSource = "tiger"
 

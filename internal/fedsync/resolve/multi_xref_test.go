@@ -97,35 +97,9 @@ func TestExactNameGeoSQL_NotExists(t *testing.T) {
 	assert.Contains(t, sql, "entity_xref_multi")
 }
 
-func TestFuzzyNameStateSQL_Content(t *testing.T) {
-	sql := fuzzyNameStateSQL(
-		"adv_firms", "crd_number", "firm_name", "state",
-		"ppp_loans", "loannumber", "borrowername", "borrowerstate",
-	)
-	assert.Contains(t, sql, "INSERT INTO fed_data.entity_xref_multi")
-	assert.Contains(t, sql, "'adv_firms'")
-	assert.Contains(t, sql, "'ppp_loans'")
-	assert.Contains(t, sql, "'fuzzy_name_state'")
-	assert.Contains(t, sql, "similarity")
-	assert.Contains(t, sql, "0.6")
-	assert.Contains(t, sql, "DISTINCT ON")
-	assert.Contains(t, sql, "a.state = b.borrowerstate")
-	assert.Contains(t, sql, "ON CONFLICT")
-}
-
-func TestFuzzyNameStateSQL_EdgarFPDS(t *testing.T) {
-	sql := fuzzyNameStateSQL(
-		"edgar_entities", "cik", "entity_name", "state_of_business",
-		"fpds_contracts", "contract_id", "vendor_name", "vendor_state",
-	)
-	assert.Contains(t, sql, "'edgar_entities'")
-	assert.Contains(t, sql, "'fpds_contracts'")
-	assert.Contains(t, sql, "a.state_of_business = b.vendor_state")
-}
-
 func TestAllPasses_Count(t *testing.T) {
 	passes := allPasses()
-	assert.Len(t, passes, 71)
+	assert.Len(t, passes, 69)
 }
 
 func TestAllPasses_UniqueNames(t *testing.T) {
@@ -158,7 +132,7 @@ func TestAllPasses_MatchTypes(t *testing.T) {
 	for _, p := range passes {
 		for _, mt := range []string{
 			"direct_crd", "direct_cik", "direct_duns", "direct_uei", "direct_ein",
-			"direct_fdic_cert", "exact_name_zip", "exact_name_state", "fuzzy_name_state",
+			"direct_fdic_cert", "exact_name_zip", "exact_name_state",
 		} {
 			quoted := "'" + mt + "'"
 			if strings.Contains(p.sql, quoted) {
@@ -174,7 +148,6 @@ func TestAllPasses_MatchTypes(t *testing.T) {
 	assert.True(t, matchTypes["direct_fdic_cert"], "missing direct_fdic_cert match type")
 	assert.True(t, matchTypes["exact_name_zip"], "missing exact_name_zip match type")
 	assert.True(t, matchTypes["exact_name_state"], "missing exact_name_state match type")
-	assert.True(t, matchTypes["fuzzy_name_state"], "missing fuzzy_name_state match type")
 }
 
 // --- MultiXrefBuilder pgxmock tests ---
@@ -197,7 +170,7 @@ func TestMultiXrefBuilder_Build_Success(t *testing.T) {
 	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref_multi").
 		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
 
-	// 14 passes, each returns some rows.
+	// 69 passes, each returns some rows.
 	passes := allPasses()
 	for range passes {
 		mock.ExpectExec("INSERT INTO fed_data.entity_xref_multi").
@@ -207,8 +180,8 @@ func TestMultiXrefBuilder_Build_Success(t *testing.T) {
 	builder := NewMultiXrefBuilder(mock)
 	total, counts, err := builder.Build(context.Background())
 	assert.NoError(t, err)
-	assert.Equal(t, int64(71*10), total)
-	assert.Len(t, counts, 71)
+	assert.Equal(t, int64(69*10), total)
+	assert.Len(t, counts, 69)
 	for _, c := range counts {
 		assert.Equal(t, int64(10), c)
 	}

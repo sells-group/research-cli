@@ -51,10 +51,11 @@ func (r *TIGERRoads) Sync(ctx context.Context, pool db.Pool, _ fetcher.Fetcher, 
 		return nil, eris.Wrap(err, "tiger_roads: download")
 	}
 
-	rawRows, err := tiger.ParseShapefile(shpPath, tigerRoadProduct)
+	result, err := tiger.ParseShapefile(shpPath, tigerRoadProduct)
 	if err != nil {
 		return nil, eris.Wrap(err, "tiger_roads: parse shapefile")
 	}
+	result = filterToProductColumns(result, tigerRoadProduct)
 
 	var totalRows int64
 	var batch [][]any
@@ -76,7 +77,7 @@ func (r *TIGERRoads) Sync(ctx context.Context, pool db.Pool, _ fetcher.Fetcher, 
 		return nil
 	}
 
-	for _, raw := range rawRows {
+	for _, raw := range result.Rows {
 		row := newRoadRow(raw)
 		batch = append(batch, row)
 		if len(batch) >= tigerBatchSize {

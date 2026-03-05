@@ -13,7 +13,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
-	"github.com/sells-group/research-cli/internal/fedsync"
 	"github.com/sells-group/research-cli/internal/scorer"
 )
 
@@ -85,9 +84,9 @@ func runScore(cmd *cobra.Command, _ []string) error {
 	}
 	defer pool.Close()
 
-	// Run migrations to ensure firm_scores table exists.
-	if err := fedsync.Migrate(ctx, pool); err != nil {
-		return eris.Wrap(err, "score: migrate")
+	// Ensure schema is current via Atlas.
+	if err := ensureSchema(ctx); err != nil {
+		return eris.Wrap(err, "score: ensure schema")
 	}
 
 	// Parse flags.

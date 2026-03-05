@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	fdicInstitutionsURL = "https://api.fdic.gov/api/financials"
-	fdicLocationsURL    = "https://api.fdic.gov/api/locations"
+	fdicInstitutionsURL = "https://api.fdic.gov/banks/institutions"
+	fdicLocationsURL    = "https://api.fdic.gov/banks/locations"
 	fdicPageSize        = 10000
 	fdicBatchSize       = 5000
 )
@@ -97,7 +97,7 @@ func (d *FDICBankFind) syncInstitutions(ctx context.Context, f fetcher.Fetcher, 
 			return totalRows, eris.Wrap(err, "fdic_bankfind: context cancelled")
 		}
 
-		url := fmt.Sprintf("https://api.fdic.gov/api/financials?limit=%d&offset=%d&sort_by=CERT&sort_order=ASC", fdicPageSize, offset)
+		url := fmt.Sprintf("%s?limit=%d&offset=%d&sort_by=CERT&sort_order=ASC", fdicInstitutionsURL, fdicPageSize, offset)
 		resp, err := d.fetchPage(ctx, f, url)
 		if err != nil {
 			return totalRows, eris.Wrapf(err, "fdic_bankfind: fetch institutions page offset=%d", offset)
@@ -149,7 +149,7 @@ func (d *FDICBankFind) syncBranches(ctx context.Context, f fetcher.Fetcher, pool
 			return totalRows, eris.Wrap(err, "fdic_bankfind: context cancelled")
 		}
 
-		url := fmt.Sprintf("https://api.fdic.gov/api/locations?limit=%d&offset=%d&sort_by=UNINUMBR&sort_order=ASC", fdicPageSize, offset)
+		url := fmt.Sprintf("%s?limit=%d&offset=%d&sort_by=UNINUM&sort_order=ASC", fdicLocationsURL, fdicPageSize, offset)
 		resp, err := d.fetchPage(ctx, f, url)
 		if err != nil {
 			return totalRows, eris.Wrapf(err, "fdic_bankfind: fetch branches page offset=%d", offset)
@@ -270,7 +270,7 @@ func fdicBranchUpsertCfg() db.UpsertConfig {
 func parseInstitution(m map[string]any) []any {
 	return []any{
 		fdicInt(m, "CERT"),
-		fdicStr(m, "REPNM"),
+		fdicStr(m, "NAME"),
 		fdicInt(m, "ACTIVE"),
 		fdicInt(m, "INACTIVE"),
 
@@ -408,9 +408,9 @@ func parseInstitution(m map[string]any) []any {
 // parseBranch extracts all branch fields from the FDIC API JSON map.
 func parseBranch(m map[string]any) []any {
 	return []any{
-		fdicInt(m, "UNINUMBR"),
+		fdicInt(m, "UNINUM"),
 		fdicInt(m, "CERT"),
-		fdicStr(m, "INSTNAME"),
+		fdicStr(m, "NAME"),
 		fdicStr(m, "OFFNAME"),
 		fdicStr(m, "OFFNUM"),
 		fdicStr(m, "FI_UNINUM"),

@@ -1,4 +1,4 @@
-// Package resolve performs entity resolution across federal datasets using fuzzy matching.
+// Package resolve performs entity resolution across federal datasets.
 package resolve
 
 // Pass1DirectSQL returns the SQL for pass 1: direct CRD-CIK matching.
@@ -42,31 +42,6 @@ WHERE e.sic IN ('6211', '6282')
       SELECT 1 FROM fed_data.entity_xref x
       WHERE x.crd_number = a.crd_number AND x.cik = e.cik
   )
-ON CONFLICT (crd_number, cik) WHERE crd_number IS NOT NULL AND cik IS NOT NULL
-DO NOTHING`
-}
-
-// FuzzyMatchSQL returns the SQL for pass 3: fuzzy name matching using pg_trgm.
-// Matches ADV firms to EDGAR entities in financial services SIC codes using
-// trigram similarity with a threshold of 0.6.
-func FuzzyMatchSQL() string {
-	return `
-INSERT INTO fed_data.entity_xref (crd_number, cik, entity_name, match_type, confidence)
-SELECT DISTINCT ON (a.crd_number)
-    a.crd_number,
-    e.cik,
-    a.firm_name,
-    'fuzzy_name',
-    similarity(UPPER(a.firm_name), UPPER(e.entity_name))::NUMERIC(3,2)
-FROM fed_data.adv_firms a
-JOIN fed_data.edgar_entities e
-    ON similarity(UPPER(a.firm_name), UPPER(e.entity_name)) > 0.6
-WHERE e.sic IN ('6211', '6282', '6199', '6726', '6159')
-  AND NOT EXISTS (
-      SELECT 1 FROM fed_data.entity_xref x
-      WHERE x.crd_number = a.crd_number
-  )
-ORDER BY a.crd_number, similarity(UPPER(a.firm_name), UPPER(e.entity_name)) DESC
 ON CONFLICT (crd_number, cik) WHERE crd_number IS NOT NULL AND cik IS NOT NULL
 DO NOTHING`
 }
