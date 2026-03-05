@@ -9,7 +9,7 @@ import (
 var fedsyncMigrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Apply fedsync schema migrations",
-	Long:  "Applies declarative schema changes via Atlas to all managed schemas.",
+	Long:  "Applies versioned schema migrations via Goose to all managed schemas.",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 

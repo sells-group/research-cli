@@ -1,183 +1,183 @@
-// Package migrate provides declarative schema management via Atlas.
+// Package migrate provides versioned schema migrations via Goose.
 package migrate
 
 import (
 	"context"
+	"database/sql"
 	"embed"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"strings"
+	"fmt"
 
-	"ariga.io/atlas-go-sdk/atlasexec"
+	_ "github.com/jackc/pgx/v5/stdlib" // register pgx driver for database/sql
+	"github.com/pressly/goose/v3"
 	"github.com/rotisserie/eris"
 	"go.uber.org/zap"
 )
 
-//go:embed all:schema
-var schemaFS embed.FS
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
 
-// Options configures an Apply or Inspect call.
-type Options struct {
-	URL         string   // Database connection URL (required).
-	DevURL      string   // Dev database URL for diffing (required for Apply).
-	DryRun      bool     // Preview changes without applying.
-	AutoApprove bool     // Skip interactive approval.
-	Schemas     []string // Schemas to manage (default: public, fed_data).
-	BinaryPath  string   // Path to atlas binary (default: "atlas").
-}
-
-// ApplyResult contains the result of a schema apply.
-type ApplyResult struct {
-	Changes string // SQL changes applied (or planned if DryRun).
-	Applied int    // Number of changes applied.
-}
-
-// Apply compares the desired schema (embedded SQL files) against the live
-// database and applies any necessary changes.
-func Apply(ctx context.Context, opts Options) (*ApplyResult, error) {
-	if opts.URL == "" {
-		return nil, eris.New("migrate: database URL is required")
+// Apply runs all pending Goose migrations against the database.
+// It auto-baselines existing databases: if goose_db_version does not
+// exist but public.companies does, version 1 is recorded without
+// executing the baseline SQL.
+func Apply(ctx context.Context, dbURL string) error {
+	if dbURL == "" {
+		return eris.New("migrate: database URL is required")
 	}
 
-	schemas := opts.Schemas
-	if len(schemas) == 0 {
-		schemas = []string{"public", "fed_data"}
-	}
-
-	binaryPath := opts.BinaryPath
-	if binaryPath == "" {
-		binaryPath = "atlas"
-	}
-
-	// Write embedded schema to a temp directory so atlas can read it.
-	workDir, err := writeSchemaToTemp()
+	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
-		return nil, err
+		return eris.Wrap(err, "migrate: open database")
 	}
-	defer os.RemoveAll(workDir) //nolint:errcheck
+	defer db.Close() //nolint:errcheck
 
-	client, err := atlasexec.NewClient(workDir, binaryPath)
-	if err != nil {
-		return nil, eris.Wrap(err, "migrate: create atlas client")
-	}
-
-	params := &atlasexec.SchemaApplyParams{
-		Env: "prod",
-		Vars: atlasexec.Vars2{
-			"url":     opts.URL,
-			"dev_url": opts.DevURL,
-		},
-		Schema:      schemas,
-		DryRun:      opts.DryRun,
-		AutoApprove: opts.AutoApprove,
+	if err := db.PingContext(ctx); err != nil {
+		return eris.Wrap(err, "migrate: ping database")
 	}
 
-	zap.L().Info("applying schema",
-		zap.Strings("schemas", schemas),
-		zap.Bool("dry_run", opts.DryRun),
-	)
+	goose.SetBaseFS(migrationsFS)
 
-	result, err := client.SchemaApply(ctx, params)
-	if err != nil {
-		return nil, eris.Wrap(err, "migrate: schema apply")
+	if err := goose.SetDialect("postgres"); err != nil {
+		return eris.Wrap(err, "migrate: set dialect")
 	}
 
-	applied := &ApplyResult{}
-	if result != nil {
-		applied.Changes = strings.Join(result.Changes.Pending, "\n")
-		// Count non-empty applied changes.
-		for _, c := range result.Changes.Applied {
-			if c != "" {
-				applied.Applied++
-			}
+	if baseline, err := needsBaseline(ctx, db); err != nil {
+		return eris.Wrap(err, "migrate: check baseline")
+	} else if baseline {
+		zap.L().Info("existing database detected, recording baseline")
+		if err := recordBaseline(ctx, db); err != nil {
+			return eris.Wrap(err, "migrate: record baseline")
 		}
 	}
 
-	zap.L().Info("schema apply complete",
-		zap.Int("changes_applied", applied.Applied),
-		zap.Bool("dry_run", opts.DryRun),
-	)
+	zap.L().Info("applying migrations")
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		return eris.Wrap(err, "migrate: apply migrations")
+	}
 
-	return applied, nil
+	zap.L().Info("migrations complete")
+	return nil
 }
 
-// Inspect returns the current database schema as HCL.
-func Inspect(ctx context.Context, opts Options) (string, error) {
-	if opts.URL == "" {
-		return "", eris.New("migrate: database URL is required")
+// Status prints the current migration status to stdout.
+func Status(ctx context.Context, dbURL string) error {
+	if dbURL == "" {
+		return eris.New("migrate: database URL is required")
 	}
 
-	schemas := opts.Schemas
-	if len(schemas) == 0 {
-		schemas = []string{"public", "fed_data"}
-	}
-
-	binaryPath := opts.BinaryPath
-	if binaryPath == "" {
-		binaryPath = "atlas"
-	}
-
-	client, err := atlasexec.NewClient(".", binaryPath)
+	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
-		return "", eris.Wrap(err, "migrate: create atlas client")
+		return eris.Wrap(err, "migrate: open database")
+	}
+	defer db.Close() //nolint:errcheck
+
+	goose.SetBaseFS(migrationsFS)
+
+	if err := goose.SetDialect("postgres"); err != nil {
+		return eris.Wrap(err, "migrate: set dialect")
 	}
 
-	result, err := client.SchemaInspect(ctx, &atlasexec.SchemaInspectParams{
-		URL:    opts.URL,
-		Schema: schemas,
-	})
+	if err := goose.StatusContext(ctx, db, "migrations"); err != nil {
+		return eris.Wrap(err, "migrate: status")
+	}
+
+	return nil
+}
+
+// Baseline explicitly marks version 1 as applied without running its SQL.
+// Use this for manually baselining an existing database.
+func Baseline(ctx context.Context, dbURL string) error {
+	if dbURL == "" {
+		return eris.New("migrate: database URL is required")
+	}
+
+	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
-		return "", eris.Wrap(err, "migrate: schema inspect")
+		return eris.Wrap(err, "migrate: open database")
+	}
+	defer db.Close() //nolint:errcheck
+
+	goose.SetBaseFS(migrationsFS)
+
+	if err := goose.SetDialect("postgres"); err != nil {
+		return eris.Wrap(err, "migrate: set dialect")
 	}
 
-	return result, nil
-}
-
-// buildSrcURLs returns the list of file:// URLs matching atlas.hcl src config.
-func buildSrcURLs() []string {
-	return []string{
-		"file://extensions.sql",
-		"file://public.sql",
-		"file://fed_data.sql",
+	if err := recordBaseline(ctx, db); err != nil {
+		return eris.Wrap(err, "migrate: record baseline")
 	}
+
+	fmt.Println("Baseline version 1 recorded.")
+	return nil
 }
 
-// writeSchemaToTemp copies the embedded schema FS to a temp directory.
-func writeSchemaToTemp() (string, error) {
-	tmpDir, err := os.MkdirTemp("", "atlas-schema-*")
+// needsBaseline returns true when the database has existing tables
+// (public.companies) but no goose_db_version table.
+func needsBaseline(ctx context.Context, db *sql.DB) (bool, error) {
+	// Check if goose version table exists.
+	var exists bool
+	err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_schema = 'public' AND table_name = 'goose_db_version'
+		)
+	`).Scan(&exists)
 	if err != nil {
-		return "", eris.Wrap(err, "migrate: create temp dir")
+		return false, eris.Wrap(err, "check goose_db_version")
+	}
+	if exists {
+		return false, nil
 	}
 
-	if err := copyEmbeddedSchema(tmpDir); err != nil {
-		_ = os.RemoveAll(tmpDir)
-		return "", err
+	// Check if this is an existing database with tables.
+	err = db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_schema = 'public' AND table_name = 'companies'
+		)
+	`).Scan(&exists)
+	if err != nil {
+		return false, eris.Wrap(err, "check public.companies")
 	}
 
-	return tmpDir, nil
+	return exists, nil
 }
 
-// copyEmbeddedSchema walks the embedded schema FS and writes files to destDir.
-func copyEmbeddedSchema(destDir string) error {
-	const prefix = "schema/"
-	return fs.WalkDir(schemaFS, "schema", func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == "schema" {
-			return nil // skip the root entry itself
-		}
-		// Strip "schema/" prefix so files land at the dest root.
-		relPath := path[len(prefix):]
-		destPath := filepath.Join(destDir, relPath)
-		if d.IsDir() {
-			return os.MkdirAll(destPath, 0o750) //nolint:gosec
-		}
-		data, err := schemaFS.ReadFile(path)
-		if err != nil {
-			return eris.Wrapf(err, "migrate: read embedded %s", path)
-		}
-		return os.WriteFile(destPath, data, 0o600) //nolint:gosec
-	})
+// recordBaseline creates the goose version table and inserts version 1
+// without executing any SQL.
+func recordBaseline(ctx context.Context, db *sql.DB) error {
+	// Ensure the version table exists.
+	if _, err := goose.EnsureDBVersionContext(ctx, db); err != nil {
+		return eris.Wrap(err, "ensure version table")
+	}
+
+	// Check if version 1 is already recorded.
+	current, err := goose.GetDBVersionContext(ctx, db)
+	if err != nil {
+		return eris.Wrap(err, "get current version")
+	}
+	if current >= 1 {
+		zap.L().Info("baseline already recorded", zap.Int64("version", current))
+		return nil
+	}
+
+	// Insert version 1 as applied.
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return eris.Wrap(err, "begin tx")
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.ExecContext(ctx,
+		"INSERT INTO goose_db_version (version_id, is_applied) VALUES ($1, true)", 1,
+	); err != nil {
+		return eris.Wrap(err, "insert baseline version")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return eris.Wrap(err, "commit baseline")
+	}
+
+	zap.L().Info("baseline recorded", zap.Int64("version", 1))
+	return nil
 }
