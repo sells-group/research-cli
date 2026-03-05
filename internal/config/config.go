@@ -148,18 +148,21 @@ type WaterfallConfig struct {
 
 // FedsyncConfig configures the federal data sync pipeline.
 type FedsyncConfig struct {
-	DatabaseURL    string    `yaml:"database_url" mapstructure:"database_url"`
-	TempDir        string    `yaml:"temp_dir" mapstructure:"temp_dir"`
-	SAMKey         string    `yaml:"sam_api_key" mapstructure:"sam_api_key"`
-	FREDKey        string    `yaml:"fred_api_key" mapstructure:"fred_api_key"`
-	BLSKey         string    `yaml:"bls_api_key" mapstructure:"bls_api_key"`
-	CensusKey      string    `yaml:"census_api_key" mapstructure:"census_api_key"`
-	FCCBDCKey      string    `yaml:"fcc_bdc_key" mapstructure:"fcc_bdc_key"`
-	EDGARUserAgent string    `yaml:"edgar_user_agent" mapstructure:"edgar_user_agent"`
-	N8NWebhook     string    `yaml:"n8n_webhook_url" mapstructure:"n8n_webhook_url"`
-	MistralKey     string    `yaml:"mistral_api_key" mapstructure:"mistral_api_key"`
-	MistralModel   string    `yaml:"mistral_ocr_model" mapstructure:"mistral_ocr_model"`
-	OCR            OCRConfig `yaml:"ocr" mapstructure:"ocr"`
+	DatabaseURL       string    `yaml:"database_url" mapstructure:"database_url"`
+	TempDir           string    `yaml:"temp_dir" mapstructure:"temp_dir"`
+	SAMKey            string    `yaml:"sam_api_key" mapstructure:"sam_api_key"`
+	FREDKey           string    `yaml:"fred_api_key" mapstructure:"fred_api_key"`
+	BLSKey            string    `yaml:"bls_api_key" mapstructure:"bls_api_key"`
+	CensusKey         string    `yaml:"census_api_key" mapstructure:"census_api_key"`
+	FCCBDCKey         string    `yaml:"fcc_bdc_key" mapstructure:"fcc_bdc_key"`
+	EDGARUserAgent    string    `yaml:"edgar_user_agent" mapstructure:"edgar_user_agent"`
+	N8NWebhook        string    `yaml:"n8n_webhook_url" mapstructure:"n8n_webhook_url"`
+	MistralKey        string    `yaml:"mistral_api_key" mapstructure:"mistral_api_key"`
+	MistralModel      string    `yaml:"mistral_ocr_model" mapstructure:"mistral_ocr_model"`
+	OCR               OCRConfig `yaml:"ocr" mapstructure:"ocr"`
+	DoclingURL        string    `yaml:"docling_url" mapstructure:"docling_url"`
+	TemporalHostPort  string    `yaml:"temporal_host_port" mapstructure:"temporal_host_port"`
+	TemporalNamespace string    `yaml:"temporal_namespace" mapstructure:"temporal_namespace"`
 }
 
 // OCRConfig configures PDF text extraction.
@@ -491,6 +494,9 @@ func Load() (*Config, error) {
 	v.SetDefault("fedsync.mistral_ocr_model", "pixtral-large-latest")
 	v.SetDefault("fedsync.ocr.provider", "local")
 	v.SetDefault("fedsync.ocr.pdftotext_path", "pdftotext")
+	v.SetDefault("fedsync.docling_url", "http://localhost:5001")
+	v.SetDefault("fedsync.temporal_host_port", "localhost:7233")
+	v.SetDefault("fedsync.temporal_namespace", "default")
 	v.SetDefault("discovery.google_places_rate_limit", 10.0)
 	v.SetDefault("discovery.max_candidates_per_run", 10000)
 	v.SetDefault("discovery.ppp_min_approval", 150000.0)
