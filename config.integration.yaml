@@ -1,0 +1,7 @@
+fedsync:
+  database_url: "postgres://research:research@localhost:5432/research?sslmode=disable"
+  docling_url: "http://localhost:5001"
+  temporal_host_port: "localhost:7233"
+  temporal_namespace: "default"
+  ocr:
+    provider: "docling"
