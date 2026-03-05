@@ -918,7 +918,7 @@ func TestADVPart2_Sync_BadOCRProvider(t *testing.T) {
 	ds := &ADVPart2{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "invalid_provider"}}}}
 	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "OCR extractor")
+	assert.Contains(t, err.Error(), "create extractor")
 }
 
 func TestADVPart2_Sync_MetadataFetchFails(t *testing.T) {
@@ -957,7 +957,7 @@ func TestADVPart2_Sync_DownloadFails(t *testing.T) {
 	ds := &ADVPart2{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "local"}}}}
 	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "download brochure ZIP")
+	assert.Contains(t, err.Error(), "download ZIP")
 }
 
 // --------------------------------------------------------------------------
@@ -974,7 +974,7 @@ func TestADVPart3_Sync_BadOCRProvider(t *testing.T) {
 	ds := &ADVPart3{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "invalid_provider"}}}}
 	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "OCR extractor")
+	assert.Contains(t, err.Error(), "create extractor")
 }
 
 func TestADVPart3_Sync_MetadataFetchFails(t *testing.T) {
@@ -1013,7 +1013,7 @@ func TestADVPart3_Sync_DownloadFails(t *testing.T) {
 	ds := &ADVPart3{cfg: &config.Config{Fedsync: config.FedsyncConfig{OCR: config.OCRConfig{Provider: "local"}}}}
 	_, err = ds.Sync(context.Background(), pool, f, t.TempDir())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "download CRS ZIP")
+	assert.Contains(t, err.Error(), "download ZIP")
 }
 
 // --------------------------------------------------------------------------

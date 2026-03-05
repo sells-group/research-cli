@@ -3,17 +3,17 @@ package dataset
 import (
 	"context"
 	"encoding/csv"
+	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
+	"regexp"
 	"time"
 
 	"github.com/rotisserie/eris"
-	"github.com/sells-group/research-cli/internal/db"
-	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
+	"github.com/sells-group/research-cli/internal/db"
+	"github.com/sells-group/research-cli/internal/docling"
 	"github.com/sells-group/research-cli/internal/fetcher"
 	"github.com/sells-group/research-cli/internal/ocr"
 )
@@ -23,9 +23,7 @@ const (
 	advPart2FirmLimit = 500
 )
 
-// ADVPart2 syncs SEC ADV Part 2 brochure PDFs → OCR → text.
-// Downloads the monthly bulk brochure ZIP, extracts mapping CSV + PDFs,
-// OCRs each PDF and upserts into adv_brochures.
+// ADVPart2 syncs SEC ADV Part 2 brochure PDFs → OCR → text + sections.
 type ADVPart2 struct {
 	cfg *config.Config
 }
@@ -49,140 +47,73 @@ func (d *ADVPart2) ShouldRun(now time.Time, lastSync *time.Time) bool {
 
 // Sync fetches and loads SEC ADV Part 2 brochure data.
 func (d *ADVPart2) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
-	log := zap.L().With(zap.String("dataset", d.Name()))
-
-	ext, err := ocr.NewExtractor(d.cfg.Fedsync.OCR, d.cfg.Fedsync.MistralKey)
+	ext, structExt, err := buildExtractors(d.cfg)
 	if err != nil {
-		return nil, eris.Wrap(err, "adv_part2: create OCR extractor")
+		return nil, eris.Wrap(err, "adv_part2: create extractor")
 	}
 
-	// Fetch IAPD reports metadata to find the latest brochure ZIP URL.
-	meta, err := fetchFOIAMetadata(ctx, f)
-	if err != nil {
-		return nil, eris.Wrap(err, "adv_part2: fetch FOIA metadata")
+	return syncADVDocuments(ctx, pool, f, ext, structExt, tempDir, advDocSyncConfig{
+		name:          d.Name(),
+		foiaSelector:  func(m *foiaReportsMetadata) []foiaFileEntry { return m.ADVBrochures },
+		table:         d.Table(),
+		sectionsTable: "fed_data.adv_brochure_sections",
+		columns:       []string{"crd_number", "brochure_id", "filing_date", "text_content", "extracted_at"},
+		conflictKeys:  []string{"crd_number", "brochure_id"},
+		batchSize:     advPart2BatchSize,
+		firmLimit:     advPart2FirmLimit,
+		parseMapping:  parseBrochureMappingDoc,
+		sectionParser: parseBrochureSections,
+	})
+}
+
+// brochureItemPattern matches Item N headers in ADV Part 2 brochures.
+var brochureItemPattern = regexp.MustCompile(
+	`(?i)^[\s]*item\s+(\d{1,2})\s*[:\-–—.\s]+\s*(.*)$`,
+)
+
+// parseBrochureSections extracts Item 1-18 sections from a Docling-parsed brochure.
+func parseBrochureSections(doc *ocr.StructuredDocument, crd int, docID string) []sectionRow {
+	if doc == nil || len(doc.Sections) == 0 {
+		return nil
 	}
 
-	url, err := latestFileURL(meta.ADVBrochures, "advBrochures")
-	if err != nil {
-		return nil, eris.Wrap(err, "adv_part2: resolve brochure URL")
-	}
-	log.Info("downloading brochure ZIP", zap.String("url", url))
-
-	zipPath := filepath.Join(tempDir, "adv_brochures.zip")
-	if _, err := f.DownloadToFile(ctx, url, zipPath); err != nil {
-		return nil, eris.Wrap(err, "adv_part2: download brochure ZIP")
-	}
-	defer os.Remove(zipPath) //nolint:errcheck
-
-	// Extract ZIP to temp dir.
-	extractDir := filepath.Join(tempDir, "adv_brochures_extract")
-	if err := os.MkdirAll(extractDir, 0o750); err != nil {
-		return nil, eris.Wrap(err, "adv_part2: create extract dir")
-	}
-	defer os.RemoveAll(extractDir) //nolint:errcheck
-
-	extractedFiles, err := fetcher.ExtractZIP(zipPath, extractDir)
-	if err != nil {
-		return nil, eris.Wrap(err, "adv_part2: extract brochure ZIP")
-	}
-
-	// Find mapping CSV.
-	var mappingPath string
-	for _, fp := range extractedFiles {
-		base := strings.ToLower(filepath.Base(fp))
-		if strings.Contains(base, "mapping") && strings.HasSuffix(base, ".csv") {
-			mappingPath = fp
-			break
-		}
-	}
-	if mappingPath == "" {
-		return nil, eris.New("adv_part2: mapping CSV not found in brochure ZIP")
-	}
-
-	// Parse mapping CSV.
-	mappings, err := parseBrochureMapping(mappingPath)
-	if err != nil {
-		return nil, eris.Wrap(err, "adv_part2: parse mapping CSV")
-	}
-	log.Info("parsed brochure mapping", zap.Int("entries", len(mappings)))
-
-	// Limit to first N firms to avoid extremely long OCR runs.
-	if len(mappings) > advPart2FirmLimit {
-		mappings = mappings[:advPart2FirmLimit]
-	}
-
-	columns := []string{"crd_number", "brochure_id", "filing_date", "text_content", "extracted_at"}
-	conflictKeys := []string{"crd_number", "brochure_id"}
-
-	var batch [][]any
-	var totalRows int64
-
-	for _, m := range mappings {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		// Find the PDF file in the extracted directory.
-		pdfPath := findPDFInExtracted(extractDir, m.PDFFileName)
-		if pdfPath == "" {
-			log.Debug("PDF not found in extract", zap.String("pdf", m.PDFFileName), zap.Int("crd", m.CRDNumber))
+	var rows []sectionRow
+	for _, sec := range doc.Sections {
+		key := matchBrochureItemKey(sec.Title)
+		if key == "" {
 			continue
 		}
 
-		text, err := ext.ExtractText(ctx, pdfPath)
-		if err != nil {
-			log.Debug("skipping brochure OCR", zap.Int("crd", m.CRDNumber), zap.Error(err))
-			continue
-		}
-
-		now := time.Now()
-		batch = append(batch, []any{m.CRDNumber, m.BrochureID, m.DateFiled, text, now})
-
-		if len(batch) >= advPart2BatchSize {
-			n, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{
-				Table:        d.Table(),
-				Columns:      columns,
-				ConflictKeys: conflictKeys,
-			}, batch)
-			if err != nil {
-				return nil, eris.Wrap(err, "adv_part2: bulk upsert")
-			}
-			totalRows += n
-			batch = batch[:0]
-		}
+		meta := extractSectionMetadata(sec.Text)
+		rows = append(rows, sectionRow{
+			CRDNumber:   crd,
+			DocID:       docID,
+			SectionKey:  key,
+			Title:       sec.Title,
+			TextContent: sec.Text,
+			Tables:      tablesToJSON(sec.Tables),
+			Metadata:    marshalJSONB(meta),
+		})
 	}
-
-	if len(batch) > 0 {
-		n, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{
-			Table:        d.Table(),
-			Columns:      columns,
-			ConflictKeys: conflictKeys,
-		}, batch)
-		if err != nil {
-			return nil, eris.Wrap(err, "adv_part2: bulk upsert final batch")
-		}
-		totalRows += n
-	}
-
-	return &SyncResult{
-		RowsSynced: totalRows,
-		Metadata:   map[string]any{"brochures_processed": len(mappings)},
-	}, nil
+	return rows
 }
 
-// brochureMapping represents one row from the brochure mapping CSV.
-type brochureMapping struct {
-	CRDNumber   int
-	BrochureID  string
-	DateFiled   string
-	PDFFileName string
+// matchBrochureItemKey extracts an item key like "item_4" from a heading title.
+func matchBrochureItemKey(title string) string {
+	m := brochureItemPattern.FindStringSubmatch(title)
+	if m == nil {
+		return ""
+	}
+	num := parseIntOr(m[1], 0)
+	if num < 1 || num > 18 {
+		return ""
+	}
+	return fmt.Sprintf("item_%d", num)
 }
 
-// parseBrochureMapping reads the mapping CSV from the brochure ZIP.
-func parseBrochureMapping(path string) ([]brochureMapping, error) {
-	f, err := os.Open(path) // #nosec G304 -- path constructed from extracted ZIP in trusted temp directory
+// parseBrochureMappingDoc reads the brochure mapping CSV and returns docMapping entries.
+func parseBrochureMappingDoc(path string) ([]docMapping, error) {
+	f, err := os.Open(path) // #nosec G304 -- path from extracted ZIP in trusted temp directory
 	if err != nil {
 		return nil, eris.Wrap(err, "open mapping CSV")
 	}
@@ -199,7 +130,7 @@ func parseBrochureMapping(path string) ([]brochureMapping, error) {
 	}
 	colIdx := mapColumns(header)
 
-	var result []brochureMapping
+	var result []docMapping
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
@@ -224,47 +155,27 @@ func parseBrochureMapping(path string) ([]brochureMapping, error) {
 			continue
 		}
 
-		dateFiled := trimQuotes(getCol(record, colIdx, "datefiled"))
-
-		result = append(result, brochureMapping{
+		result = append(result, docMapping{
 			CRDNumber:   crd,
-			BrochureID:  brochureID,
-			DateFiled:   dateFiled,
+			DocID:       brochureID,
+			DateFiled:   trimQuotes(getCol(record, colIdx, "datefiled")),
 			PDFFileName: pdfFileName,
 		})
 	}
-
 	return result, nil
 }
 
-// findPDFInExtracted searches for a PDF file in the extracted directory tree.
-func findPDFInExtracted(dir, pdfName string) string {
-	if pdfName == "" {
-		return ""
+// buildExtractors creates an Extractor and optional StructuredExtractor based on config.
+func buildExtractors(cfg *config.Config) (ocr.Extractor, ocr.StructuredExtractor, error) {
+	if cfg.Fedsync.DoclingURL != "" && cfg.Fedsync.OCR.Provider == "docling" {
+		client := docling.NewClient(cfg.Fedsync.DoclingURL)
+		ext := ocr.NewDoclingExtractor(client)
+		return ext, ext, nil
 	}
 
-	// Try direct path first.
-	direct := filepath.Join(dir, pdfName)
-	if _, err := os.Stat(direct); err == nil {
-		return direct
+	ext, err := ocr.NewExtractor(cfg.Fedsync.OCR, cfg.Fedsync.MistralKey)
+	if err != nil {
+		return nil, nil, err
 	}
-
-	// Walk directory to find the file by base name.
-	target := strings.ToLower(filepath.Base(pdfName))
-	var found string
-	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if strings.ToLower(filepath.Base(path)) == target {
-			found = path
-			return filepath.SkipAll
-		}
-		return nil
-	})
-
-	return found
+	return ext, nil, nil
 }
