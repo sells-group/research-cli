@@ -10,7 +10,7 @@ import (
 
 // BackfillParams is the input for BackfillWorkflow.
 type BackfillParams struct {
-	Source    string `json:"source"` // "adv", "5500", "990", "fdic"
+	Source    string `json:"source"` // "adv", "5500", "990", "fdic", "sba", "address"
 	Limit     int    `json:"limit"`
 	BatchSize int    `json:"batch_size"`
 	SkipMSA   bool   `json:"skip_msa"`

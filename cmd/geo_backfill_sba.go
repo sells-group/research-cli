@@ -29,6 +29,10 @@ and ordered by most recent approval year, largest loan first.`,
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
+		if shouldUseTemporal(cmd) {
+			return runGeoBackfillViaTemporal(ctx, cmd, "sba")
+		}
+
 		pool, err := fedsyncPool(ctx)
 		if err != nil {
 			return err
@@ -280,5 +284,6 @@ func init() {
 	f.Int("concurrency", 10, "maximum parallel geocode calls")
 	f.Bool("skip-geocode", false, "skip geocoding step")
 	f.Bool("skip-msa", false, "skip MSA association step")
+	addDirectFlag(geoBackfillSBACmd)
 	geoCmd.AddCommand(geoBackfillSBACmd)
 }

@@ -1,19 +1,24 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os/signal"
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/rotisserie/eris"
 	"github.com/spf13/cobra"
+	"go.temporal.io/sdk/client"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/pipeline"
+	temporalpkg "github.com/sells-group/research-cli/internal/temporal"
+	temporalenrich "github.com/sells-group/research-cli/internal/temporal/enrichment"
 	sfpkg "github.com/sells-group/research-cli/pkg/salesforce"
 )
 
@@ -44,6 +49,10 @@ Examples:
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
+
+		if shouldUseTemporal(cmd) && !sfreportDryRun {
+			return runSFReportViaTemporal(ctx, cmd)
+		}
 
 		// Swap to sandbox credentials if requested.
 		if sfreportSandbox {
@@ -215,8 +224,85 @@ func init() {
 	sfreportCmd.Flags().BoolVar(&sfreportForce, "force", false, "force re-extraction even if cached")
 	sfreportCmd.Flags().BoolVar(&sfreportDryRun, "dry-run", false, "fetch report and print accounts, skip pipeline")
 	sfreportCmd.Flags().BoolVar(&sfreportSandbox, "sandbox", false, "use sandbox SF credentials")
+	addDirectFlag(sfreportCmd)
 	_ = sfreportCmd.MarkFlagRequired("report-id")
 	rootCmd.AddCommand(sfreportCmd)
+}
+
+// runSFReportViaTemporal fetches the SF report, then delegates enrichment to a Temporal workflow.
+func runSFReportViaTemporal(ctx context.Context, _ *cobra.Command) error {
+	// Swap sandbox if needed.
+	if sfreportSandbox {
+		cfg.Salesforce.UseSandbox()
+	}
+
+	sfClient, err := initSalesforce()
+	if err != nil {
+		return eris.Wrap(err, "sfreport: init salesforce")
+	}
+	if sfClient == nil {
+		return eris.New("sfreport: salesforce not configured")
+	}
+
+	// Fetch report.
+	result, err := sfClient.RunReport(ctx, sfreportReportID)
+	if err != nil {
+		return eris.Wrap(err, "sfreport: fetch report")
+	}
+
+	accounts, err := sfpkg.ParseReportAccounts(result)
+	if err != nil {
+		return eris.Wrap(err, "sfreport: parse report accounts")
+	}
+
+	// Filter and limit.
+	var withWebsite []sfpkg.ReportAccount
+	for _, acct := range accounts {
+		if strings.TrimSpace(acct.Website) != "" {
+			withWebsite = append(withWebsite, acct)
+		}
+	}
+	if sfreportLimit > 0 && sfreportLimit < len(withWebsite) {
+		withWebsite = withWebsite[:sfreportLimit]
+	}
+	if len(withWebsite) == 0 {
+		zap.L().Info("no accounts to process")
+		return nil
+	}
+
+	companies := reportAccountsToCompanies(withWebsite)
+
+	c, err := temporalpkg.NewClient(cfg.Temporal)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	workflowID := fmt.Sprintf("sfreport-%d", time.Now().UnixNano())
+	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: temporalpkg.EnrichmentTaskQueue,
+	}, temporalenrich.BatchEnrichWorkflow, temporalenrich.BatchEnrichParams{
+		Companies:      companies,
+		Concurrency:    sfreportConcurrency,
+		ForceReExtract: sfreportForce,
+	})
+	if err != nil {
+		return eris.Wrap(err, "start sfreport workflow")
+	}
+
+	zap.L().Info("sfreport workflow started",
+		zap.String("workflow_id", run.GetID()),
+		zap.Int("companies", len(companies)),
+	)
+
+	var batchResult temporalenrich.BatchEnrichResult
+	if err := run.Get(ctx, &batchResult); err != nil {
+		return eris.Wrap(err, "sfreport workflow failed")
+	}
+
+	fmt.Printf("SF report complete: %d succeeded, %d failed\n", batchResult.Succeeded, batchResult.Failed)
+	return nil
 }
 
 // reportAccountsToCompanies converts SF report accounts to pipeline Company models.

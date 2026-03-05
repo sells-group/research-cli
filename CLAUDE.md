@@ -19,6 +19,7 @@ Automated account enrichment pipeline + federal data sync in Go. Two subsystems:
 | LinkedIn | Perplexity API → Haiku JSON |
 | Destination | Salesforce REST API (go-salesforce/v3) |
 | Lead Tracker | Notion API (notionapi) |
+| Workflow | Temporal.io (go.temporal.io/sdk) |
 | Concurrency | errgroup |
 | FTP | jlaffaye/ftp |
 | XLSX | tealeg/xlsx/v2 |
@@ -56,6 +57,26 @@ go run ./cmd geo backfill-sba --limit 10000              # stub + geocode SBA lo
 
 # Salesforce report enrichment
 go run ./cmd sfreport --report-id 00O... --limit 5       # enrich from SF report
+
+# Local dev (bypass Temporal)
+go run ./cmd batch --direct --limit 5                    # run enrichment locally
+go run ./cmd geo backfill-adv --direct --limit 100       # geo backfill locally
+```
+
+### Local Temporal Testing
+
+```bash
+# Terminal 1: Start Temporal dev server (brew install temporal)
+temporal server start-dev
+
+# Terminal 2: Start enrichment worker in offline mode
+RESEARCH_TEMPORAL_HOST_PORT=localhost:7233 go run ./cmd temporal-worker enrichment --offline
+
+# Terminal 3: Run csvrun through Temporal
+RESEARCH_TEMPORAL_HOST_PORT=localhost:7233 go run ./cmd csvrun --csv testdata/test_companies.csv --limit 1
+
+# Verify at http://localhost:8233 — look for "csvrun-*" workflow
+# Workflow should complete with succeeded=1, failed=0
 ```
 
 ## Project Structure
@@ -467,6 +488,16 @@ CI runs 5 parallel jobs on every push/PR to `main`: `test`, `vet`, `lint`, `gofi
 | `RESEARCH_STORE_DRIVER` | `postgres` | `postgres` or `sqlite` |
 | `RESEARCH_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `RESEARCH_LOG_FORMAT` | `json` | `json` (prod) or `console` (dev) |
+
+### Temporal
+
+Temporal is the default execution mode for all batch/async operations. Use `--direct` to bypass Temporal and run locally (useful for local dev).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `RESEARCH_TEMPORAL_ENABLED` | `true` | Enable Temporal workflow execution |
+| `RESEARCH_TEMPORAL_HOST_PORT` | `sells-temporal.internal:7233` | Temporal gRPC address (`localhost:7233` for local dev) |
+| `RESEARCH_TEMPORAL_NAMESPACE` | `research-cli` | Temporal namespace |
 
 ### Fedsync
 

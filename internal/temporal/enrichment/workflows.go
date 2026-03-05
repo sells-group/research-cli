@@ -135,7 +135,8 @@ func BatchEnrichWorkflow(ctx workflow.Context, params BatchEnrichParams) (*Batch
 
 			var childResult EnrichCompanyResult
 			err := workflow.ExecuteChildWorkflow(childCtx, EnrichCompanyWorkflow, EnrichCompanyParams{
-				Company: company,
+				Company:        company,
+				ForceReExtract: params.ForceReExtract,
 			}).Get(gCtx, &childResult)
 
 			success := err == nil && childResult.Error == ""

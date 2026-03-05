@@ -43,6 +43,7 @@ func TestLoadDefaults(t *testing.T) {
 	assert.InDelta(t, 0.25, cfg.Pipeline.QualityWeights.Completeness, 0.001)
 	assert.InDelta(t, 0.15, cfg.Pipeline.QualityWeights.Diversity, 0.001)
 	assert.InDelta(t, 0.10, cfg.Pipeline.QualityWeights.Freshness, 0.001)
+	assert.True(t, cfg.Temporal.Enabled)
 }
 
 func TestLoadFromYAML(t *testing.T) {
@@ -129,6 +130,26 @@ func TestInitLoggerJSON(t *testing.T) {
 func TestInitLoggerInvalidLevel(t *testing.T) {
 	err := InitLogger(LogConfig{Level: "invalid", Format: "json"})
 	assert.Error(t, err)
+}
+
+func TestShouldUseTemporal(t *testing.T) {
+	tests := []struct {
+		name     string
+		enabled  bool
+		hostPort string
+		want     bool
+	}{
+		{"enabled with host", true, "localhost:7233", true},
+		{"disabled with host", false, "localhost:7233", false},
+		{"enabled without host", true, "", false},
+		{"disabled without host", false, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := TemporalConfig{Enabled: tt.enabled, HostPort: tt.hostPort}
+			assert.Equal(t, tt.want, tc.ShouldUseTemporal())
+		})
+	}
 }
 
 // validDefaults returns a Config with all defaults populated for validation tests.

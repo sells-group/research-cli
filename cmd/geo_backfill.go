@@ -22,6 +22,10 @@ var geoBackfillCmd = &cobra.Command{
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
+		if shouldUseTemporal(cmd) {
+			return runGeoBackfillViaTemporal(ctx, cmd, "address")
+		}
+
 		pool, err := fedsyncPool(ctx)
 		if err != nil {
 			return err
@@ -146,5 +150,6 @@ func init() {
 	geoBackfillCmd.Flags().Int("limit", 100, "maximum number of addresses to geocode")
 	geoBackfillCmd.Flags().Int("batch-size", 1000, "batch size for geocoding")
 	geoBackfillCmd.Flags().Bool("skip-msa", false, "skip MSA association step")
+	addDirectFlag(geoBackfillCmd)
 	geoCmd.AddCommand(geoBackfillCmd)
 }

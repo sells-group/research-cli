@@ -12,7 +12,7 @@ func TestDownloadURL_National(t *testing.T) {
 	require.True(t, ok)
 
 	url := DownloadURL(p, 2024, "")
-	assert.Equal(t, "https://www2.census.gov/geo/tiger/TIGER2024/STATE/tl_2024_us_state_all.zip", url)
+	assert.Equal(t, "https://www2.census.gov/geo/tiger/TIGER2024/STATE/tl_2024_us_state.zip", url)
 }
 
 func TestDownloadURL_PerState(t *testing.T) {
@@ -76,7 +76,7 @@ func TestNationalProducts(t *testing.T) {
 	for _, p := range natl {
 		assert.True(t, p.National, "product %s should be national", p.Name)
 	}
-	assert.True(t, len(natl) >= 5)
+	assert.True(t, len(natl) >= 3)
 }
 
 func TestPerStateProducts(t *testing.T) {
@@ -84,7 +84,24 @@ func TestPerStateProducts(t *testing.T) {
 	for _, p := range perState {
 		assert.False(t, p.National, "product %s should be per-state", p.Name)
 	}
-	assert.True(t, len(perState) >= 4)
+	assert.True(t, len(perState) >= 6)
+}
+
+func TestPerCountyProducts(t *testing.T) {
+	perCounty := PerCountyProducts()
+	for _, p := range perCounty {
+		assert.True(t, p.PerCounty, "product %s should be per-county", p.Name)
+		assert.False(t, p.National, "per-county product %s should not be national", p.Name)
+	}
+	assert.Equal(t, 4, len(perCounty)) // EDGES, FACES, ADDR, FEATNAMES
+}
+
+func TestDownloadURL_PerCounty(t *testing.T) {
+	p, ok := ProductByName("EDGES")
+	require.True(t, ok)
+
+	url := DownloadURL(p, 2024, "01001")
+	assert.Equal(t, "https://www2.census.gov/geo/tiger/TIGER2024/EDGES/tl_2024_01001_edges.zip", url)
 }
 
 func TestProducts_HaveColumns(t *testing.T) {

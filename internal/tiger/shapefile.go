@@ -8,10 +8,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// ParseShapefile reads a shapefile and returns rows suitable for COPY loading.
-// Each row is []any matching product.Columns; if the product has a GeomType,
-// a WKB-encoded geometry column is appended as the final element.
+// ParseShapefile reads a shapefile (or DBF for non-spatial products) and returns
+// rows suitable for COPY loading. Each row is []any matching product.Columns;
+// if the product has a GeomType, a WKB-encoded geometry column is appended.
 func ParseShapefile(shpPath string, product Product) ([][]any, error) {
+	// Non-spatial products (ADDR, FEATNAMES) come as DBF-only files.
+	if strings.HasSuffix(strings.ToLower(shpPath), ".dbf") {
+		return ParseDBF(shpPath, product)
+	}
+
 	reader, err := shp.Open(shpPath)
 	if err != nil {
 		return nil, eris.Wrapf(err, "tiger: open shapefile %s", shpPath)

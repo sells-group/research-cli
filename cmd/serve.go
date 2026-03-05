@@ -14,6 +14,7 @@ import (
 
 	"github.com/sells-group/research-cli/internal/api"
 	"github.com/sells-group/research-cli/internal/monitoring"
+	temporalpkg "github.com/sells-group/research-cli/internal/temporal"
 )
 
 var servePort int
@@ -49,6 +50,15 @@ var serveCmd = &cobra.Command{
 		}
 
 		h := api.NewHandlers(cfg, env.Store, env.Pipeline, collector)
+		if cfg.Temporal.ShouldUseTemporal() {
+			tc, tcErr := temporalpkg.NewClient(cfg.Temporal)
+			if tcErr != nil {
+				zap.L().Warn("temporal client unavailable, webhook uses direct mode", zap.Error(tcErr))
+			} else {
+				h.SetTemporalClient(tc)
+				defer tc.Close()
+			}
+		}
 		router := api.Router(h)
 		port := resolvePort(servePort, cfg.Server.Port)
 		srvErr := startServer(ctx, router, port)

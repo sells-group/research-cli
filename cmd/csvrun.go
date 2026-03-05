@@ -8,17 +8,18 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/rotisserie/eris"
 	"github.com/spf13/cobra"
+	"go.temporal.io/sdk/client"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/sells-group/research-cli/internal/model"
 	"github.com/sells-group/research-cli/internal/pipeline"
-	"github.com/sells-group/research-cli/internal/registry"
-	"github.com/sells-group/research-cli/internal/scrape"
-	"github.com/sells-group/research-cli/internal/store"
+	temporalpkg "github.com/sells-group/research-cli/internal/temporal"
+	temporalenrich "github.com/sells-group/research-cli/internal/temporal/enrichment"
 )
 
 var (
@@ -104,6 +105,10 @@ Examples:
 		// Dry run: print parsed companies and exit.
 		if csvrunDryRun {
 			return printCompaniesJSON(companies)
+		}
+
+		if shouldUseTemporal(cmd) && csvrunOutput == "" && !csvrunOffline {
+			return runCSVRunViaTemporal(ctx, companies)
 		}
 
 		// Validate API keys in real mode.
@@ -224,66 +229,43 @@ func init() {
 	csvrunCmd.Flags().StringVar(&csvrunFormat, "format", "json", "output format: json, grata-csv, or sf-report-csv (auto-detected for SF reports)")
 	csvrunCmd.Flags().BoolVar(&csvrunCompare, "compare", false, "compare results against Grata ground truth from CSV")
 	csvrunCmd.Flags().StringVar(&csvrunCompareOutput, "compare-output", "", "write comparison report to file (default: stderr)")
+	addDirectFlag(csvrunCmd)
 	_ = csvrunCmd.MarkFlagRequired("csv")
 	rootCmd.AddCommand(csvrunCmd)
 }
 
-// initOfflinePipeline builds a pipeline with stub clients and fixture registries.
-func initOfflinePipeline(ctx context.Context) (*pipelineEnv, error) {
-	// Use SQLite store.
-	dsn := cfg.Store.DatabaseURL
-	if dsn == "" {
-		dsn = "research.db"
-	}
-	st, err := store.NewSQLite(dsn)
+// runCSVRunViaTemporal starts a BatchEnrichWorkflow for CSV-parsed companies.
+func runCSVRunViaTemporal(ctx context.Context, companies []model.Company) error {
+	c, err := temporalpkg.NewClient(cfg.Temporal)
 	if err != nil {
-		return nil, eris.Wrap(err, "csvrun: init sqlite store")
+		return err
 	}
-	if err := st.Migrate(ctx); err != nil {
-		_ = st.Close()
-		return nil, eris.Wrap(err, "csvrun: migrate store")
+	defer c.Close()
+
+	workflowID := fmt.Sprintf("csvrun-%d", time.Now().UnixNano())
+	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: temporalpkg.EnrichmentTaskQueue,
+	}, temporalenrich.BatchEnrichWorkflow, temporalenrich.BatchEnrichParams{
+		Companies:   companies,
+		Concurrency: csvrunConcurrency,
+	})
+	if err != nil {
+		return eris.Wrap(err, "start csvrun workflow")
 	}
 
-	// Load fixture registries.
-	questions, err := registry.LoadQuestionsFromFile("testdata/questions.json")
-	if err != nil {
-		_ = st.Close()
-		return nil, eris.Wrap(err, "csvrun: load question fixtures")
-	}
-	fields, err := registry.LoadFieldsFromFile("testdata/fields.json")
-	if err != nil {
-		_ = st.Close()
-		return nil, eris.Wrap(err, "csvrun: load field fixtures")
-	}
-
-	// Stub clients.
-	jinaClient := &pipeline.StubJinaClient{}
-	firecrawlClient := &pipeline.StubFirecrawlClient{}
-	anthropicClient := &pipeline.StubAnthropicClient{}
-	perplexityClient := &pipeline.StubPerplexityClient{}
-	sfClient := &pipeline.StubSalesforceClient{}
-	notionClient := &pipeline.StubNotionClient{}
-
-	// Build scrape chain: Local → Jina.
-	matcher := scrape.NewPathMatcher(cfg.Crawl.ExcludePaths)
-	chain := scrape.NewChain(matcher,
-		scrape.NewLocalScraper(),
-		scrape.NewJinaAdapter(jinaClient),
+	zap.L().Info("csvrun workflow started",
+		zap.String("workflow_id", run.GetID()),
+		zap.Int("companies", len(companies)),
 	)
 
-	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, nil, nil, nil, nil, questions, fields)
+	var result temporalenrich.BatchEnrichResult
+	if err := run.Get(ctx, &result); err != nil {
+		return eris.Wrap(err, "csvrun workflow failed")
+	}
 
-	// Register default exporters for offline mode.
-	p.AddExporter(pipeline.NewSalesforceExporter(sfClient, notionClient, fields, cfg, false))
-	p.AddExporter(pipeline.NewNotionExporter(notionClient))
-
-	return &pipelineEnv{
-		Store:     st,
-		Pipeline:  p,
-		Questions: questions,
-		Fields:    fields,
-		Notion:    notionClient,
-	}, nil
+	fmt.Printf("CSV run complete: %d succeeded, %d failed\n", result.Succeeded, result.Failed)
+	return nil
 }
 
 // printCompaniesJSON prints parsed companies as indented JSON.

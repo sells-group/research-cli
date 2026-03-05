@@ -130,6 +130,62 @@ func TestBackfillWorkflow_BatchFailureContinues(t *testing.T) {
 	require.True(t, result.Failed > 0)
 }
 
+func TestBackfillWorkflow_SBASource(t *testing.T) {
+	ts := &testsuite.WorkflowTestSuite{}
+	env := ts.NewTestWorkflowEnvironment()
+
+	records := []UnlinkedRecord{
+		{Key: "1234567", Name: "SBA Borrower LLC", City: "Dallas", State: "TX"},
+	}
+
+	env.OnActivity((*Activities).QueryUnlinkedRecords, mock.Anything, mock.Anything, mock.Anything).
+		Return(&QueryUnlinkedResult{Records: records}, nil)
+
+	env.OnActivity((*Activities).ProcessGeoBackfillBatch, mock.Anything, mock.Anything, mock.Anything).
+		Return(&ProcessBatchResult{Created: 1, Geocoded: 1, Linked: 1}, nil)
+
+	env.ExecuteWorkflow(BackfillWorkflow, BackfillParams{
+		Source:    "sba",
+		Limit:     100,
+		BatchSize: 50,
+	})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result BackfillResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, 1, result.TotalRecords)
+	require.Equal(t, 1, result.Created)
+}
+
+func TestBackfillWorkflow_AddressSource(t *testing.T) {
+	ts := &testsuite.WorkflowTestSuite{}
+	env := ts.NewTestWorkflowEnvironment()
+
+	records := []UnlinkedRecord{
+		{Key: "42", Name: "123 Main St", City: "Boston", State: "MA"},
+	}
+
+	env.OnActivity((*Activities).QueryUnlinkedRecords, mock.Anything, mock.Anything, mock.Anything).
+		Return(&QueryUnlinkedResult{Records: records}, nil)
+
+	env.OnActivity((*Activities).ProcessGeoBackfillBatch, mock.Anything, mock.Anything, mock.Anything).
+		Return(&ProcessBatchResult{Geocoded: 1}, nil)
+
+	env.ExecuteWorkflow(BackfillWorkflow, BackfillParams{
+		Source:    "address",
+		Limit:     100,
+		BatchSize: 50,
+	})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result BackfillResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, 1, result.TotalRecords)
+	require.Equal(t, 1, result.Geocoded)
+}
+
 func TestBackfillWorkflow_ProgressQuery(t *testing.T) {
 	ts := &testsuite.WorkflowTestSuite{}
 	env := ts.NewTestWorkflowEnvironment()

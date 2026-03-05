@@ -41,8 +41,7 @@ Use --full to perform a full reload instead of incremental sync.`,
 
 		log := zap.L().With(zap.String("command", "fedsync.sync"))
 
-		useTemporal, _ := cmd.Flags().GetBool("temporal")
-		if useTemporal {
+		if shouldUseTemporal(cmd) {
 			return runFedsyncViaTemporal(ctx, cmd, log)
 		}
 
@@ -107,19 +106,13 @@ func init() {
 	fedsyncSyncCmd.Flags().String("datasets", "", "comma-separated dataset names (e.g., cbp,fpds)")
 	fedsyncSyncCmd.Flags().Bool("force", false, "ignore ShouldRun() scheduling logic")
 	fedsyncSyncCmd.Flags().Bool("full", false, "full reload instead of incremental sync")
-	fedsyncSyncCmd.Flags().Bool("temporal", false, "run via Temporal workflow instead of direct engine")
+	addDirectFlag(fedsyncSyncCmd)
 	fedsyncSyncCmd.Flags().Bool("wait", true, "wait for Temporal workflow completion (only with --temporal)")
 	fedsyncCmd.AddCommand(fedsyncSyncCmd)
 }
 
 // runFedsyncViaTemporal starts a FedsyncRunWorkflow on Temporal.
-func runFedsyncViaTemporal(ctx context.Context, cmd *cobra.Command, log *zap.Logger) error {
-	c, err := temporalpkg.NewClient(cfg.Temporal)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
+func runFedsyncViaTemporal(ctx context.Context, cmd *cobra.Command, _ *zap.Logger) error {
 	opts, err := parseSyncOpts(cmd)
 	if err != nil {
 		return err
@@ -137,7 +130,19 @@ func runFedsyncViaTemporal(ctx context.Context, cmd *cobra.Command, log *zap.Log
 		params.Datasets = opts.Datasets
 	}
 
-	log.Info("starting fedsync via Temporal",
+	wait, _ := cmd.Flags().GetBool("wait")
+	return startFedsyncWorkflow(ctx, params, wait)
+}
+
+// startFedsyncWorkflow starts a fedsync RunWorkflow on Temporal and optionally waits for completion.
+func startFedsyncWorkflow(ctx context.Context, params temporalfedsync.RunParams, wait bool) error {
+	c, err := temporalpkg.NewClient(cfg.Temporal)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	zap.L().Info("starting fedsync via Temporal",
 		zap.Any("phase", params.Phase),
 		zap.Strings("datasets", params.Datasets),
 		zap.Bool("force", params.Force),
@@ -152,12 +157,11 @@ func runFedsyncViaTemporal(ctx context.Context, cmd *cobra.Command, log *zap.Log
 		return eris.Wrap(err, "start fedsync workflow")
 	}
 
-	log.Info("fedsync workflow started",
+	zap.L().Info("fedsync workflow started",
 		zap.String("workflow_id", run.GetID()),
 		zap.String("run_id", run.GetRunID()),
 	)
 
-	wait, _ := cmd.Flags().GetBool("wait")
 	if !wait {
 		fmt.Printf("Workflow started: %s (run: %s)\n", run.GetID(), run.GetRunID())
 		return nil

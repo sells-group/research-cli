@@ -3,6 +3,7 @@ package tiger
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -88,7 +89,7 @@ func Load(ctx context.Context, pool db.Pool, opts LoadOptions) error {
 
 	// Load national products first (sequentially).
 	for _, p := range national {
-		if err := loadProduct(ctx, pool, p, "", "us", opts); err != nil {
+		if _, err := LoadProduct(ctx, pool, p, "", "us", opts); err != nil {
 			return eris.Wrapf(err, "tiger: load national product %s", p.Name)
 		}
 	}
@@ -120,7 +121,8 @@ func Load(ctx context.Context, pool db.Pool, opts LoadOptions) error {
 			stAbbr := stateAbbr
 			stFIPS := fips
 			g.Go(func() error {
-				return loadProduct(gCtx, pool, p, stAbbr, stFIPS, opts)
+				_, err := LoadProduct(gCtx, pool, p, stAbbr, stFIPS, opts)
+				return err
 			})
 		}
 	}
@@ -145,8 +147,11 @@ func Load(ctx context.Context, pool db.Pool, opts LoadOptions) error {
 	return nil
 }
 
-// loadProduct downloads, parses, and loads a single product for a given state.
-func loadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, stateFIPS string, opts LoadOptions) error {
+// LoadProduct downloads, parses, and loads a single TIGER product.
+// Exported for use by Temporal activities. Returns the number of rows loaded.
+// Per-county products (EDGES, FACES, ADDR, FEATNAMES) are handled by downloading
+// each county file separately and loading into the state's child table.
+func LoadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, stateFIPS string, opts LoadOptions) (int64, error) {
 	log := zap.L().With(
 		zap.String("component", "tiger.loader"),
 		zap.String("product", product.Name),
@@ -162,12 +167,17 @@ func loadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, 
 	if opts.Incremental {
 		loaded, err := isLoaded(ctx, pool, stateFIPS, product.Table, opts.Year)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if loaded {
 			log.Debug("already loaded, skipping", zap.String("table", tableName))
-			return nil
+			return 0, nil
 		}
+	}
+
+	// Per-county products: download each county file and load into the state child table.
+	if product.PerCounty && stateFIPS != "us" && stateFIPS != "" {
+		return loadCountyProduct(ctx, pool, product, stateAbbr, stateFIPS, opts)
 	}
 
 	start := time.Now()
@@ -177,7 +187,7 @@ func loadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, 
 	destDir := fmt.Sprintf("%s/%s/%s", opts.TempDir, stateFIPS, strings.ToLower(product.Name))
 	shpPath, err := Download(ctx, url, destDir)
 	if err != nil {
-		return eris.Wrapf(err, "tiger: download %s for %s", product.Name, stateAbbr)
+		return 0, eris.Wrapf(err, "tiger: download %s for %s", product.Name, stateAbbr)
 	}
 
 	log.Info("shapefile downloaded", zap.String("path", shpPath))
@@ -185,14 +195,14 @@ func loadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, 
 	// Parse shapefile.
 	rows, err := ParseShapefile(shpPath, product)
 	if err != nil {
-		return eris.Wrapf(err, "tiger: parse %s for %s", product.Name, stateAbbr)
+		return 0, eris.Wrapf(err, "tiger: parse %s for %s", product.Name, stateAbbr)
 	}
 
 	log.Info("shapefile parsed", zap.Int("rows", len(rows)))
 
 	if opts.DryRun {
 		log.Info("dry run — skipping load", zap.Int("rows", len(rows)))
-		return nil
+		return 0, nil
 	}
 
 	// Truncate existing data before reload.
@@ -204,7 +214,12 @@ func loadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, 
 	// Bulk load via COPY.
 	loaded, err := BulkLoad(ctx, pool, product, stateAbbr, rows, opts.BatchSize)
 	if err != nil {
-		return err
+		return 0, err
+	}
+
+	// Clean up downloaded files to free disk space.
+	if err := os.RemoveAll(destDir); err != nil {
+		log.Warn("failed to clean up download dir", zap.String("dir", destDir), zap.Error(err))
 	}
 
 	duration := time.Since(start)
@@ -220,7 +235,130 @@ func loadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, 
 		zap.Duration("duration", duration),
 	)
 
-	return nil
+	return loaded, nil
+}
+
+// loadCountyProduct handles per-county TIGER products by downloading each county's
+// shapefile separately and loading into the state's child table.
+// Census publishes EDGES, FACES, ADDR, and FEATNAMES as per-county files using
+// 5-digit county FIPS codes (e.g., tl_2024_01001_edges.zip for Autauga County, AL).
+func loadCountyProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, stateFIPS string, opts LoadOptions) (int64, error) {
+	log := zap.L().With(
+		zap.String("component", "tiger.loader"),
+		zap.String("product", product.Name),
+		zap.String("state", stateAbbr),
+	)
+
+	// Query county FIPS codes from loaded county_all data.
+	counties, err := CountyFIPSForState(ctx, pool, stateFIPS)
+	if err != nil {
+		return 0, eris.Wrapf(err, "tiger: get counties for %s", stateAbbr)
+	}
+
+	log.Info("loading per-county product",
+		zap.Int("counties", len(counties)),
+	)
+
+	start := time.Now()
+
+	// Truncate state child table once before loading all counties.
+	if !opts.DryRun {
+		if err := TruncateTable(ctx, pool, product, stateAbbr); err != nil {
+			log.Warn("truncate failed (table may be empty)", zap.Error(err))
+		}
+	}
+
+	var totalRows int64
+	for i, countyFIPS := range counties {
+		// Check for context cancellation between counties.
+		if ctx.Err() != nil {
+			return totalRows, ctx.Err()
+		}
+
+		url := DownloadURL(product, opts.Year, countyFIPS)
+		destDir := fmt.Sprintf("%s/%s/%s/%s", opts.TempDir, stateFIPS, strings.ToLower(product.Name), countyFIPS)
+
+		shpPath, err := Download(ctx, url, destDir)
+		if err != nil {
+			// Some counties may not have files for all products — skip on download error.
+			log.Warn("county download failed, skipping",
+				zap.String("county", countyFIPS),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		rows, err := ParseShapefile(shpPath, product)
+		if err != nil {
+			log.Warn("county parse failed, skipping",
+				zap.String("county", countyFIPS),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		if opts.DryRun {
+			totalRows += int64(len(rows))
+			continue
+		}
+
+		loaded, err := BulkLoad(ctx, pool, product, stateAbbr, rows, opts.BatchSize)
+		if err != nil {
+			return totalRows, eris.Wrapf(err, "tiger: load %s county %s", product.Name, countyFIPS)
+		}
+		totalRows += loaded
+
+		// Clean up county files to free disk space.
+		_ = os.RemoveAll(destDir)
+
+		if (i+1)%25 == 0 || i == len(counties)-1 {
+			log.Info("county progress",
+				zap.Int("loaded", i+1),
+				zap.Int("total", len(counties)),
+				zap.Int64("rows", totalRows),
+			)
+		}
+	}
+
+	duration := time.Since(start)
+
+	// Record single load_status entry for the entire state+product.
+	// Only record if rows were actually loaded — 0-row entries poison incremental checks.
+	if !opts.DryRun && totalRows > 0 {
+		if err := recordLoad(ctx, pool, stateFIPS, stateAbbr, product.Table, opts.Year, int(totalRows), int(duration.Milliseconds())); err != nil {
+			log.Warn("failed to record load status", zap.Error(err))
+		}
+	}
+
+	log.Info("per-county product loaded",
+		zap.Int64("total_rows", totalRows),
+		zap.Int("counties", len(counties)),
+		zap.Duration("duration", duration),
+	)
+
+	return totalRows, nil
+}
+
+// CountyFIPSForState returns sorted 5-digit county FIPS codes for a state.
+// Requires tiger_data.county_all to be populated (loaded as a national product).
+func CountyFIPSForState(ctx context.Context, pool db.Pool, stateFIPS string) ([]string, error) {
+	rows, err := pool.Query(ctx,
+		"SELECT statefp || countyfp FROM tiger_data.county_all WHERE statefp = $1 ORDER BY countyfp",
+		stateFIPS)
+	if err != nil {
+		return nil, eris.Wrap(err, "tiger: query county FIPS")
+	}
+	defer rows.Close()
+
+	var codes []string
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			return nil, eris.Wrap(err, "tiger: scan county FIPS")
+		}
+		codes = append(codes, code)
+	}
+	return codes, rows.Err()
 }
 
 // isLoaded checks if a product has already been loaded for a given state/year.

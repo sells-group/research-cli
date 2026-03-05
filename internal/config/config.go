@@ -39,20 +39,19 @@ type Config struct {
 	Retry      RetryConfig      `yaml:"retry" mapstructure:"retry"`
 	Circuit    CircuitConfig    `yaml:"circuit" mapstructure:"circuit"`
 	Monitoring MonitoringConfig `yaml:"monitoring" mapstructure:"monitoring"`
-	Atlas      AtlasConfig      `yaml:"atlas" mapstructure:"atlas"`
 	Temporal   TemporalConfig   `yaml:"temporal" mapstructure:"temporal"`
-}
-
-// AtlasConfig configures the Atlas declarative schema management.
-type AtlasConfig struct {
-	DevURL     string `yaml:"dev_url" mapstructure:"dev_url"`
-	BinaryPath string `yaml:"binary_path" mapstructure:"binary_path"`
 }
 
 // TemporalConfig configures the Temporal.io workflow engine connection.
 type TemporalConfig struct {
+	Enabled   bool   `yaml:"enabled" mapstructure:"enabled"`
 	HostPort  string `yaml:"host_port" mapstructure:"host_port"`
 	Namespace string `yaml:"namespace" mapstructure:"namespace"`
+}
+
+// ShouldUseTemporal reports whether Temporal is enabled and reachable.
+func (c TemporalConfig) ShouldUseTemporal() bool {
+	return c.Enabled && c.HostPort != ""
 }
 
 // MonitoringConfig configures production monitoring and alerting.
@@ -458,6 +457,7 @@ func Load() (*Config, error) {
 
 	// Defaults
 	v.SetDefault("store.driver", "postgres")
+	v.SetDefault("store.database_url", "")
 	v.SetDefault("store.max_conns", 10)
 	v.SetDefault("store.min_conns", 2)
 	v.SetDefault("log.level", "info")
@@ -500,6 +500,7 @@ func Load() (*Config, error) {
 	v.SetDefault("salesforce.rate_limit", 25.0)
 	v.SetDefault("ppp.similarity_threshold", 0.4)
 	v.SetDefault("ppp.max_candidates", 10)
+	v.SetDefault("fedsync.database_url", "")
 	v.SetDefault("fedsync.temp_dir", "/tmp/fedsync")
 	v.SetDefault("fedsync.edgar_user_agent", "Sells Advisors blake@sellsadvisors.com")
 	v.SetDefault("fedsync.mistral_ocr_model", "pixtral-large-latest")
@@ -564,7 +565,8 @@ func Load() (*Config, error) {
 	v.SetDefault("retry.dlq_max_retries", 3)
 	v.SetDefault("circuit.failure_threshold", 5)
 	v.SetDefault("circuit.reset_timeout_secs", 30)
-	v.SetDefault("temporal.host_port", "localhost:7233")
+	v.SetDefault("temporal.enabled", true)
+	v.SetDefault("temporal.host_port", "sells-temporal.internal:7233")
 	v.SetDefault("temporal.namespace", "research-cli")
 	v.SetDefault("monitoring.enabled", false)
 	v.SetDefault("monitoring.check_interval_secs", 300)

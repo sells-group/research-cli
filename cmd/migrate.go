@@ -12,11 +12,11 @@ import (
 
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "Apply declarative schema changes",
-	Long: `Apply declarative schema changes via Atlas.
+	Short: "Apply sequential schema migrations",
+	Long: `Apply sequential schema migrations via goose.
 
-Compares the desired schema (embedded SQL files) against the live database
-and applies any necessary changes. Use --dry-run to preview without applying.`,
+Runs all pending migrations against the database. Use --dry-run to preview
+which migrations would be applied without making changes.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 
@@ -31,11 +31,8 @@ and applies any necessary changes. Use --dry-run to preview without applying.`,
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 		result, err := migrate.Apply(ctx, migrate.Options{
-			URL:         dbURL,
-			DevURL:      cfg.Atlas.DevURL,
-			DryRun:      dryRun,
-			AutoApprove: !dryRun,
-			BinaryPath:  cfg.Atlas.BinaryPath,
+			URL:    dbURL,
+			DryRun: dryRun,
 		})
 		if err != nil {
 			return eris.Wrap(err, "migrate")
@@ -43,19 +40,19 @@ and applies any necessary changes. Use --dry-run to preview without applying.`,
 
 		if dryRun {
 			if result.Changes == "" {
-				fmt.Println("No schema changes needed.")
+				fmt.Println("No pending migrations.")
 			} else {
-				fmt.Println("Planned changes:")
-				fmt.Println(result.Changes)
+				fmt.Println("Pending migrations:")
+				fmt.Print(result.Changes)
 			}
 		} else {
 			zap.L().Info("schema migration complete",
-				zap.Int("changes_applied", result.Applied),
+				zap.Int("migrations_applied", result.Applied),
 			)
 			if result.Applied == 0 {
 				fmt.Println("Schema is up to date.")
 			} else {
-				fmt.Printf("Applied %d schema changes.\n", result.Applied)
+				fmt.Printf("Applied %d migration(s).\n", result.Applied)
 			}
 		}
 
@@ -63,9 +60,9 @@ and applies any necessary changes. Use --dry-run to preview without applying.`,
 	},
 }
 
-var migrateInspectCmd = &cobra.Command{
-	Use:   "inspect",
-	Short: "Dump current database schema as HCL",
+var migrateStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show migration status",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 
@@ -74,24 +71,15 @@ var migrateInspectCmd = &cobra.Command{
 			dbURL = cfg.Store.DatabaseURL
 		}
 		if dbURL == "" {
-			return eris.New("migrate inspect: database URL is required")
+			return eris.New("migrate status: database URL is required")
 		}
 
-		result, err := migrate.Inspect(ctx, migrate.Options{
-			URL:        dbURL,
-			BinaryPath: cfg.Atlas.BinaryPath,
-		})
-		if err != nil {
-			return eris.Wrap(err, "migrate inspect")
-		}
-
-		fmt.Println(result)
-		return nil
+		return migrate.Status(ctx, migrate.Options{URL: dbURL})
 	},
 }
 
 func init() {
-	migrateCmd.Flags().Bool("dry-run", false, "preview changes without applying")
-	migrateCmd.AddCommand(migrateInspectCmd)
+	migrateCmd.Flags().Bool("dry-run", false, "preview pending migrations without applying")
+	migrateCmd.AddCommand(migrateStatusCmd)
 	rootCmd.AddCommand(migrateCmd)
 }

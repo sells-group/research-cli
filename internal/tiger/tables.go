@@ -5,15 +5,17 @@ package tiger
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Product describes a TIGER/Line shapefile product.
 type Product struct {
-	Name     string   // e.g., "EDGES"
-	Table    string   // target table without state prefix, e.g., "edges"
-	National bool     // true = single national file, false = per-state
-	Columns  []string // DB columns (without geom)
-	GeomType string   // "POINT", "LINESTRING", "POLYGON", "MULTIPOLYGON"
+	Name      string   // e.g., "EDGES"
+	Table     string   // target table without state prefix, e.g., "edges"
+	National  bool     // true = single national file, false = per-state/county
+	PerCounty bool     // true = one file per county (5-digit FIPS), false = one file per state (2-digit)
+	Columns   []string // DB columns (without geom)
+	GeomType  string   // "POINT", "LINESTRING", "POLYGON", "MULTIPOLYGON"
 }
 
 // Products lists all TIGER/Line products required for geocoding.
@@ -43,7 +45,7 @@ var Products = []Product{
 	{
 		Name:     "PLACE",
 		Table:    "place",
-		National: true,
+		National: false,
 		Columns: []string{
 			"statefp", "placefp", "placens", "geoid", "name", "namelsad",
 			"lsad", "classfp", "pcicbsa", "pcinecta", "mtfcc", "funcstat",
@@ -54,7 +56,7 @@ var Products = []Product{
 	{
 		Name:     "COUSUB",
 		Table:    "cousub",
-		National: true,
+		National: false,
 		Columns: []string{
 			"statefp", "countyfp", "cousubfp", "cousubns", "geoid", "name",
 			"namelsad", "lsad", "classfp", "mtfcc", "cnectafp", "nectafp",
@@ -73,9 +75,10 @@ var Products = []Product{
 		GeomType: "MULTIPOLYGON",
 	},
 	{
-		Name:     "EDGES",
-		Table:    "edges",
-		National: false,
+		Name:      "EDGES",
+		Table:     "edges",
+		National:  false,
+		PerCounty: true,
 		Columns: []string{
 			"tlid", "statefp", "countyfp", "fullname", "smtyp", "mtfcc",
 			"lwflag", "offsetl", "offsetr", "tfidl", "tfidr", "zipl", "zipr",
@@ -83,9 +86,10 @@ var Products = []Product{
 		GeomType: "MULTILINESTRING",
 	},
 	{
-		Name:     "FACES",
-		Table:    "faces",
-		National: false,
+		Name:      "FACES",
+		Table:     "faces",
+		National:  false,
+		PerCounty: true,
 		Columns: []string{
 			"tfid", "statefp00", "countyfp00", "tractce00", "blkgrpce00",
 			"blockce00", "cousubfp00", "submcdfp00", "conctyfp00", "placefp00",
@@ -96,9 +100,10 @@ var Products = []Product{
 		GeomType: "MULTIPOLYGON",
 	},
 	{
-		Name:     "ADDR",
-		Table:    "addr",
-		National: false,
+		Name:      "ADDR",
+		Table:     "addr",
+		National:  false,
+		PerCounty: true,
 		Columns: []string{
 			"tlid", "fromhn", "tohn", "side", "zip", "plus4", "fromtyp",
 			"totyp", "fromarmid", "toarmid", "aodo", "statefp",
@@ -106,9 +111,10 @@ var Products = []Product{
 		GeomType: "",
 	},
 	{
-		Name:     "FEATNAMES",
-		Table:    "featnames",
-		National: false,
+		Name:      "FEATNAMES",
+		Table:     "featnames",
+		National:  false,
+		PerCounty: true,
 		Columns: []string{
 			"tlid", "fullname", "name", "predirabrv", "pretypabrv",
 			"prequalabr", "sufdirabrv", "suftypabrv", "sufqualabr", "predir",
@@ -171,17 +177,19 @@ func ProductByName(name string) (Product, bool) {
 }
 
 // DownloadURL builds the Census Bureau download URL for a TIGER/Line shapefile.
-// National products use tl_{year}_us_{table}.zip; per-state use tl_{year}_{fips}_{table}.zip.
+// Census filenames use the lowercased product name (e.g., "state", "zcta520"),
+// NOT the PostGIS table name (e.g., "state_all", "zcta5").
 func DownloadURL(product Product, year int, stateFIPS string) string {
+	name := strings.ToLower(product.Name)
 	if product.National {
 		return fmt.Sprintf(
 			"https://www2.census.gov/geo/tiger/TIGER%d/%s/tl_%d_us_%s.zip",
-			year, product.Name, year, product.Table,
+			year, product.Name, year, name,
 		)
 	}
 	return fmt.Sprintf(
 		"https://www2.census.gov/geo/tiger/TIGER%d/%s/tl_%d_%s_%s.zip",
-		year, product.Name, year, stateFIPS, product.Table,
+		year, product.Name, year, stateFIPS, name,
 	)
 }
 
@@ -211,6 +219,17 @@ func PerStateProducts() []Product {
 	var out []Product
 	for _, p := range Products {
 		if !p.National {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// PerCountyProducts returns products with PerCounty=true.
+func PerCountyProducts() []Product {
+	var out []Product
+	for _, p := range Products {
+		if p.PerCounty {
 			out = append(out, p)
 		}
 	}

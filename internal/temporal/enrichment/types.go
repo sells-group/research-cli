@@ -5,7 +5,8 @@ import "github.com/sells-group/research-cli/internal/model"
 
 // EnrichCompanyParams is the input for EnrichCompanyWorkflow.
 type EnrichCompanyParams struct {
-	Company model.Company `json:"company"`
+	Company        model.Company `json:"company"`
+	ForceReExtract bool          `json:"force_re_extract,omitempty"`
 }
 
 // EnrichCompanyResult is the output of EnrichCompanyWorkflow.
@@ -17,8 +18,9 @@ type EnrichCompanyResult struct {
 
 // BatchEnrichParams is the input for BatchEnrichWorkflow.
 type BatchEnrichParams struct {
-	Companies   []model.Company `json:"companies"`
-	Concurrency int             `json:"concurrency"`
+	Companies      []model.Company `json:"companies"`
+	Concurrency    int             `json:"concurrency"`
+	ForceReExtract bool            `json:"force_re_extract,omitempty"`
 }
 
 // BatchEnrichResult is the output of BatchEnrichWorkflow.

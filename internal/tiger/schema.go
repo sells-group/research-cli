@@ -109,12 +109,13 @@ func PopulateLookups(ctx context.Context, pool db.Pool) error {
 	}{
 		{
 			name: "state_lookup",
-			sql: `INSERT INTO tiger.state_lookup (st_code, abbrev, name)
-				SELECT CAST(statefp AS integer), stusps, name
+			sql: `INSERT INTO tiger.state_lookup (st_code, abbrev, name, statefp)
+				SELECT CAST(statefp AS integer), stusps, name, statefp
 				FROM tiger_data.state_all
 				ON CONFLICT (st_code) DO UPDATE SET
 					abbrev = EXCLUDED.abbrev,
-					name = EXCLUDED.name`,
+					name = EXCLUDED.name,
+					statefp = EXCLUDED.statefp`,
 		},
 		{
 			name: "county_lookup",
@@ -143,21 +144,23 @@ func PopulateLookups(ctx context.Context, pool db.Pool) error {
 					name = EXCLUDED.name`,
 		},
 		{
+			name: "zip_lookup_all_truncate",
+			sql:  `TRUNCATE tiger.zip_lookup_all`,
+		},
+		{
 			name: "zip_lookup_all",
-			sql: `INSERT INTO tiger.zip_lookup_all (zip, st_code, state, co_code, county, city, statefp, countyfp)
-				SELECT DISTINCT ON (a.zip, s.statefp)
-					a.zip,
-					CAST(s.statefp AS integer),
+			sql: `INSERT INTO tiger.zip_lookup_all
+					(zip, st_code, state, co_code, county, cs_code, cousub, pl_code, place, cnt)
+				SELECT
+					CAST(a.zip AS integer),
+					CAST(a.statefp AS integer),
 					s.stusps,
-					0,
-					'',
-					'',
-					s.statefp,
-					''
+					0, '', 0, '', 0, '',
+					COUNT(*)
 				FROM tiger_data.addr a
 				JOIN tiger_data.state_all s ON a.statefp = s.statefp
 				WHERE a.zip IS NOT NULL AND a.zip != ''
-				ON CONFLICT DO NOTHING`,
+				GROUP BY a.zip, a.statefp, s.stusps`,
 		},
 	}
 

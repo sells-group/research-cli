@@ -30,6 +30,65 @@ import (
 	sfpkg "github.com/sells-group/research-cli/pkg/salesforce"
 )
 
+// initOfflinePipeline builds a pipeline with stub clients and fixture registries.
+// No API keys are required — useful for offline testing and local Temporal workers.
+func initOfflinePipeline(ctx context.Context) (*pipelineEnv, error) {
+	// Use SQLite store.
+	dsn := cfg.Store.DatabaseURL
+	if dsn == "" {
+		dsn = "research.db"
+	}
+	st, err := store.NewSQLite(dsn)
+	if err != nil {
+		return nil, eris.Wrap(err, "init sqlite store")
+	}
+	if err := st.Migrate(ctx); err != nil {
+		_ = st.Close()
+		return nil, eris.Wrap(err, "migrate store")
+	}
+
+	// Load fixture registries.
+	questions, err := registry.LoadQuestionsFromFile("testdata/questions.json")
+	if err != nil {
+		_ = st.Close()
+		return nil, eris.Wrap(err, "load question fixtures")
+	}
+	fields, err := registry.LoadFieldsFromFile("testdata/fields.json")
+	if err != nil {
+		_ = st.Close()
+		return nil, eris.Wrap(err, "load field fixtures")
+	}
+
+	// Stub clients.
+	jinaClient := &pipeline.StubJinaClient{}
+	firecrawlClient := &pipeline.StubFirecrawlClient{}
+	anthropicClient := &pipeline.StubAnthropicClient{}
+	perplexityClient := &pipeline.StubPerplexityClient{}
+	sfClient := &pipeline.StubSalesforceClient{}
+	notionClient := &pipeline.StubNotionClient{}
+
+	// Build scrape chain: Local → Jina.
+	matcher := scrape.NewPathMatcher(cfg.Crawl.ExcludePaths)
+	chain := scrape.NewChain(matcher,
+		scrape.NewLocalScraper(),
+		scrape.NewJinaAdapter(jinaClient),
+	)
+
+	p := pipeline.New(cfg, st, chain, jinaClient, firecrawlClient, perplexityClient, anthropicClient, sfClient, notionClient, nil, nil, nil, nil, questions, fields)
+
+	// Register default exporters for offline mode.
+	p.AddExporter(pipeline.NewSalesforceExporter(sfClient, notionClient, fields, cfg, false))
+	p.AddExporter(pipeline.NewNotionExporter(notionClient))
+
+	return &pipelineEnv{
+		Store:     st,
+		Pipeline:  p,
+		Questions: questions,
+		Fields:    fields,
+		Notion:    notionClient,
+	}, nil
+}
+
 // pipelineEnv holds all initialized clients, registries, and the pipeline
 // needed by the run/batch/serve commands.
 type pipelineEnv struct {

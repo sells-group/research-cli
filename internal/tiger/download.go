@@ -54,10 +54,14 @@ func Download(ctx context.Context, url, destDir string) (string, error) {
 		return "", eris.Wrap(err, "tiger: extract ZIP")
 	}
 
-	// Find the .shp file.
+	// Find data file: prefer .shp, fall back to .dbf for non-spatial products (ADDR, FEATNAMES).
 	shpPath, err := findFileByExt(extractDir, ".shp")
 	if err != nil {
-		return "", eris.Wrap(err, "tiger: find .shp file")
+		dbfPath, dbfErr := findFileByExt(extractDir, ".dbf")
+		if dbfErr != nil {
+			return "", eris.Wrap(err, "tiger: find data file (.shp or .dbf)")
+		}
+		return dbfPath, nil
 	}
 
 	return shpPath, nil

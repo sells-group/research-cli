@@ -27,13 +27,19 @@ var geoScrapeCmd = &cobra.Command{
 By default, runs all scrapers whose ShouldRun() returns true.
 Use --category to restrict to a category, or --sources for specific scrapers.
 Use --states to filter state-level scrapers by FIPS code.
-Use --force to ignore ShouldRun() scheduling logic.`,
+Use --force to ignore ShouldRun() scheduling logic.
+Use --direct to bypass Temporal and run locally.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
 		if err := cfg.Validate("fedsync"); err != nil {
 			return err
+		}
+
+		// Dispatch to Temporal unless --direct is set.
+		if shouldUseTemporal(cmd) {
+			return runGeoScrapeViaTemporal(ctx, cmd)
 		}
 
 		log := zap.L().With(zap.String("command", "geo.scrape"))
@@ -44,7 +50,7 @@ Use --force to ignore ShouldRun() scheduling logic.`,
 		}
 		defer pool.Close()
 
-		// Ensure schema is current via Atlas.
+		// Ensure schema is current.
 		if err := ensureSchema(ctx); err != nil {
 			return eris.Wrap(err, "geo scrape: ensure schema")
 		}
@@ -79,7 +85,7 @@ Use --force to ignore ShouldRun() scheduling logic.`,
 		queue := geospatial.NewGeocodeQueue(pool, nil, cfg.Geo.BatchSize)
 		engine := geoscraper.NewEngine(pool, f, syncLog, reg, queue, runDir)
 
-		log.Info("starting geo scrape",
+		log.Info("starting geo scrape (direct mode)",
 			zap.Any("category", opts.Category),
 			zap.Strings("sources", opts.Sources),
 			zap.Strings("states", opts.States),
@@ -100,6 +106,7 @@ func init() {
 	geoScrapeCmd.Flags().String("sources", "", "comma-separated scraper names (e.g., hifld,fema_flood)")
 	geoScrapeCmd.Flags().String("states", "", "comma-separated state FIPS codes (e.g., 48,12,06)")
 	geoScrapeCmd.Flags().Bool("force", false, "ignore ShouldRun() scheduling logic")
+	addDirectFlag(geoScrapeCmd)
 	geoCmd.AddCommand(geoScrapeCmd)
 }
 

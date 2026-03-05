@@ -40,7 +40,7 @@ var batchCmd = &cobra.Command{
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
-		if useTemporal, _ := cmd.Flags().GetBool("temporal"); useTemporal {
+		if shouldUseTemporal(cmd) {
 			return runBatchViaTemporal(ctx, cmd)
 		}
 
@@ -109,6 +109,10 @@ var retryFailedCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
+
+		if shouldUseTemporal(cmd) {
+			return runRetryFailedViaTemporal(ctx, cmd)
+		}
 
 		env, err := initPipeline(ctx)
 		if err != nil {
@@ -192,6 +196,10 @@ var reEnrichCmd = &cobra.Command{
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
+		if shouldUseTemporal(cmd) {
+			return runReEnrichViaTemporal(ctx, cmd)
+		}
+
 		env, err := initPipeline(ctx)
 		if err != nil {
 			return err
@@ -272,12 +280,14 @@ var reEnrichCmd = &cobra.Command{
 
 func init() {
 	batchCmd.Flags().IntVar(&batchLimit, "limit", 100, "max number of leads to process")
-	batchCmd.Flags().Bool("temporal", false, "run via Temporal workflow")
+	addDirectFlag(batchCmd)
 	batchCmd.AddCommand(retryFailedCmd)
 	retryFailedCmd.Flags().IntVar(&batchLimit, "limit", 50, "max number of DLQ entries to retry")
+	addDirectFlag(retryFailedCmd)
 	batchCmd.AddCommand(reEnrichCmd)
 	reEnrichCmd.Flags().IntVar(&reEnrichDays, "days", 90, "re-enrich companies older than this many days")
 	reEnrichCmd.Flags().IntVar(&reEnrichLimit, "limit", 50, "max number of stale companies to re-enrich")
+	addDirectFlag(reEnrichCmd)
 	rootCmd.AddCommand(batchCmd)
 }
 
@@ -489,6 +499,122 @@ func dlqBackoff(retryCount int) time.Duration {
 		d = 2 * time.Hour
 	}
 	return d
+}
+
+// runRetryFailedViaTemporal starts a BatchEnrichWorkflow for DLQ entries.
+func runRetryFailedViaTemporal(ctx context.Context, _ *cobra.Command) error {
+	c, err := temporalpkg.NewClient(cfg.Temporal)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	env, err := initPipeline(ctx)
+	if err != nil {
+		return err
+	}
+	defer env.Close()
+
+	entries, err := env.Store.DequeueDLQ(ctx, resilience.DLQFilter{
+		ErrorType: "transient",
+		Limit:     batchLimit,
+	})
+	if err != nil {
+		return eris.Wrap(err, "query dead letter queue")
+	}
+	if len(entries) == 0 {
+		zap.L().Info("no retryable entries in dead letter queue")
+		return nil
+	}
+
+	companies := make([]model.Company, len(entries))
+	for i, e := range entries {
+		companies[i] = e.Company
+	}
+
+	workflowID := fmt.Sprintf("retry-failed-%d", time.Now().UnixNano())
+	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: temporalpkg.EnrichmentTaskQueue,
+	}, temporalenrich.BatchEnrichWorkflow, temporalenrich.BatchEnrichParams{
+		Companies:   companies,
+		Concurrency: cfg.Batch.MaxConcurrentCompanies,
+	})
+	if err != nil {
+		return eris.Wrap(err, "start retry-failed workflow")
+	}
+
+	zap.L().Info("retry-failed workflow started",
+		zap.String("workflow_id", run.GetID()),
+		zap.Int("companies", len(companies)),
+	)
+
+	var result temporalenrich.BatchEnrichResult
+	if err := run.Get(ctx, &result); err != nil {
+		return eris.Wrap(err, "retry-failed workflow failed")
+	}
+
+	fmt.Printf("Retry-failed complete: %d succeeded, %d failed\n", result.Succeeded, result.Failed)
+	return nil
+}
+
+// runReEnrichViaTemporal starts a BatchEnrichWorkflow for stale companies.
+func runReEnrichViaTemporal(ctx context.Context, _ *cobra.Command) error {
+	c, err := temporalpkg.NewClient(cfg.Temporal)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	env, err := initPipeline(ctx)
+	if err != nil {
+		return err
+	}
+	defer env.Close()
+
+	cutoff := time.Now().AddDate(0, 0, -reEnrichDays)
+	stale, err := env.Store.ListStaleCompanies(ctx, store.StaleCompanyFilter{
+		LastEnrichedBefore: cutoff,
+		Limit:              reEnrichLimit,
+	})
+	if err != nil {
+		return eris.Wrap(err, "list stale companies")
+	}
+	if len(stale) == 0 {
+		zap.L().Info("no stale companies found", zap.Int("days_threshold", reEnrichDays))
+		return nil
+	}
+
+	companies := make([]model.Company, len(stale))
+	for i, sc := range stale {
+		companies[i] = sc.Company
+	}
+
+	workflowID := fmt.Sprintf("re-enrich-%d", time.Now().UnixNano())
+	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: temporalpkg.EnrichmentTaskQueue,
+	}, temporalenrich.BatchEnrichWorkflow, temporalenrich.BatchEnrichParams{
+		Companies:      companies,
+		Concurrency:    cfg.Batch.MaxConcurrentCompanies,
+		ForceReExtract: true,
+	})
+	if err != nil {
+		return eris.Wrap(err, "start re-enrich workflow")
+	}
+
+	zap.L().Info("re-enrich workflow started",
+		zap.String("workflow_id", run.GetID()),
+		zap.Int("companies", len(companies)),
+	)
+
+	var result temporalenrich.BatchEnrichResult
+	if err := run.Get(ctx, &result); err != nil {
+		return eris.Wrap(err, "re-enrich workflow failed")
+	}
+
+	fmt.Printf("Re-enrich complete: %d succeeded, %d failed\n", result.Succeeded, result.Failed)
+	return nil
 }
 
 // updateNotionFailed sets the Notion page status to "Failed" when enrichment errors out.

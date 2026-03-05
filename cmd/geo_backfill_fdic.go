@@ -31,7 +31,7 @@ so the scorer can use MSA-aware geo_match scoring.`,
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
-		if useTemporal, _ := cmd.Flags().GetBool("temporal"); useTemporal {
+		if shouldUseTemporal(cmd) {
 			return runGeoBackfillViaTemporal(ctx, cmd, "fdic")
 		}
 
@@ -412,6 +412,6 @@ func init() {
 	f.Int("concurrency", 10, "maximum parallel geocode calls")
 	f.Bool("skip-msa", false, "skip MSA association step")
 	f.Bool("skip-branches", false, "skip branch location creation")
-	f.Bool("temporal", false, "run via Temporal workflow")
+	addDirectFlag(geoBackfillFDICCmd)
 	geoCmd.AddCommand(geoBackfillFDICCmd)
 }

@@ -125,7 +125,7 @@ func placeDef() boundaryDef {
 		table:       "geo.places",
 		product:     placeProduct,
 		conflictKey: "geoid",
-		national:    true,
+		national:    false,
 		columns:     placeCols,
 		buildRow:    newPlaceRow,
 	}
@@ -317,9 +317,9 @@ func newCensusTractRow(raw []any) []any {
 // --- Congressional Districts ---
 
 var congressionalDistrictProduct = tiger.Product{
-	Name:     "CD118",
-	Table:    "cd118",
-	Columns:  []string{"statefp", "cd118fp", "geoid", "namelsad", "lsad", "mtfcc", "funcstat", "aland", "awater", "intptlat", "intptlon"},
+	Name:     "CD",
+	Table:    "cd119",
+	Columns:  []string{"statefp", "cd119fp", "geoid", "namelsad", "lsad", "mtfcc", "funcstat", "aland", "awater", "intptlat", "intptlon"},
 	GeomType: "MULTIPOLYGON",
 }
 
@@ -335,14 +335,14 @@ func congressionalDistrictDef() boundaryDef {
 		table:       "geo.congressional_districts",
 		product:     congressionalDistrictProduct,
 		conflictKey: "geoid",
-		national:    true,
+		national:    false,
 		columns:     congressionalDistrictCols,
 		buildRow:    newCongressionalDistrictRow,
 	}
 }
 
 func newCongressionalDistrictRow(raw []any) []any {
-	// raw: statefp, cd118fp, geoid, namelsad, lsad, mtfcc, funcstat, aland, awater, intptlat, intptlon, wkb
+	// raw: statefp, cd119fp, geoid, namelsad, lsad, mtfcc, funcstat, aland, awater, intptlat, intptlon, wkb
 	geoid := strVal(raw, 2)
 	lat, lon := parseLatLon(raw, 9, 10)
 	props := boundaryProperties(raw,
@@ -355,7 +355,7 @@ func newCongressionalDistrictRow(raw []any) []any {
 		geoid,
 		strVal(raw, 0), // state_fips
 		strVal(raw, 1), // district
-		"118",          // congress (118th)
+		"119",          // congress (119th)
 		strVal(raw, 3), // name (namelsad)
 		strVal(raw, 4), // lsad
 		raw[11],        // geom (WKB)

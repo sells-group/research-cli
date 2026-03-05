@@ -29,7 +29,7 @@ descending asset order so the largest nonprofits/foundations are linked first.`,
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
-		if useTemporal, _ := cmd.Flags().GetBool("temporal"); useTemporal {
+		if shouldUseTemporal(cmd) {
 			return runGeoBackfillViaTemporal(ctx, cmd, "990")
 		}
 
@@ -272,6 +272,6 @@ func init() {
 	f.Int("batch-size", 100, "batch size for processing")
 	f.Int("concurrency", 10, "maximum parallel geocode calls")
 	f.Bool("skip-msa", false, "skip MSA association step")
-	f.Bool("temporal", false, "run via Temporal workflow")
+	addDirectFlag(geoBackfill990Cmd)
 	geoCmd.AddCommand(geoBackfill990Cmd)
 }

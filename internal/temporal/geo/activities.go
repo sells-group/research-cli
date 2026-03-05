@@ -65,7 +65,7 @@ type UnlinkedRecord struct {
 
 // QueryUnlinkedParams is the input for QueryUnlinkedRecords.
 type QueryUnlinkedParams struct {
-	Source string `json:"source"` // "adv", "5500", "990", "fdic"
+	Source string `json:"source"` // "adv", "5500", "990", "fdic", "sba", "address"
 	Limit  int    `json:"limit"`
 }
 
@@ -88,6 +88,10 @@ func (a *Activities) QueryUnlinkedRecords(ctx context.Context, params QueryUnlin
 		records, err = a.queryUnlinked990(ctx, params.Limit)
 	case "fdic":
 		records, err = a.queryUnlinkedFDIC(ctx, params.Limit)
+	case "sba":
+		records, err = a.queryUnlinkedSBA(ctx, params.Limit)
+	case "address":
+		records, err = a.queryUngeocodedAddresses(ctx, params.Limit)
 	default:
 		return nil, temporal.NewNonRetryableApplicationError(
 			fmt.Sprintf("unknown source: %s", params.Source),
@@ -325,6 +329,11 @@ func (a *Activities) ProcessGeoBackfillBatch(ctx context.Context, params Process
 
 func (a *Activities) processRecord(ctx context.Context, source string, rec UnlinkedRecord, skipMSA bool, result *ProcessBatchResult) error {
 	// Determine match source and type from the backfill source.
+	// Address source is special — only geocodes existing addresses, no company creation.
+	if source == "address" {
+		return a.processAddressRecord(ctx, rec, skipMSA, result)
+	}
+
 	var matchSource, matchType, addrSource, identSystem string
 	switch source {
 	case "adv":
@@ -347,6 +356,11 @@ func (a *Activities) processRecord(ctx context.Context, source string, rec Unlin
 		matchType = "direct_fdic_cert"
 		addrSource = "fdic_institutions"
 		identSystem = company.SystemFDIC
+	case "sba":
+		matchSource = "sba_loans"
+		matchType = "direct_sba_loan"
+		addrSource = "sba_loans"
+		identSystem = company.SystemSBALoan
 	}
 
 	// 1. Create stub company.
@@ -461,6 +475,124 @@ func (a *Activities) processRecord(ctx context.Context, source string, rec Unlin
 		return eris.Wrap(err, "upsert match")
 	}
 	result.Linked++
+	return nil
+}
+
+func (a *Activities) queryUnlinkedSBA(ctx context.Context, limit int) ([]UnlinkedRecord, error) {
+	rows, err := a.pool.Query(ctx, `
+		SELECT DISTINCT ON (s.l2locid)
+		       s.l2locid::text, s.borrname,
+		       s.borrstreet, s.borrcity, s.borrstate, s.borrzip
+		FROM fed_data.sba_loans s
+		LEFT JOIN public.company_matches cm
+			ON cm.matched_key = s.l2locid::text
+			AND cm.matched_source = 'sba_loans'
+		WHERE cm.id IS NULL
+		  AND s.borrname IS NOT NULL AND s.borrname != ''
+		ORDER BY s.l2locid, s.approvalfiscalyear DESC NULLS LAST, s.grossapproval DESC NULLS LAST
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, eris.Wrap(err, "query unlinked SBA borrowers")
+	}
+	defer rows.Close()
+
+	var records []UnlinkedRecord
+	for rows.Next() {
+		var r UnlinkedRecord
+		var street, city, state, zip *string
+		if err := rows.Scan(&r.Key, &r.Name, &street, &city, &state, &zip); err != nil {
+			return nil, eris.Wrap(err, "scan SBA borrower")
+		}
+		if street != nil {
+			r.Street1 = *street
+		}
+		if city != nil {
+			r.City = *city
+		}
+		if state != nil {
+			r.State = *state
+		}
+		if zip != nil {
+			r.Zip = *zip
+		}
+		records = append(records, r)
+	}
+	return records, rows.Err()
+}
+
+func (a *Activities) queryUngeocodedAddresses(ctx context.Context, limit int) ([]UnlinkedRecord, error) {
+	rows, err := a.pool.Query(ctx, `
+		SELECT ca.id::text, COALESCE(c.name, ''),
+		       ca.street, ca.city, ca.state, ca.zip_code
+		FROM public.company_addresses ca
+		JOIN public.companies c ON c.id = ca.company_id
+		WHERE ca.latitude IS NULL
+		ORDER BY ca.id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, eris.Wrap(err, "query ungeocoded addresses")
+	}
+	defer rows.Close()
+
+	var records []UnlinkedRecord
+	for rows.Next() {
+		var r UnlinkedRecord
+		var street, city, state, zip *string
+		if err := rows.Scan(&r.Key, &r.Name, &street, &city, &state, &zip); err != nil {
+			return nil, eris.Wrap(err, "scan ungeocoded address")
+		}
+		if street != nil {
+			r.Street1 = *street
+		}
+		if city != nil {
+			r.City = *city
+		}
+		if state != nil {
+			r.State = *state
+		}
+		if zip != nil {
+			r.Zip = *zip
+		}
+		records = append(records, r)
+	}
+	return records, rows.Err()
+}
+
+func (a *Activities) processAddressRecord(ctx context.Context, rec UnlinkedRecord, skipMSA bool, result *ProcessBatchResult) error {
+	var addrID int64
+	if _, err := fmt.Sscanf(rec.Key, "%d", &addrID); err != nil {
+		return eris.Wrapf(err, "parse address ID %q", rec.Key)
+	}
+
+	street := strings.TrimSpace(rec.Street1 + " " + rec.Street2)
+	gcResult, err := a.gc.Geocode(ctx, geocode.AddressInput{
+		ID:      rec.Key,
+		Street:  street,
+		City:    rec.City,
+		State:   rec.State,
+		ZipCode: rec.Zip,
+	})
+	if err != nil {
+		return eris.Wrap(err, "geocode address")
+	}
+	if !gcResult.Matched {
+		return nil
+	}
+
+	if err := a.cs.UpdateAddressGeocode(ctx, addrID, gcResult.Latitude, gcResult.Longitude, gcResult.Source, gcResult.Quality, gcResult.CountyFIPS); err != nil {
+		return eris.Wrap(err, "update address geocode")
+	}
+	result.Geocoded++
+
+	if !skipMSA && a.assoc != nil {
+		relations, err := a.assoc.AssociateAddress(ctx, addrID, gcResult.Latitude, gcResult.Longitude, a.topMSAs)
+		if err != nil {
+			zap.L().Warn("MSA association failed", zap.String("address_id", rec.Key), zap.Error(err))
+		} else {
+			result.MSAs += len(relations)
+		}
+	}
+
 	return nil
 }
 

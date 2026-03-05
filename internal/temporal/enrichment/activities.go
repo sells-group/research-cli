@@ -25,7 +25,8 @@ func NewActivities(p *pipeline.Pipeline) *Activities {
 
 // RunEnrichmentParams is the input for RunEnrichment.
 type RunEnrichmentParams struct {
-	Company model.Company `json:"company"`
+	Company        model.Company `json:"company"`
+	ForceReExtract bool          `json:"force_re_extract,omitempty"`
 }
 
 // RunEnrichmentResult is the output of RunEnrichment.
@@ -40,6 +41,10 @@ type RunEnrichmentResult struct {
 func (a *Activities) RunEnrichment(ctx context.Context, params RunEnrichmentParams) (*RunEnrichmentResult, error) {
 	log := zap.L().With(zap.String("company", params.Company.URL))
 	log.Info("starting enrichment via Temporal activity")
+
+	if params.ForceReExtract {
+		a.pipeline.SetForceReExtract(true)
+	}
 
 	result, err := a.pipeline.Run(ctx, params.Company)
 	if err != nil {

@@ -8,11 +8,12 @@ import (
 	"github.com/sells-group/research-cli/internal/config"
 )
 
-// TaskQueue constants for the three worker types.
+// TaskQueue constants for the four worker types.
 const (
 	FedsyncTaskQueue    = "fedsync"
 	EnrichmentTaskQueue = "enrichment"
 	GeoTaskQueue        = "geo"
+	TigerTaskQueue      = "tiger"
 )
 
 // NewClient creates a Temporal client from the application config.

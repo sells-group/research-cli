@@ -10,6 +10,7 @@ import (
 	"github.com/sells-group/research-cli/internal/fedsync"
 	"github.com/sells-group/research-cli/internal/fedsync/dataset"
 	"github.com/sells-group/research-cli/internal/fetcher"
+	temporalfedsync "github.com/sells-group/research-cli/internal/temporal/fedsync"
 )
 
 var fedsyncXrefCmd = &cobra.Command{
@@ -24,6 +25,13 @@ Stage 2: Multi-dataset matching across ADV, EDGAR, BrokerCheck, Form BD, OSHA,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 		log := zap.L().With(zap.String("command", "fedsync.xref"))
+
+		if shouldUseTemporal(cmd) {
+			return startFedsyncWorkflow(ctx, temporalfedsync.RunParams{
+				Datasets: []string{"entity_xref"},
+				Force:    true,
+			}, true)
+		}
 
 		pool, err := fedsyncPool(ctx)
 		if err != nil {
@@ -61,5 +69,6 @@ Stage 2: Multi-dataset matching across ADV, EDGAR, BrokerCheck, Form BD, OSHA,
 }
 
 func init() {
+	addDirectFlag(fedsyncXrefCmd)
 	fedsyncCmd.AddCommand(fedsyncXrefCmd)
 }
