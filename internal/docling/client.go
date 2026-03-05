@@ -47,13 +47,16 @@ type TableData struct {
 
 type httpClient struct {
 	baseURL string
+	apiKey  string
 	client  *http.Client
 }
 
 // NewClient creates a Docling Client that talks to the given base URL.
-func NewClient(baseURL string) Client {
+// If apiKey is non-empty, it is sent as an X-API-Key header on every request.
+func NewClient(baseURL, apiKey string) Client {
 	return &httpClient{
 		baseURL: baseURL,
+		apiKey:  apiKey,
 		client:  &http.Client{Timeout: 120 * time.Second},
 	}
 }
@@ -97,6 +100,9 @@ func (c *httpClient) Convert(ctx context.Context, pdfData []byte, _ ConvertOpts)
 		return nil, eris.Wrap(err, "docling: create request")
 	}
 	req.Header.Set("Content-Type", contentType)
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {

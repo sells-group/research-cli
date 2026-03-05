@@ -168,7 +168,7 @@ func parseBrochureMappingDoc(path string) ([]docMapping, error) {
 // buildExtractors creates an Extractor and optional StructuredExtractor based on config.
 func buildExtractors(cfg *config.Config) (ocr.Extractor, ocr.StructuredExtractor, error) {
 	if cfg.Fedsync.DoclingURL != "" && cfg.Fedsync.OCR.Provider == "docling" {
-		client := docling.NewClient(cfg.Fedsync.DoclingURL)
+		client := docling.NewClient(cfg.Fedsync.DoclingURL, cfg.Fedsync.DoclingAPIKey)
 		ext := ocr.NewDoclingExtractor(client)
 		return ext, ext, nil
 	}

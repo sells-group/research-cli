@@ -175,6 +175,7 @@ type FedsyncConfig struct {
 	MistralModel   string    `yaml:"mistral_ocr_model" mapstructure:"mistral_ocr_model"`
 	OCR            OCRConfig `yaml:"ocr" mapstructure:"ocr"`
 	DoclingURL     string    `yaml:"docling_url" mapstructure:"docling_url"`
+	DoclingAPIKey  string    `yaml:"docling_api_key" mapstructure:"docling_api_key"`
 }
 
 // OCRConfig configures PDF text extraction.
