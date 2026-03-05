@@ -29,6 +29,15 @@ const (
 	SectionFull            = "full" // fallback: entire brochure
 )
 
+// CRS section keys.
+const (
+	SectionRelationshipsServices = "relationships_services"
+	SectionFeesCosts             = "fees_costs"
+	SectionDisciplinaryHistory   = "disciplinary"
+	SectionConversationStarters  = "conversation_starters"
+	SectionAdditionalInfo        = "additional_info"
+)
+
 // itemHeaders maps section keys to their canonical titles for display.
 var itemHeaders = map[string]string{
 	SectionCoverPage:       "Cover Page",
@@ -147,6 +156,23 @@ func SectionsForItems(sections map[string]string, keys ...string) string {
 // itemKey converts an item number (1-18) to a section key like "item_4".
 func itemKey(num int) string {
 	return fmt.Sprintf("item_%d", num)
+}
+
+// SectionBrochureFromDB converts DB section rows into the same map format
+// as SectionBrochure returns, for use in document assembly.
+func SectionBrochureFromDB(sections []DBSection) map[string]string {
+	result := make(map[string]string)
+	var fullParts []string
+	for _, s := range sections {
+		if s.TextContent != "" {
+			result[s.SectionKey] = s.TextContent
+			fullParts = append(fullParts, s.TextContent)
+		}
+	}
+	if len(fullParts) > 0 {
+		result[SectionFull] = strings.Join(fullParts, "\n\n")
+	}
+	return result
 }
 
 func parseItemNumber(s string) int {
