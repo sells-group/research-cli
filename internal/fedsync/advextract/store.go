@@ -577,6 +577,65 @@ func (s *Store) WriteComputedMetrics(ctx context.Context, m *ComputedMetrics) er
 	return eris.Wrapf(err, "advextract: write computed metrics for CRD %d", m.CRDNumber)
 }
 
+// DBSection represents a section row from adv_brochure_sections or adv_crs_sections.
+type DBSection struct {
+	CRDNumber    int
+	DocID        string
+	SectionKey   string
+	SectionTitle string
+	TextContent  string
+	Tables       json.RawMessage
+	Metadata     json.RawMessage
+}
+
+// LoadBrochureSections loads brochure sections for an advisor from the sections table.
+func (s *Store) LoadBrochureSections(ctx context.Context, crd int) ([]DBSection, error) {
+	query := `SELECT crd_number, brochure_id, section_key, section_title, text_content, tables, metadata
+		FROM fed_data.adv_brochure_sections
+		WHERE crd_number = $1
+		ORDER BY section_key`
+
+	rows, err := s.pool.Query(ctx, query, crd)
+	if err != nil {
+		return nil, eris.Wrapf(err, "advextract: load brochure sections for CRD %d", crd)
+	}
+	defer rows.Close()
+
+	var result []DBSection
+	for rows.Next() {
+		var sec DBSection
+		if err := rows.Scan(&sec.CRDNumber, &sec.DocID, &sec.SectionKey, &sec.SectionTitle, &sec.TextContent, &sec.Tables, &sec.Metadata); err != nil {
+			return nil, eris.Wrap(err, "advextract: scan brochure section")
+		}
+		result = append(result, sec)
+	}
+	return result, rows.Err()
+}
+
+// LoadCRSSections loads CRS sections for an advisor from the sections table.
+func (s *Store) LoadCRSSections(ctx context.Context, crd int) ([]DBSection, error) {
+	query := `SELECT crd_number, crs_id, section_key, section_title, text_content, tables, metadata
+		FROM fed_data.adv_crs_sections
+		WHERE crd_number = $1
+		ORDER BY section_key`
+
+	rows, err := s.pool.Query(ctx, query, crd)
+	if err != nil {
+		return nil, eris.Wrapf(err, "advextract: load CRS sections for CRD %d", crd)
+	}
+	defer rows.Close()
+
+	var result []DBSection
+	for rows.Next() {
+		var sec DBSection
+		if err := rows.Scan(&sec.CRDNumber, &sec.DocID, &sec.SectionKey, &sec.SectionTitle, &sec.TextContent, &sec.Tables, &sec.Metadata); err != nil {
+			return nil, eris.Wrap(err, "advextract: scan CRS section")
+		}
+		result = append(result, sec)
+	}
+	return result, rows.Err()
+}
+
 // RefreshMaterializedView refreshes the M&A intelligence materialized view.
 func (s *Store) RefreshMaterializedView(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, "REFRESH MATERIALIZED VIEW CONCURRENTLY fed_data.mv_adv_intelligence")

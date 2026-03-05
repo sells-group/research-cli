@@ -10,10 +10,9 @@ import (
 	"time"
 
 	"github.com/rotisserie/eris"
-	"github.com/sells-group/research-cli/internal/db"
-	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/config"
+	"github.com/sells-group/research-cli/internal/db"
 	"github.com/sells-group/research-cli/internal/fetcher"
 	"github.com/sells-group/research-cli/internal/ocr"
 )
@@ -23,9 +22,31 @@ const (
 	advPart3FirmLimit = 500
 )
 
-// ADVPart3 syncs CRS (Client Relationship Summary) PDFs → OCR → text.
-// Downloads the monthly bulk CRS ZIP from the FOIA metadata API,
-// extracts mapping CSV + PDFs, OCRs each PDF and upserts into adv_crs.
+// CRS section keys.
+const (
+	crsSectionRelationshipsServices = "relationships_services"
+	crsSectionFeesCosts             = "fees_costs"
+	crsSectionDisciplinary          = "disciplinary"
+	crsSectionConversationStarters  = "conversation_starters"
+	crsSectionAdditionalInfo        = "additional_info"
+)
+
+// crsHeadingMap maps normalized CRS heading text to section keys.
+var crsHeadingMap = map[string]string{
+	"relationships and services":                                                crsSectionRelationshipsServices,
+	"what investment services and advice can you provide me":                    crsSectionRelationshipsServices,
+	"fees costs conflicts and standard of conduct":                              crsSectionFeesCosts,
+	"fees, costs, conflicts, and standard of conduct":                           crsSectionFeesCosts,
+	"what fees will i pay":                                                      crsSectionFeesCosts,
+	"disciplinary history":                                                      crsSectionDisciplinary,
+	"do you or your financial professionals have legal or disciplinary history": crsSectionDisciplinary,
+	"conversation starters":                                                     crsSectionConversationStarters,
+	"key questions to ask":                                                      crsSectionConversationStarters,
+	"additional information":                                                    crsSectionAdditionalInfo,
+	"who is my primary contact":                                                 crsSectionAdditionalInfo,
+}
+
+// ADVPart3 syncs CRS (Client Relationship Summary) PDFs → OCR → text + sections.
 type ADVPart3 struct {
 	cfg *config.Config
 }
@@ -49,143 +70,76 @@ func (d *ADVPart3) ShouldRun(now time.Time, lastSync *time.Time) bool {
 
 // Sync fetches and loads CRS (Client Relationship Summary) data.
 func (d *ADVPart3) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, tempDir string) (*SyncResult, error) {
-	log := zap.L().With(zap.String("dataset", d.Name()))
-
-	ext, err := ocr.NewExtractor(d.cfg.Fedsync.OCR, d.cfg.Fedsync.MistralKey)
+	ext, structExt, err := buildExtractors(d.cfg)
 	if err != nil {
-		return nil, eris.Wrap(err, "adv_part3: create OCR extractor")
+		return nil, eris.Wrap(err, "adv_part3: create extractor")
 	}
 
-	// Fetch IAPD reports metadata to find the latest CRS ZIP URL.
-	meta, err := fetchFOIAMetadata(ctx, f)
-	if err != nil {
-		return nil, eris.Wrap(err, "adv_part3: fetch FOIA metadata")
+	return syncADVDocuments(ctx, pool, f, ext, structExt, tempDir, advDocSyncConfig{
+		name:          d.Name(),
+		foiaSelector:  func(m *foiaReportsMetadata) []foiaFileEntry { return m.ADVFirmCRSDocs },
+		table:         d.Table(),
+		sectionsTable: "fed_data.adv_crs_sections",
+		columns:       []string{"crd_number", "crs_id", "filing_date", "text_content", "extracted_at"},
+		conflictKeys:  []string{"crd_number", "crs_id"},
+		batchSize:     advPart3BatchSize,
+		firmLimit:     advPart3FirmLimit,
+		parseMapping:  parseCRSMappingDoc,
+		pdfFallback:   crsMappingsFromPDFsDoc,
+		sectionParser: parseCRSSections,
+	})
+}
+
+// parseCRSSections extracts the 5 CRS sections from a Docling-parsed document.
+func parseCRSSections(doc *ocr.StructuredDocument, crd int, docID string) []sectionRow {
+	if doc == nil || len(doc.Sections) == 0 {
+		return nil
 	}
 
-	url, err := latestFileURL(meta.ADVFirmCRSDocs, "advFirmCRSDocs")
-	if err != nil {
-		return nil, eris.Wrap(err, "adv_part3: resolve CRS URL")
-	}
-	log.Info("downloading CRS ZIP", zap.String("url", url))
-
-	zipPath := filepath.Join(tempDir, "adv_crs.zip")
-	if _, err := f.DownloadToFile(ctx, url, zipPath); err != nil {
-		return nil, eris.Wrap(err, "adv_part3: download CRS ZIP")
-	}
-	defer os.Remove(zipPath) //nolint:errcheck
-
-	// Extract ZIP to temp dir.
-	extractDir := filepath.Join(tempDir, "adv_crs_extract")
-	if err := os.MkdirAll(extractDir, 0o750); err != nil {
-		return nil, eris.Wrap(err, "adv_part3: create extract dir")
-	}
-	defer os.RemoveAll(extractDir) //nolint:errcheck
-
-	extractedFiles, err := fetcher.ExtractZIP(zipPath, extractDir)
-	if err != nil {
-		return nil, eris.Wrap(err, "adv_part3: extract CRS ZIP")
-	}
-
-	// Find mapping CSV.
-	var mappingPath string
-	for _, fp := range extractedFiles {
-		base := strings.ToLower(filepath.Base(fp))
-		if strings.Contains(base, "mapping") && strings.HasSuffix(base, ".csv") {
-			mappingPath = fp
-			break
-		}
-	}
-
-	var mappings []crsMapping
-	if mappingPath != "" {
-		mappings, err = parseCRSMapping(mappingPath)
-		if err != nil {
-			return nil, eris.Wrap(err, "adv_part3: parse mapping CSV")
-		}
-	} else {
-		// Fallback: treat all PDFs in the ZIP as CRS docs.
-		log.Warn("no mapping CSV found in CRS ZIP, falling back to PDF filenames")
-		mappings = crsMappingsFromPDFs(extractedFiles)
-	}
-	log.Info("parsed CRS mapping", zap.Int("entries", len(mappings)))
-
-	// Limit to first N entries to avoid extremely long OCR runs.
-	if len(mappings) > advPart3FirmLimit {
-		mappings = mappings[:advPart3FirmLimit]
-	}
-
-	columns := []string{"crd_number", "crs_id", "filing_date", "text_content", "extracted_at"}
-	conflictKeys := []string{"crd_number", "crs_id"}
-
-	var batch [][]any
-	var totalRows int64
-
-	for _, m := range mappings {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		// Find the PDF file in the extracted directory.
-		pdfPath := findPDFInExtracted(extractDir, m.PDFFileName)
-		if pdfPath == "" {
-			log.Debug("PDF not found in extract", zap.String("pdf", m.PDFFileName), zap.Int("crd", m.CRDNumber))
+	var rows []sectionRow
+	for _, sec := range doc.Sections {
+		key := matchCRSSectionKey(sec.Title)
+		if key == "" {
 			continue
 		}
 
-		text, err := ext.ExtractText(ctx, pdfPath)
-		if err != nil {
-			log.Debug("skipping CRS OCR", zap.Int("crd", m.CRDNumber), zap.Error(err))
-			continue
-		}
-
-		now := time.Now()
-		batch = append(batch, []any{m.CRDNumber, m.CRSID, m.DateFiled, text, now})
-
-		if len(batch) >= advPart3BatchSize {
-			n, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{
-				Table:        d.Table(),
-				Columns:      columns,
-				ConflictKeys: conflictKeys,
-			}, batch)
-			if err != nil {
-				return nil, eris.Wrap(err, "adv_part3: bulk upsert")
-			}
-			totalRows += n
-			batch = batch[:0]
-		}
+		meta := extractSectionMetadata(sec.Text)
+		rows = append(rows, sectionRow{
+			CRDNumber:   crd,
+			DocID:       docID,
+			SectionKey:  key,
+			Title:       sec.Title,
+			TextContent: sec.Text,
+			Tables:      tablesToJSON(sec.Tables),
+			Metadata:    marshalJSONB(meta),
+		})
 	}
-
-	if len(batch) > 0 {
-		n, err := db.BulkUpsert(ctx, pool, db.UpsertConfig{
-			Table:        d.Table(),
-			Columns:      columns,
-			ConflictKeys: conflictKeys,
-		}, batch)
-		if err != nil {
-			return nil, eris.Wrap(err, "adv_part3: bulk upsert final batch")
-		}
-		totalRows += n
-	}
-
-	return &SyncResult{
-		RowsSynced: totalRows,
-		Metadata:   map[string]any{"crs_processed": len(mappings)},
-	}, nil
+	return rows
 }
 
-// crsMapping represents one row from the CRS mapping CSV.
-type crsMapping struct {
-	CRDNumber   int
-	CRSID       string
-	DateFiled   string
-	PDFFileName string
+// matchCRSSectionKey maps a heading title to a CRS section key.
+func matchCRSSectionKey(title string) string {
+	normalized := strings.ToLower(strings.TrimSpace(title))
+	// Remove trailing question marks and punctuation for fuzzy matching.
+	normalized = strings.TrimRight(normalized, "?!.")
+	normalized = strings.TrimSpace(normalized)
+
+	if key, ok := crsHeadingMap[normalized]; ok {
+		return key
+	}
+
+	// Substring matching for common CRS headings.
+	for pattern, key := range crsHeadingMap {
+		if strings.Contains(normalized, pattern) {
+			return key
+		}
+	}
+	return ""
 }
 
-// parseCRSMapping reads the mapping CSV from the CRS ZIP.
-func parseCRSMapping(path string) ([]crsMapping, error) {
-	f, err := os.Open(path) // #nosec G304 -- path constructed from extracted ZIP in trusted temp directory
+// parseCRSMappingDoc reads the CRS mapping CSV and returns docMapping entries.
+func parseCRSMappingDoc(path string) ([]docMapping, error) {
+	f, err := os.Open(path) // #nosec G304 -- path from extracted ZIP in trusted temp directory
 	if err != nil {
 		return nil, eris.Wrap(err, "open CRS mapping CSV")
 	}
@@ -202,7 +156,7 @@ func parseCRSMapping(path string) ([]crsMapping, error) {
 	}
 	colIdx := mapColumns(header)
 
-	var result []crsMapping
+	var result []docMapping
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
@@ -217,7 +171,7 @@ func parseCRSMapping(path string) ([]crsMapping, error) {
 			continue
 		}
 
-		// Try CRS-specific column names, then brochure-style fallbacks.
+		// Try CRS-specific column names, then fallbacks.
 		crsID := trimQuotes(getCol(record, colIdx, "crsid"))
 		if crsID == "" {
 			crsID = trimQuotes(getCol(record, colIdx, "documentid"))
@@ -237,23 +191,19 @@ func parseCRSMapping(path string) ([]crsMapping, error) {
 			continue
 		}
 
-		dateFiled := trimQuotes(getCol(record, colIdx, "datefiled"))
-
-		result = append(result, crsMapping{
+		result = append(result, docMapping{
 			CRDNumber:   crd,
-			CRSID:       crsID,
-			DateFiled:   dateFiled,
+			DocID:       crsID,
+			DateFiled:   trimQuotes(getCol(record, colIdx, "datefiled")),
 			PDFFileName: pdfFileName,
 		})
 	}
-
 	return result, nil
 }
 
-// crsMappingsFromPDFs builds CRS mappings from PDF filenames when no mapping CSV exists.
-// Attempts to derive CRD from filename patterns like "crs_12345.pdf" or "12345.pdf".
-func crsMappingsFromPDFs(files []string) []crsMapping {
-	var result []crsMapping
+// crsMappingsFromPDFsDoc builds CRS mappings from PDF filenames when no mapping CSV exists.
+func crsMappingsFromPDFsDoc(files []string) []docMapping {
+	var result []docMapping
 	for _, fp := range files {
 		base := filepath.Base(fp)
 		if !strings.HasSuffix(strings.ToLower(base), ".pdf") {
@@ -262,19 +212,16 @@ func crsMappingsFromPDFs(files []string) []crsMapping {
 
 		name := strings.TrimSuffix(base, filepath.Ext(base))
 		name = strings.ToLower(name)
-
-		// Try patterns: "crs_12345", "12345", etc.
-		numStr := name
-		numStr = strings.TrimPrefix(numStr, "crs_")
+		numStr := strings.TrimPrefix(name, "crs_")
 
 		crd := parseIntOr(numStr, 0)
 		if crd == 0 {
 			continue
 		}
 
-		result = append(result, crsMapping{
+		result = append(result, docMapping{
 			CRDNumber:   crd,
-			CRSID:       "crs_" + numStr,
+			DocID:       "crs_" + numStr,
 			PDFFileName: base,
 		})
 	}

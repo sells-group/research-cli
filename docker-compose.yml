@@ -1,0 +1,35 @@
+services:
+  docling:
+    image: quay.io/docling-project/docling-serve
+    ports:
+      - "5001:5001"
+    environment:
+      - DOCLING_SERVE_CONCURRENCY=2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    environment:
+      - DB=sqlite
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+
+  postgres:
+    image: postgis/postgis:16-3.4
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=research
+      - POSTGRES_PASSWORD=research
+      - POSTGRES_DB=research
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

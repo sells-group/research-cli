@@ -2,6 +2,8 @@ package advextract
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestSectionBrochure_StandardItems(t *testing.T) {
@@ -129,6 +131,51 @@ func TestSectionsForItems(t *testing.T) {
 	if !contains(result2, "Full brochure text") {
 		t.Error("should fall back to full text for missing items")
 	}
+}
+
+func TestSectionBrochureFromDB(t *testing.T) {
+	t.Run("builds map from sections", func(t *testing.T) {
+		sections := []DBSection{
+			{CRDNumber: 12345, DocID: "doc1", SectionKey: "item_4", SectionTitle: "Advisory Business", TextContent: "We provide advisory services."},
+			{CRDNumber: 12345, DocID: "doc1", SectionKey: "item_5", SectionTitle: "Fees", TextContent: "We charge 1% annually."},
+			{CRDNumber: 12345, DocID: "doc1", SectionKey: "item_8", SectionTitle: "Investment", TextContent: "We use fundamental analysis."},
+		}
+
+		result := SectionBrochureFromDB(sections)
+
+		require.Equal(t, "We provide advisory services.", result["item_4"])
+		require.Equal(t, "We charge 1% annually.", result["item_5"])
+		require.Equal(t, "We use fundamental analysis.", result["item_8"])
+
+		// Full text should be concatenation of all sections.
+		full, ok := result[SectionFull]
+		require.True(t, ok, "expected 'full' key")
+		require.Contains(t, full, "We provide advisory services.")
+		require.Contains(t, full, "We charge 1% annually.")
+		require.Contains(t, full, "We use fundamental analysis.")
+	})
+
+	t.Run("skips empty text content", func(t *testing.T) {
+		sections := []DBSection{
+			{SectionKey: "item_4", TextContent: "Has content."},
+			{SectionKey: "item_5", TextContent: ""},
+		}
+
+		result := SectionBrochureFromDB(sections)
+
+		require.Equal(t, "Has content.", result["item_4"])
+		_, ok := result["item_5"]
+		require.False(t, ok, "empty text content should be skipped")
+		require.Equal(t, "Has content.", result[SectionFull])
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		result := SectionBrochureFromDB(nil)
+
+		require.Empty(t, result)
+		_, ok := result[SectionFull]
+		require.False(t, ok, "no full key for empty input")
+	})
 }
 
 func contains(s, substr string) bool {

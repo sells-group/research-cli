@@ -174,6 +174,7 @@ type FedsyncConfig struct {
 	MistralKey     string    `yaml:"mistral_api_key" mapstructure:"mistral_api_key"`
 	MistralModel   string    `yaml:"mistral_ocr_model" mapstructure:"mistral_ocr_model"`
 	OCR            OCRConfig `yaml:"ocr" mapstructure:"ocr"`
+	DoclingURL     string    `yaml:"docling_url" mapstructure:"docling_url"`
 }
 
 // OCRConfig configures PDF text extraction.
@@ -505,6 +506,7 @@ func Load() (*Config, error) {
 	v.SetDefault("fedsync.mistral_ocr_model", "pixtral-large-latest")
 	v.SetDefault("fedsync.ocr.provider", "local")
 	v.SetDefault("fedsync.ocr.pdftotext_path", "pdftotext")
+	v.SetDefault("fedsync.docling_url", "http://localhost:5001")
 	v.SetDefault("discovery.google_places_rate_limit", 10.0)
 	v.SetDefault("discovery.max_candidates_per_run", 10000)
 	v.SetDefault("discovery.ppp_min_approval", 150000.0)

@@ -13,6 +13,7 @@ const (
 	FedsyncTaskQueue    = "fedsync"
 	EnrichmentTaskQueue = "enrichment"
 	GeoTaskQueue        = "geo"
+	ADVDocumentQueue    = "adv-documents"
 )
 
 // NewClient creates a Temporal client from the application config.

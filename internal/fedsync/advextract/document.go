@@ -1,9 +1,12 @@
 package advextract
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 // AdvisorDocs holds all assembled documents for a single advisor.
@@ -32,6 +35,11 @@ type AdvisorDocs struct {
 
 // AssembleDocs builds an AdvisorDocs from store data.
 func AssembleDocs(advisor *AdvisorRow, brochures []BrochureRow, crs []CRSRow, owners []OwnerRow, funds []FundRow) *AdvisorDocs {
+	return AssembleDocsWithStore(context.Background(), nil, advisor, brochures, crs, owners, funds)
+}
+
+// AssembleDocsWithStore builds an AdvisorDocs, preferring pre-parsed sections from DB.
+func AssembleDocsWithStore(ctx context.Context, store *Store, advisor *AdvisorRow, brochures []BrochureRow, crs []CRSRow, owners []OwnerRow, funds []FundRow) *AdvisorDocs {
 	docs := &AdvisorDocs{
 		CRDNumber: advisor.CRDNumber,
 		FirmName:  advisor.FirmName,
@@ -39,22 +47,31 @@ func AssembleDocs(advisor *AdvisorRow, brochures []BrochureRow, crs []CRSRow, ow
 		Funds:     funds,
 	}
 
-	// Format Part 1 structured data.
 	docs.Part1Formatted = FormatPart1Structured(advisor)
 
-	// Section the best brochure (most recent with content).
-	if len(brochures) > 0 {
-		docs.BrochureSections = SectionBrochure(brochures[0].TextContent)
-	} else {
-		docs.BrochureSections = make(map[string]string)
+	// Try sections table first, fall back to regex.
+	if store != nil {
+		sections, err := store.LoadBrochureSections(ctx, advisor.CRDNumber)
+		if err == nil && len(sections) > 0 {
+			docs.BrochureSections = SectionBrochureFromDB(sections)
+			zap.L().Debug("assembled brochure from sections table",
+				zap.Int("crd", advisor.CRDNumber),
+				zap.Int("sections", len(sections)))
+		}
+	}
+	if docs.BrochureSections == nil {
+		if len(brochures) > 0 {
+			docs.BrochureSections = SectionBrochure(brochures[0].TextContent)
+			zap.L().Debug("assembled brochure from regex",
+				zap.Int("crd", advisor.CRDNumber))
+		} else {
+			docs.BrochureSections = make(map[string]string)
+		}
 	}
 
-	// Use the most recent CRS.
 	if len(crs) > 0 {
 		docs.CRSText = crs[0].TextContent
 	}
-
-	// Format owners.
 	docs.OwnersFormatted = formatOwners(owners)
 
 	return docs
