@@ -38,7 +38,7 @@ func TestConvert_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL)
+	c := NewClient(srv.URL, "")
 	doc, err := c.Convert(context.Background(), []byte("%PDF-fake"), ConvertOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -93,7 +93,7 @@ func TestConvert_ServerError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL)
+	c := NewClient(srv.URL, "")
 	_, err := c.Convert(context.Background(), []byte("%PDF-fake"), ConvertOpts{})
 	if err == nil {
 		t.Fatal("expected error for 500 response")
@@ -107,7 +107,7 @@ func TestConvert_InvalidJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL)
+	c := NewClient(srv.URL, "")
 	_, err := c.Convert(context.Background(), []byte("%PDF-fake"), ConvertOpts{})
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
@@ -120,7 +120,7 @@ func TestConvert_RequestError(t *testing.T) {
 	}))
 	srv.Close() // close immediately so the HTTP call fails
 
-	c := NewClient(srv.URL)
+	c := NewClient(srv.URL, "")
 	_, err := c.Convert(context.Background(), []byte("%PDF-fake"), ConvertOpts{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "docling: API call")
@@ -134,7 +134,7 @@ func TestConvert_EmptyResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL)
+	c := NewClient(srv.URL, "")
 	doc, err := c.Convert(context.Background(), []byte("%PDF-fake"), ConvertOpts{})
 	require.NoError(t, err)
 	// Empty pages list defaults to 1 page with empty elements.
@@ -190,4 +190,32 @@ func TestMapResponse_TableElements(t *testing.T) {
 	require.Nil(t, elems[2].Table.Headers)
 	require.Len(t, elems[2].Table.Rows, 1)
 	require.Equal(t, []string{"only", "row"}, elems[2].Table.Rows[0])
+}
+
+func TestConvert_APIKeyHeader(t *testing.T) {
+	const testKey = "test-api-key-123"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get("X-API-Key")
+		if got != testKey {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(cannedResponse))
+	}))
+	defer srv.Close()
+
+	// Without key → 401.
+	noKey := NewClient(srv.URL, "")
+	_, err := noKey.Convert(context.Background(), []byte("%PDF-fake"), ConvertOpts{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "401")
+
+	// With key → success.
+	withKey := NewClient(srv.URL, testKey)
+	doc, err := withKey.Convert(context.Background(), []byte("%PDF-fake"), ConvertOpts{})
+	require.NoError(t, err)
+	require.Len(t, doc.Pages, 1)
+	require.Len(t, doc.Pages[0].Elements, 3)
 }

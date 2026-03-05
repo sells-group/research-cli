@@ -41,7 +41,7 @@ var workerCmd = &cobra.Command{
 		})
 
 		// Create Docling client.
-		dc := docling.NewClient(cfg.Fedsync.DoclingURL)
+		dc := docling.NewClient(cfg.Fedsync.DoclingURL, cfg.Fedsync.DoclingAPIKey)
 
 		// Build activities.
 		activities := &tmprl.Activities{
