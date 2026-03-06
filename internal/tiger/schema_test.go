@@ -274,6 +274,10 @@ func TestCreateParentTables(t *testing.T) {
 	mock.ExpectExec(`ALTER TABLE "tiger_data"."zcta5" ALTER COLUMN statefp DROP NOT NULL`).
 		WillReturnResult(pgxmock.NewResult("ALTER", 0))
 
+	// load_status tracking table
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tiger_data.load_status").
+		WillReturnResult(pgxmock.NewResult("CREATE", 0))
+
 	err = CreateParentTables(context.Background(), mock, products)
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -295,6 +299,7 @@ func TestCreateParentTables_CreateError(t *testing.T) {
 	err = CreateParentTables(context.Background(), mock, products)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "create parent table")
+	// No load_status expectation needed — function returns early on error.
 }
 
 func TestCreateStateTables(t *testing.T) {
@@ -514,6 +519,10 @@ func TestCreateParentTables_ZCTA_PKError(t *testing.T) {
 	mock.ExpectExec(`ALTER TABLE "tiger_data"."zcta5" ALTER COLUMN statefp DROP NOT NULL`).
 		WillReturnError(fmt.Errorf("column does not have NOT NULL"))
 
+	// load_status tracking table
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tiger_data.load_status").
+		WillReturnResult(pgxmock.NewResult("CREATE", 0))
+
 	err = CreateParentTables(context.Background(), mock, products)
 	require.NoError(t, err, "ZCTA PK/NOT NULL errors should be non-fatal")
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -538,6 +547,7 @@ func TestCreateParentTables_InheritError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "inherit")
 	require.NoError(t, mock.ExpectationsWereMet())
+	// No load_status expectation needed — function returns early on error.
 }
 
 func TestCreateStateTables_ZipIndexError(t *testing.T) {

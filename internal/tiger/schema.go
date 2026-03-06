@@ -97,6 +97,21 @@ func CreateParentTables(ctx context.Context, pool db.Pool, products []Product) e
 		log.Debug("parent table ready", zap.String("table", p.Table), zap.String("template", p.Template()))
 	}
 
+	// Create load_status tracking table (used by recordLoad, isLoaded, LoadStatus).
+	loadStatusSQL := `CREATE TABLE IF NOT EXISTS tiger_data.load_status (
+		state_fips varchar(2) NOT NULL,
+		state_abbr varchar(2) NOT NULL,
+		table_name varchar(50) NOT NULL,
+		year integer NOT NULL,
+		row_count integer NOT NULL DEFAULT 0,
+		loaded_at timestamptz NOT NULL DEFAULT now(),
+		duration_ms integer,
+		PRIMARY KEY (state_fips, table_name, year)
+	)`
+	if _, err := pool.Exec(ctx, loadStatusSQL); err != nil {
+		return eris.Wrap(err, "tiger: create load_status table")
+	}
+
 	return nil
 }
 
