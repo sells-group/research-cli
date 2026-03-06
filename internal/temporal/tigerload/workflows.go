@@ -58,8 +58,8 @@ type TigerStateResult struct {
 }
 
 // Workflow orchestrates the full TIGER data load:
-// 1. Load national products
-// 2. Create per-state tables
+// 1. Create parent + per-state tables (DDL must precede COPY)
+// 2. Load national products into the parent tables
 // 3. Fan out child workflows per state (with concurrency semaphore)
 // 4. Populate lookup tables
 func Workflow(ctx workflow.Context, params Params) (*Result, error) {
@@ -87,24 +87,24 @@ func Workflow(ctx workflow.Context, params Params) (*Result, error) {
 		},
 	})
 
-	// 1. Load national products.
+	// 1. Create parent + per-state tables (DDL must precede COPY).
+	err := workflow.ExecuteActivity(shortCtx, (*Activities).CreateAllStateTables, CreateStateTablesParams{
+		States: params.States,
+		Tables: params.Tables,
+	}).Get(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create state tables: %w", err)
+	}
+
+	// 2. Load national products into the parent tables.
 	var nationalResult LoadNationalResult
-	err := workflow.ExecuteActivity(longCtx, (*Activities).LoadNational, LoadNationalParams{
+	err = workflow.ExecuteActivity(longCtx, (*Activities).LoadNational, LoadNationalParams{
 		Year:        params.Year,
 		Tables:      params.Tables,
 		Incremental: params.Incremental,
 	}).Get(ctx, &nationalResult)
 	if err != nil {
 		return nil, fmt.Errorf("load national products: %w", err)
-	}
-
-	// 2. Create per-state tables.
-	err = workflow.ExecuteActivity(shortCtx, (*Activities).CreateAllStateTables, CreateStateTablesParams{
-		States: params.States,
-		Tables: params.Tables,
-	}).Get(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create state tables: %w", err)
 	}
 
 	// 3. Resolve state list for progress tracking.
