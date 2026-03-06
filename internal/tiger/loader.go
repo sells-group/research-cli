@@ -3,6 +3,7 @@ package tiger
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -251,6 +252,9 @@ func Load(ctx context.Context, pool db.Pool, opts LoadOptions) error {
 							return copyErr
 						}
 						totalRows += n
+
+						// Clean up county files to free disk space.
+						_ = os.RemoveAll(destDir)
 						return nil
 					}
 					cg.Go(g2)
@@ -266,7 +270,8 @@ func Load(ctx context.Context, pool db.Pool, opts LoadOptions) error {
 				}
 
 				duration := time.Since(start)
-				if !opts.DryRun {
+				// Only record if rows were loaded — 0-row entries poison incremental checks.
+				if !opts.DryRun && totalRows > 0 {
 					if recErr := recordLoad(ctx, pool, stateFIPS, stateAbbr, p.Table, opts.Year, int(totalRows), int(duration.Milliseconds())); recErr != nil {
 						log.Warn("failed to record load status", zap.Error(recErr))
 					}
@@ -400,6 +405,11 @@ func loadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, 
 		return err
 	}
 
+	// Clean up downloaded files to free disk space.
+	if rmErr := os.RemoveAll(destDir); rmErr != nil {
+		log.Warn("failed to clean up download dir", zap.String("dir", destDir), zap.Error(rmErr))
+	}
+
 	duration := time.Since(start)
 
 	// Record in load_status.
@@ -467,4 +477,199 @@ func LoadStatus(ctx context.Context, pool db.Pool) ([]StatusRow, error) {
 		status = append(status, sr)
 	}
 	return status, rows.Err()
+}
+
+// LoadProduct downloads, parses, and loads a single national or per-state TIGER product.
+// Exported for use by Temporal activities. Returns the number of rows loaded.
+func LoadProduct(ctx context.Context, pool db.Pool, product Product, stateAbbr, stateFIPS string, opts LoadOptions) (int64, error) {
+	colCache := &columnCache{pool: pool}
+
+	log := zap.L().With(
+		zap.String("component", "tiger.loader"),
+		zap.String("product", product.Name),
+		zap.String("state", stateAbbr),
+	)
+
+	tableName := product.Table
+	if (product.PerState || product.PerCounty) && stateAbbr != "" {
+		tableName = fmt.Sprintf("%s_%s", strings.ToLower(stateAbbr), product.Table)
+	}
+
+	// Check if already loaded (incremental mode).
+	if opts.Incremental {
+		loaded, err := isLoaded(ctx, pool, stateFIPS, product.Table, opts.Year)
+		if err != nil {
+			return 0, err
+		}
+		if loaded {
+			log.Debug("already loaded, skipping", zap.String("table", tableName))
+			return 0, nil
+		}
+	}
+
+	start := time.Now()
+
+	url := DownloadURL(product, opts.Year, stateFIPS)
+	destDir := fmt.Sprintf("%s/%s/%s", opts.TempDir, stateFIPS, strings.ToLower(product.Name))
+	shpPath, err := Download(ctx, url, destDir)
+	if err != nil {
+		return 0, eris.Wrapf(err, "tiger: download %s for %s", product.Name, stateAbbr)
+	}
+
+	result, err := ParseShapefile(shpPath, product)
+	if err != nil {
+		return 0, eris.Wrapf(err, "tiger: parse %s for %s", product.Name, stateAbbr)
+	}
+
+	result = RenameColumns(result, product.Table)
+	result = SetStateFIPS(result, stateFIPS)
+	result = ComputeDerivedColumns(result, product.Table)
+
+	validCols, colErr := colCache.get(ctx, product.Table)
+	if colErr != nil {
+		return 0, colErr
+	}
+	filtered := FilterToTable(result, validCols)
+
+	if err := TruncateTable(ctx, pool, product, stateAbbr); err != nil {
+		log.Warn("truncate failed (table may be empty)", zap.Error(err))
+	}
+
+	loaded, err := BulkLoad(ctx, pool, product, stateAbbr, filtered.Columns, filtered.Rows, opts.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+
+	// Clean up downloaded files to free disk space.
+	_ = os.RemoveAll(destDir)
+
+	duration := time.Since(start)
+	if err := recordLoad(ctx, pool, stateFIPS, stateAbbr, product.Table, opts.Year, int(loaded), int(duration.Milliseconds())); err != nil {
+		log.Warn("failed to record load status", zap.Error(err))
+	}
+
+	log.Info("product loaded",
+		zap.String("table", tableName),
+		zap.Int64("rows", loaded),
+		zap.Duration("duration", duration),
+	)
+	return loaded, nil
+}
+
+// LoadCountyProducts loads all per-county products for a state.
+// Exported for use by Temporal activities. Returns total rows loaded.
+func LoadCountyProducts(ctx context.Context, pool db.Pool, stateAbbr, stateFIPS string, products []Product, opts LoadOptions) (int64, error) {
+	colCache := &columnCache{pool: pool}
+	log := zap.L().With(
+		zap.String("component", "tiger.loader"),
+		zap.String("state", stateAbbr),
+	)
+
+	countyFIPS, err := CountyFIPSForState(ctx, pool, stateFIPS)
+	if err != nil {
+		return 0, eris.Wrapf(err, "tiger: get county FIPS for %s", stateAbbr)
+	}
+
+	var grandTotal int64
+
+	for _, p := range products {
+		if !p.PerCounty {
+			continue
+		}
+
+		// Check incremental.
+		if opts.Incremental {
+			loaded, chkErr := isLoaded(ctx, pool, stateFIPS, p.Table, opts.Year)
+			if chkErr != nil {
+				return grandTotal, chkErr
+			}
+			if loaded {
+				log.Debug("already loaded, skipping", zap.String("product", p.Name))
+				continue
+			}
+		}
+
+		// Truncate state child table before loading.
+		if err := TruncateTable(ctx, pool, p, stateAbbr); err != nil {
+			log.Warn("truncate failed (table may be empty)", zap.Error(err))
+		}
+
+		start := time.Now()
+		var totalRows int64
+
+		for i, cFIPS := range countyFIPS {
+			if ctx.Err() != nil {
+				return grandTotal, ctx.Err()
+			}
+
+			url := DownloadURL(p, opts.Year, cFIPS)
+			destDir := fmt.Sprintf("%s/%s/%s/%s", opts.TempDir, stateFIPS, strings.ToLower(p.Name), cFIPS)
+
+			shpPath, dlErr := Download(ctx, url, destDir)
+			if dlErr != nil {
+				log.Warn("county download failed, skipping",
+					zap.String("product", p.Name), zap.String("county", cFIPS), zap.Error(dlErr))
+				continue
+			}
+
+			result, parseErr := ParseShapefile(shpPath, p)
+			if parseErr != nil {
+				log.Warn("county parse failed, skipping",
+					zap.String("product", p.Name), zap.String("county", cFIPS), zap.Error(parseErr))
+				_ = os.RemoveAll(destDir)
+				continue
+			}
+
+			if len(result.Rows) == 0 {
+				_ = os.RemoveAll(destDir)
+				continue
+			}
+
+			result = RenameColumns(result, p.Table)
+			result = SetStateFIPS(result, stateFIPS)
+			result = ComputeDerivedColumns(result, p.Table)
+
+			validCols, colErr := colCache.get(ctx, p.Table)
+			if colErr != nil {
+				return grandTotal, colErr
+			}
+			filtered := FilterToTable(result, validCols)
+
+			n, copyErr := BulkLoad(ctx, pool, p, stateAbbr, filtered.Columns, filtered.Rows, opts.BatchSize)
+			if copyErr != nil {
+				return grandTotal, eris.Wrapf(copyErr, "tiger: load %s county %s", p.Name, cFIPS)
+			}
+			totalRows += n
+
+			// Clean up county files to free disk space.
+			_ = os.RemoveAll(destDir)
+
+			if (i+1)%25 == 0 || i == len(countyFIPS)-1 {
+				log.Info("county progress",
+					zap.String("product", p.Name),
+					zap.Int("loaded", i+1),
+					zap.Int("total", len(countyFIPS)),
+					zap.Int64("rows", totalRows),
+				)
+			}
+		}
+
+		duration := time.Since(start)
+		// Only record if rows were loaded — 0-row entries poison incremental checks.
+		if totalRows > 0 {
+			if recErr := recordLoad(ctx, pool, stateFIPS, stateAbbr, p.Table, opts.Year, int(totalRows), int(duration.Milliseconds())); recErr != nil {
+				log.Warn("failed to record load status", zap.Error(recErr))
+			}
+		}
+
+		grandTotal += totalRows
+		log.Info("per-county product loaded",
+			zap.String("product", p.Name),
+			zap.Int64("rows", totalRows),
+			zap.Int("counties", len(countyFIPS)),
+			zap.Duration("duration", duration),
+		)
+	}
+
+	return grandTotal, nil
 }
