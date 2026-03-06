@@ -53,6 +53,10 @@ func TestWorkflow_NationalFailure(t *testing.T) {
 	ts := &testsuite.WorkflowTestSuite{}
 	env := ts.NewTestWorkflowEnvironment()
 
+	// CreateAllStateTables runs first (DDL before COPY).
+	env.OnActivity((*Activities).CreateAllStateTables, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil)
+
 	env.OnActivity((*Activities).LoadNational, mock.Anything, mock.Anything, mock.Anything).
 		Return(nil, temporal.NewNonRetryableApplicationError(
 			"download failed", "DOWNLOAD_ERROR", nil))
