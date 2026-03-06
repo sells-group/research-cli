@@ -65,7 +65,7 @@ type UnlinkedRecord struct {
 
 // QueryUnlinkedParams is the input for QueryUnlinkedRecords.
 type QueryUnlinkedParams struct {
-	Source string `json:"source"` // "adv", "5500", "990", "fdic"
+	Source string `json:"source"` // "adv", "5500", "990", "fdic", "ncua"
 	Limit  int    `json:"limit"`
 }
 
@@ -88,6 +88,8 @@ func (a *Activities) QueryUnlinkedRecords(ctx context.Context, params QueryUnlin
 		records, err = a.queryUnlinked990(ctx, params.Limit)
 	case "fdic":
 		records, err = a.queryUnlinkedFDIC(ctx, params.Limit)
+	case "ncua":
+		records, err = a.queryUnlinkedNCUA(ctx, params.Limit)
 	default:
 		return nil, temporal.NewNonRetryableApplicationError(
 			fmt.Sprintf("unknown source: %s", params.Source),
@@ -282,6 +284,46 @@ func (a *Activities) queryUnlinkedFDIC(ctx context.Context, limit int) ([]Unlink
 	return records, rows.Err()
 }
 
+func (a *Activities) queryUnlinkedNCUA(ctx context.Context, limit int) ([]UnlinkedRecord, error) {
+	rows, err := a.pool.Query(ctx, `
+		SELECT DISTINCT ON (n.cu_number) n.cu_number::text, n.cu_name,
+		       n.street, n.city, n.state, n.zip_code
+		FROM fed_data.ncua_call_reports n
+		LEFT JOIN public.company_matches cm
+			ON cm.matched_key = n.cu_number::text
+			AND cm.matched_source = 'ncua_call_reports'
+		WHERE cm.id IS NULL
+		ORDER BY n.cu_number, n.cycle_date DESC, n.total_assets DESC NULLS LAST
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, eris.Wrap(err, "query unlinked NCUA credit unions")
+	}
+	defer rows.Close()
+
+	var records []UnlinkedRecord
+	for rows.Next() {
+		var r UnlinkedRecord
+		var street, city, state, zip *string
+		if err := rows.Scan(&r.Key, &r.Name, &street, &city, &state, &zip); err != nil {
+			return nil, eris.Wrap(err, "scan NCUA credit union")
+		}
+		if street != nil {
+			r.Street1 = *street
+		}
+		if city != nil {
+			r.City = *city
+		}
+		if state != nil {
+			r.State = *state
+		}
+		if zip != nil {
+			r.Zip = *zip
+		}
+		records = append(records, r)
+	}
+	return records, rows.Err()
+}
+
 // ProcessBatchParams is the input for ProcessGeoBackfillBatch.
 type ProcessBatchParams struct {
 	Source  string           `json:"source"`
@@ -347,6 +389,11 @@ func (a *Activities) processRecord(ctx context.Context, source string, rec Unlin
 		matchType = "direct_fdic_cert"
 		addrSource = "fdic_institutions"
 		identSystem = company.SystemFDIC
+	case "ncua":
+		matchSource = "ncua_call_reports"
+		matchType = "direct_ncua_charter"
+		addrSource = "ncua_call_reports"
+		identSystem = company.SystemNCUA
 	}
 
 	// 1. Create stub company.

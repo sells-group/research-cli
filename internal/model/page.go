@@ -32,6 +32,7 @@ const (
 	PageTypeSoS             PageType = "government_registry"
 	PageTypeLinkedIn        PageType = "linkedin"
 	PageTypePerplexityIntel PageType = "perplexity_intel"
+	PageTypeFederalData     PageType = "federal_data"
 )
 
 // AllPageTypes returns all defined page types.
@@ -59,6 +60,7 @@ func AllPageTypes() []PageType {
 		PageTypeSoS,
 		PageTypeLinkedIn,
 		PageTypePerplexityIntel,
+		PageTypeFederalData,
 	}
 }
 
@@ -71,13 +73,14 @@ func ExternalPageTypes() []PageType {
 		PageTypeSoS,
 		PageTypeLinkedIn,
 		PageTypePerplexityIntel,
+		PageTypeFederalData,
 	}
 }
 
 // IsExternalPageType returns true if the page type is an external source.
 func IsExternalPageType(pt PageType) bool {
 	switch pt {
-	case PageTypeBBB, PageTypeGoogleMaps, PageTypeSoS, PageTypeLinkedIn, PageTypePerplexityIntel:
+	case PageTypeBBB, PageTypeGoogleMaps, PageTypeSoS, PageTypeLinkedIn, PageTypePerplexityIntel, PageTypeFederalData:
 		return true
 	}
 	return false

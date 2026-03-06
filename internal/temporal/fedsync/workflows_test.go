@@ -38,6 +38,11 @@ func TestRunWorkflow_TwoDatasets(t *testing.T) {
 	env.OnWorkflow(DatasetSyncWorkflow, mock.Anything, mock.Anything).
 		Return(&DatasetSyncResult{RowsSynced: 100}, nil)
 
+	env.OnActivity((*Activities).CheckSyncLag, mock.Anything, mock.Anything).
+		Return(&SyncLagResult{}, nil)
+	env.OnActivity((*Activities).NotifyComplete, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil)
+
 	env.ExecuteWorkflow(RunWorkflow, RunParams{Force: true})
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
@@ -59,6 +64,11 @@ func TestRunWorkflow_PartialFailure(t *testing.T) {
 		Return(&DatasetSyncResult{RowsSynced: 100}, nil)
 	env.OnWorkflow(DatasetSyncWorkflow, mock.Anything, sdk.SyncItemParams{Name: "fpds"}).
 		Return(nil, testsuite.ErrMockStartChildWorkflowFailed)
+
+	env.OnActivity((*Activities).CheckSyncLag, mock.Anything, mock.Anything).
+		Return(&SyncLagResult{}, nil)
+	env.OnActivity((*Activities).NotifyComplete, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil)
 
 	env.ExecuteWorkflow(RunWorkflow, RunParams{Force: true})
 	require.True(t, env.IsWorkflowCompleted())
@@ -115,6 +125,11 @@ func TestRunWorkflow_ProgressQuery(t *testing.T) {
 
 	env.OnWorkflow(DatasetSyncWorkflow, mock.Anything, mock.Anything).
 		Return(&DatasetSyncResult{RowsSynced: 100}, nil)
+
+	env.OnActivity((*Activities).CheckSyncLag, mock.Anything, mock.Anything).
+		Return(&SyncLagResult{}, nil)
+	env.OnActivity((*Activities).NotifyComplete, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil)
 
 	env.ExecuteWorkflow(RunWorkflow, RunParams{Force: true})
 	require.True(t, env.IsWorkflowCompleted())

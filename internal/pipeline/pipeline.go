@@ -54,7 +54,7 @@ type Pipeline struct {
 	fields        *model.FieldRegistry
 	breakers      *resilience.ServiceBreakers
 	retryCfg      resilience.RetryConfig
-	fedsyncPool   db.Pool // optional: enables ADV pre-fill when set
+	fedsyncPool   db.Pool // optional: enables ADV pre-fill + federal context when set
 
 	// Geocoding (Phase 7D) — set via SetGeocoder / SetGeoAssociator.
 	geocoder geocode.Client
@@ -134,7 +134,8 @@ func New(
 	}
 }
 
-// SetFedsyncPool sets an optional fed_data database pool for ADV pre-fill.
+// SetFedsyncPool sets an optional fed_data database pool for ADV pre-fill
+// and federal context lookup via entity_xref_multi.
 func (p *Pipeline) SetFedsyncPool(pool db.Pool) {
 	p.fedsyncPool = pool
 }
@@ -716,6 +717,27 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 		}
 	}
 
+	// --- Federal context lookup ---
+	// If a fedsync pool is connected, query entity_xref_multi for all known
+	// identifiers and build a federal data context block for T2/T3 extraction.
+	var fedCtx *FederalContext
+	if p.fedsyncPool != nil {
+		ids := buildIdentifiersMap(company.PreSeeded)
+		if len(ids) > 0 {
+			fc, fcErr := LookupFederalContext(ctx, p.fedsyncPool, ids)
+			if fcErr != nil {
+				log.Warn("pipeline: federal context lookup failed", zap.Error(fcErr))
+			} else if fc != nil && fc.Summary != "" {
+				fedCtx = fc
+				allPages = append(allPages, federalContextToPage(fc))
+				log.Info("pipeline: federal context injected",
+					zap.Int("entity_matches", len(fc.EntityMatches)),
+					zap.Int("summary_len", len(fc.Summary)),
+				)
+			}
+		}
+	}
+
 	// --- Optimization: Checkpoint/resume ---
 	// Check for existing T1 checkpoint from a prior failed run.
 	var checkpointT1 []model.ExtractionAnswer
@@ -1024,6 +1046,9 @@ func (p *Pipeline) Run(ctx context.Context, company model.Company) (*model.Enric
 
 	result.Answers = allAnswers
 	result.FieldValues = fieldValues
+	if fedCtx != nil {
+		result.FederalContext = fedCtx
+	}
 
 	// Gap-fill company City/State from extraction if still empty.
 	if result.Company.City == "" {

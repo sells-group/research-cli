@@ -99,7 +99,7 @@ func TestExactNameGeoSQL_NotExists(t *testing.T) {
 
 func TestAllPasses_Count(t *testing.T) {
 	passes := allPasses()
-	assert.Len(t, passes, 69)
+	assert.Len(t, passes, 85)
 }
 
 func TestAllPasses_UniqueNames(t *testing.T) {
@@ -170,7 +170,7 @@ func TestMultiXrefBuilder_Build_Success(t *testing.T) {
 	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref_multi").
 		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
 
-	// 69 passes, each returns some rows.
+	// 85 passes, each returns some rows.
 	passes := allPasses()
 	for range passes {
 		mock.ExpectExec("INSERT INTO fed_data.entity_xref_multi").
@@ -180,8 +180,8 @@ func TestMultiXrefBuilder_Build_Success(t *testing.T) {
 	builder := NewMultiXrefBuilder(mock)
 	total, counts, err := builder.Build(context.Background())
 	assert.NoError(t, err)
-	assert.Equal(t, int64(69*10), total)
-	assert.Len(t, counts, 69)
+	assert.Equal(t, int64(85*10), total)
+	assert.Len(t, counts, 85)
 	for _, c := range counts {
 		assert.Equal(t, int64(10), c)
 	}
@@ -290,6 +290,7 @@ func TestAllPassSQL(t *testing.T) {
 	assert.Contains(t, sql, "fed_data.brokercheck")
 	assert.Contains(t, sql, "fed_data.form_bd")
 	assert.Contains(t, sql, "fed_data.form_d")
+	assert.Contains(t, sql, "fed_data.ncua_call_reports")
 }
 
 func TestDirectFDICSBASQL_Content(t *testing.T) {
