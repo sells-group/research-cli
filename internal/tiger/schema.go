@@ -150,6 +150,15 @@ func CreateStateTables(ctx context.Context, pool db.Pool, stateAbbr string, prod
 			if _, err := pool.Exec(ctx, zipSQL); err != nil {
 				return eris.Wrapf(err, "tiger: create zip index on tiger_data.%s", childTable)
 			}
+			// tlid index needed for zip_lookup_all join (addr.tlid = edges.tlid).
+			tlidIdxName := pgx.Identifier{fmt.Sprintf("idx_%s_tlid", childTable)}.Sanitize()
+			tlidSQL := fmt.Sprintf(
+				"CREATE INDEX IF NOT EXISTS %s ON %s (tlid)",
+				tlidIdxName, childQuoted,
+			)
+			if _, err := pool.Exec(ctx, tlidSQL); err != nil {
+				return eris.Wrapf(err, "tiger: create tlid index on tiger_data.%s", childTable)
+			}
 		case "edges":
 			idxName := pgx.Identifier{fmt.Sprintf("idx_%s_tlid", childTable)}.Sanitize()
 			tlidSQL := fmt.Sprintf(
@@ -444,16 +453,27 @@ func PopulateLookups(ctx context.Context, pool db.Pool) error {
 			name: "zip_lookup_all",
 			sql: `INSERT INTO tiger.zip_lookup_all (zip, st_code, state, co_code, county, cnt)
 				SELECT CAST(a.zip AS integer),
-					CAST(e.statefp AS integer),
+					CAST(a.statefp AS integer),
 					s.stusps,
 					0,
 					'',
 					1
 				FROM tiger_data.addr a
-				JOIN tiger_data.edges e ON a.tlid = e.tlid
-				JOIN tiger_data.state_all s ON e.statefp = s.statefp
-				WHERE a.zip IS NOT NULL AND CAST(a.zip AS text) != ''
-				GROUP BY a.zip, e.statefp, s.stusps
+				JOIN tiger_data.state_all s ON a.statefp = s.statefp
+				WHERE a.zip IS NOT NULL AND a.zip != '' AND a.statefp IS NOT NULL
+				GROUP BY a.zip, a.statefp, s.stusps
+				ON CONFLICT DO NOTHING`,
+		},
+		{
+			name: "countysub_lookup",
+			sql: `INSERT INTO tiger.countysub_lookup (st_code, co_code, cs_code, state, name)
+				SELECT CAST(c.statefp AS integer),
+					CAST(c.countyfp AS integer),
+					CAST(c.cousubfp AS integer),
+					s.stusps,
+					c.name
+				FROM tiger_data.cousub c
+				JOIN tiger_data.state_all s ON c.statefp = s.statefp
 				ON CONFLICT DO NOTHING`,
 		},
 	}

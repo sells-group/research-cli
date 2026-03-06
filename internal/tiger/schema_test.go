@@ -303,13 +303,16 @@ func TestCreateStateTables(t *testing.T) {
 		{Name: "FEATNAMES", Table: "featnames", PerCounty: true, GeomType: ""},
 	}
 
-	// --- ADDR (no geom, zip index) ---
+	// --- ADDR (no geom, zip + tlid indexes) ---
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS "tiger_data"."fl_addr" \(LIKE "tiger_data"."addr" INCLUDING ALL\)`).
 		WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectExec("DO").
 		WillReturnResult(pgxmock.NewResult("DO", 0))
 	// addr-specific zip index
 	mock.ExpectExec(`CREATE INDEX IF NOT EXISTS "idx_fl_addr_zip" ON "tiger_data"."fl_addr" \(zip\)`).
+		WillReturnResult(pgxmock.NewResult("CREATE", 0))
+	// addr-specific tlid index (for zip_lookup_all join)
+	mock.ExpectExec(`CREATE INDEX IF NOT EXISTS "idx_fl_addr_tlid" ON "tiger_data"."fl_addr" \(tlid\)`).
 		WillReturnResult(pgxmock.NewResult("CREATE", 0))
 
 	// --- EDGES (has geom + tlid index) ---
@@ -442,7 +445,7 @@ func TestPopulateLookups(t *testing.T) {
 	require.NoError(t, err)
 	defer mock.Close()
 
-	// Expect all 4 lookup INSERT queries to succeed.
+	// Expect all 5 lookup INSERT queries to succeed.
 	mock.ExpectExec("INSERT INTO tiger.state_lookup").
 		WillReturnResult(pgxmock.NewResult("INSERT", 51))
 	mock.ExpectExec("INSERT INTO tiger.county_lookup").
@@ -451,6 +454,8 @@ func TestPopulateLookups(t *testing.T) {
 		WillReturnResult(pgxmock.NewResult("INSERT", 29000))
 	mock.ExpectExec("INSERT INTO tiger.zip_lookup_all").
 		WillReturnResult(pgxmock.NewResult("INSERT", 41000))
+	mock.ExpectExec("INSERT INTO tiger.countysub_lookup").
+		WillReturnResult(pgxmock.NewResult("INSERT", 35000))
 
 	err = PopulateLookups(context.Background(), mock)
 	require.NoError(t, err)
