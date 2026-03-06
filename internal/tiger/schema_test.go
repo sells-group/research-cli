@@ -239,6 +239,13 @@ func TestPrepareTemplates_AllErrors(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+// mockSRIDNotExists mocks the SRID check query returning 0 (table not found in geometry_columns).
+func mockSRIDNotExists(mock pgxmock.PgxPoolIface, schema, table string) {
+	mock.ExpectQuery("SELECT COALESCE").
+		WithArgs(schema, table).
+		WillReturnRows(pgxmock.NewRows([]string{"coalesce"}).AddRow(0))
+}
+
 func TestCreateParentTables(t *testing.T) {
 	mock, err := pgxmock.NewPool()
 	require.NoError(t, err)
@@ -249,13 +256,15 @@ func TestCreateParentTables(t *testing.T) {
 		{Name: "ZCTA520", Table: "zcta5", FileKey: "zcta520", National: true, GeomType: "MULTIPOLYGON"},
 	}
 
-	// --- STATE product (non-zcta5): CREATE TABLE + inheritance DO block ---
+	// --- STATE product (non-zcta5): SRID check + CREATE TABLE + inheritance DO block ---
+	mockSRIDNotExists(mock, "tiger_data", "state_all")
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS "tiger_data"."state_all" \(LIKE "tiger"."state" INCLUDING ALL\)`).
 		WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectExec("DO").
 		WillReturnResult(pgxmock.NewResult("DO", 0))
 
-	// --- ZCTA520 product (zcta5 special case): CREATE TABLE + drop PK DO block + drop NOT NULL ---
+	// --- ZCTA520 product (zcta5 special case): SRID check + CREATE TABLE + drop PK DO block + drop NOT NULL ---
+	mockSRIDNotExists(mock, "tiger_data", "zcta5")
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS "tiger_data"."zcta5" \(LIKE "tiger"."zcta5" INCLUDING ALL\)`).
 		WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	// zcta5: drop PK constraint via DO block
@@ -276,9 +285,10 @@ func TestCreateParentTables_CreateError(t *testing.T) {
 	defer mock.Close()
 
 	products := []Product{
-		{Name: "STATE", Table: "state_all", TemplateTable: "state", National: true},
+		{Name: "STATE", Table: "state_all", TemplateTable: "state", National: true, GeomType: "MULTIPOLYGON"},
 	}
 
+	mockSRIDNotExists(mock, "tiger_data", "state_all")
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS "tiger_data"."state_all"`).
 		WillReturnError(fmt.Errorf("permission denied"))
 
@@ -303,7 +313,7 @@ func TestCreateStateTables(t *testing.T) {
 		{Name: "FEATNAMES", Table: "featnames", PerCounty: true, GeomType: ""},
 	}
 
-	// --- ADDR (no geom, zip index) ---
+	// --- ADDR (no geom, zip + tlid indexes) ---
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS "tiger_data"."fl_addr" \(LIKE "tiger_data"."addr" INCLUDING ALL\)`).
 		WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectExec("DO").
@@ -311,8 +321,12 @@ func TestCreateStateTables(t *testing.T) {
 	// addr-specific zip index
 	mock.ExpectExec(`CREATE INDEX IF NOT EXISTS "idx_fl_addr_zip" ON "tiger_data"."fl_addr" \(zip\)`).
 		WillReturnResult(pgxmock.NewResult("CREATE", 0))
+	// addr-specific tlid index (for zip_lookup_all join)
+	mock.ExpectExec(`CREATE INDEX IF NOT EXISTS "idx_fl_addr_tlid" ON "tiger_data"."fl_addr" \(tlid\)`).
+		WillReturnResult(pgxmock.NewResult("CREATE", 0))
 
-	// --- EDGES (has geom + tlid index) ---
+	// --- EDGES (has geom: SRID check + create + inherit + GIST + tlid) ---
+	mockSRIDNotExists(mock, "tiger_data", "fl_edges")
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS "tiger_data"."fl_edges" \(LIKE "tiger_data"."edges" INCLUDING ALL\)`).
 		WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectExec("DO").
@@ -347,6 +361,7 @@ func TestCreateStateTables_CreateError(t *testing.T) {
 		{Name: "PLACE", Table: "place", PerState: true, GeomType: "MULTIPOLYGON"},
 	}
 
+	mockSRIDNotExists(mock, "tiger_data", "fl_place")
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS "tiger_data"."fl_place"`).
 		WillReturnError(fmt.Errorf("permission denied"))
 
@@ -364,6 +379,7 @@ func TestCreateStateTables_InheritError(t *testing.T) {
 		{Name: "PLACE", Table: "place", PerState: true, GeomType: "MULTIPOLYGON"},
 	}
 
+	mockSRIDNotExists(mock, "tiger_data", "fl_place")
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS "tiger_data"."fl_place"`).
 		WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectExec("DO").
@@ -383,6 +399,7 @@ func TestCreateStateTables_GISTError(t *testing.T) {
 		{Name: "EDGES", Table: "edges", PerCounty: true, GeomType: "MULTILINESTRING"},
 	}
 
+	mockSRIDNotExists(mock, "tiger_data", "fl_edges")
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS "tiger_data"."fl_edges"`).
 		WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectExec("DO").
@@ -442,7 +459,7 @@ func TestPopulateLookups(t *testing.T) {
 	require.NoError(t, err)
 	defer mock.Close()
 
-	// Expect all 4 lookup INSERT queries to succeed.
+	// Expect all 5 lookup INSERT queries to succeed.
 	mock.ExpectExec("INSERT INTO tiger.state_lookup").
 		WillReturnResult(pgxmock.NewResult("INSERT", 51))
 	mock.ExpectExec("INSERT INTO tiger.county_lookup").
@@ -451,6 +468,8 @@ func TestPopulateLookups(t *testing.T) {
 		WillReturnResult(pgxmock.NewResult("INSERT", 29000))
 	mock.ExpectExec("INSERT INTO tiger.zip_lookup_all").
 		WillReturnResult(pgxmock.NewResult("INSERT", 41000))
+	mock.ExpectExec("INSERT INTO tiger.countysub_lookup").
+		WillReturnResult(pgxmock.NewResult("INSERT", 35000))
 
 	err = PopulateLookups(context.Background(), mock)
 	require.NoError(t, err)
@@ -483,6 +502,8 @@ func TestCreateParentTables_ZCTA_PKError(t *testing.T) {
 		{Name: "ZCTA520", Table: "zcta5", FileKey: "zcta520", National: true, GeomType: "MULTIPOLYGON"},
 	}
 
+	// SRID check (table doesn't exist yet).
+	mockSRIDNotExists(mock, "tiger_data", "zcta5")
 	// CREATE TABLE succeeds.
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS "tiger_data"."zcta5" \(LIKE "tiger"."zcta5" INCLUDING ALL\)`).
 		WillReturnResult(pgxmock.NewResult("CREATE", 0))
@@ -507,6 +528,7 @@ func TestCreateParentTables_InheritError(t *testing.T) {
 		{Name: "STATE", Table: "state_all", TemplateTable: "state", National: true, GeomType: "MULTIPOLYGON"},
 	}
 
+	mockSRIDNotExists(mock, "tiger_data", "state_all")
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS "tiger_data"."state_all" \(LIKE "tiger"."state" INCLUDING ALL\)`).
 		WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectExec("DO").
@@ -571,6 +593,7 @@ func TestCreateStateTables_EdgesTlidError(t *testing.T) {
 		{Name: "EDGES", Table: "edges", PerCounty: true, GeomType: "MULTILINESTRING"},
 	}
 
+	mockSRIDNotExists(mock, "tiger_data", "tx_edges")
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS "tiger_data"."tx_edges"`).
 		WillReturnResult(pgxmock.NewResult("CREATE", 0))
 	mock.ExpectExec("DO").

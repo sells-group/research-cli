@@ -39,12 +39,22 @@ func PrepareTemplates(ctx context.Context, pool db.Pool) error {
 // ensuring correct column types and schema compatibility with the geocoder functions.
 // NOT NULL constraints (except on gid) are dropped since shapefiles may not populate all columns.
 // Parent tables inherit from their tiger.* templates so the geocoder can find data via inheritance.
+//
+// If an existing table has a geometry column with the wrong SRID (e.g., 4326 instead
+// of the template's 4269), the table is dropped and recreated to avoid COPY failures.
 func CreateParentTables(ctx context.Context, pool db.Pool, products []Product) error {
 	log := zap.L().With(zap.String("component", "tiger.schema"))
 
 	for _, p := range products {
 		tableName := pgx.Identifier{"tiger_data", p.Table}.Sanitize()
 		templateName := pgx.Identifier{"tiger", p.Template()}.Sanitize()
+
+		// If the table already exists with a wrong SRID, drop and recreate.
+		if p.GeomType != "" {
+			if err := dropIfSRIDMismatch(ctx, pool, log, "tiger_data", p.Table, "tiger", p.Template()); err != nil {
+				return err
+			}
+		}
 
 		createSQL := fmt.Sprintf(
 			"CREATE TABLE IF NOT EXISTS %s (LIKE %s INCLUDING ALL)",
@@ -109,6 +119,13 @@ func CreateStateTables(ctx context.Context, pool db.Pool, stateAbbr string, prod
 		childQuoted := pgx.Identifier{"tiger_data", childTable}.Sanitize()
 		parentQuoted := pgx.Identifier{"tiger_data", p.Table}.Sanitize()
 
+		// If the table already exists with a wrong SRID, drop and recreate.
+		if p.GeomType != "" {
+			if err := dropIfSRIDMismatch(ctx, pool, log, "tiger_data", childTable, "tiger_data", p.Table); err != nil {
+				return err
+			}
+		}
+
 		// Create child table with same structure as parent.
 		createSQL := fmt.Sprintf(
 			"CREATE TABLE IF NOT EXISTS %s (LIKE %s INCLUDING ALL)",
@@ -149,6 +166,15 @@ func CreateStateTables(ctx context.Context, pool db.Pool, stateAbbr string, prod
 			)
 			if _, err := pool.Exec(ctx, zipSQL); err != nil {
 				return eris.Wrapf(err, "tiger: create zip index on tiger_data.%s", childTable)
+			}
+			// tlid index needed for zip_lookup_all join (addr.tlid = edges.tlid).
+			tlidIdxName := pgx.Identifier{fmt.Sprintf("idx_%s_tlid", childTable)}.Sanitize()
+			tlidSQL := fmt.Sprintf(
+				"CREATE INDEX IF NOT EXISTS %s ON %s (tlid)",
+				tlidIdxName, childQuoted,
+			)
+			if _, err := pool.Exec(ctx, tlidSQL); err != nil {
+				return eris.Wrapf(err, "tiger: create tlid index on tiger_data.%s", childTable)
 			}
 		case "edges":
 			idxName := pgx.Identifier{fmt.Sprintf("idx_%s_tlid", childTable)}.Sanitize()
@@ -395,6 +421,51 @@ func SetStateFIPS(result *ParseResult, stateFIPS string) *ParseResult {
 	return &ParseResult{Columns: newCols, Rows: newRows}
 }
 
+// dropIfSRIDMismatch checks if tableName exists with a geometry column whose SRID
+// differs from the template. If so, it drops the table (CASCADE) so it can be recreated.
+// This handles tables previously created by PostGIS loader scripts or old migrations
+// that used SRID 4326 instead of the template's 4269.
+func dropIfSRIDMismatch(ctx context.Context, pool db.Pool, log *zap.Logger, schema, table, tmplSchema, tmplTable string) error {
+	var tableSRID, tmplSRID int
+	err := pool.QueryRow(ctx,
+		`SELECT COALESCE(
+			(SELECT srid FROM geometry_columns WHERE f_table_schema = $1 AND f_table_name = $2 LIMIT 1),
+			0)`,
+		schema, table,
+	).Scan(&tableSRID)
+	if err != nil {
+		return eris.Wrapf(err, "tiger: check SRID for %s.%s", schema, table)
+	}
+	if tableSRID == 0 {
+		return nil // table doesn't exist or has no geometry
+	}
+
+	err = pool.QueryRow(ctx,
+		`SELECT COALESCE(
+			(SELECT srid FROM geometry_columns WHERE f_table_schema = $1 AND f_table_name = $2 LIMIT 1),
+			0)`,
+		tmplSchema, tmplTable,
+	).Scan(&tmplSRID)
+	if err != nil {
+		return eris.Wrapf(err, "tiger: check template SRID for %s.%s", tmplSchema, tmplTable)
+	}
+	if tmplSRID == 0 || tableSRID == tmplSRID {
+		return nil // no mismatch
+	}
+
+	log.Warn("dropping table with wrong SRID",
+		zap.String("table", fmt.Sprintf("%s.%s", schema, table)),
+		zap.Int("got_srid", tableSRID),
+		zap.Int("want_srid", tmplSRID),
+	)
+	dropSQL := fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE",
+		pgx.Identifier{schema, table}.Sanitize())
+	if _, err := pool.Exec(ctx, dropSQL); err != nil {
+		return eris.Wrapf(err, "tiger: drop %s.%s with wrong SRID", schema, table)
+	}
+	return nil
+}
+
 // PopulateLookups populates tiger_data lookup tables from loaded data.
 // These lookup tables are required by the PostGIS geocoder to resolve addresses.
 func PopulateLookups(ctx context.Context, pool db.Pool) error {
@@ -444,16 +515,27 @@ func PopulateLookups(ctx context.Context, pool db.Pool) error {
 			name: "zip_lookup_all",
 			sql: `INSERT INTO tiger.zip_lookup_all (zip, st_code, state, co_code, county, cnt)
 				SELECT CAST(a.zip AS integer),
-					CAST(e.statefp AS integer),
+					CAST(a.statefp AS integer),
 					s.stusps,
 					0,
 					'',
 					1
 				FROM tiger_data.addr a
-				JOIN tiger_data.edges e ON a.tlid = e.tlid
-				JOIN tiger_data.state_all s ON e.statefp = s.statefp
-				WHERE a.zip IS NOT NULL AND CAST(a.zip AS text) != ''
-				GROUP BY a.zip, e.statefp, s.stusps
+				JOIN tiger_data.state_all s ON a.statefp = s.statefp
+				WHERE a.zip IS NOT NULL AND a.zip != '' AND a.statefp IS NOT NULL
+				GROUP BY a.zip, a.statefp, s.stusps
+				ON CONFLICT DO NOTHING`,
+		},
+		{
+			name: "countysub_lookup",
+			sql: `INSERT INTO tiger.countysub_lookup (st_code, co_code, cs_code, state, name)
+				SELECT CAST(c.statefp AS integer),
+					CAST(c.countyfp AS integer),
+					CAST(c.cousubfp AS integer),
+					s.stusps,
+					c.name
+				FROM tiger_data.cousub c
+				JOIN tiger_data.state_all s ON c.statefp = s.statefp
 				ON CONFLICT DO NOTHING`,
 		},
 	}
