@@ -7,6 +7,8 @@ import (
 
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
+
+	"github.com/sells-group/research-cli/internal/temporal/sdk"
 )
 
 // ScrapeParams is the input for ScrapeWorkflow.
@@ -42,27 +44,17 @@ type ScrapeProgress struct {
 }
 
 // ScrapeSingleParams is the input for ScrapeSingleWorkflow.
-type ScrapeSingleParams struct {
-	Scraper string `json:"scraper"`
-}
+type ScrapeSingleParams = sdk.SyncItemParams
 
 // ScrapeSingleResult is the output of ScrapeSingleWorkflow.
-type ScrapeSingleResult struct {
-	RowsSynced int64          `json:"rows_synced"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-}
+type ScrapeSingleResult = sdk.SyncItemResult
 
 // ScrapeWorkflow orchestrates the sync of selected geo scrapers.
 // It selects scrapers, then fans out ScrapeSingleWorkflow child workflows
 // with a max concurrency of 5.
 func ScrapeWorkflow(ctx workflow.Context, params ScrapeParams) (*ScrapeResult, error) {
 	// Activity options for the lightweight selection activity.
-	selectCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 2 * time.Minute,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumAttempts: 3,
-		},
-	})
+	selectCtx := workflow.WithActivityOptions(ctx, sdk.ShortActivityOptions())
 
 	// Select scrapers that need running.
 	var selectResult SelectScrapersResult
@@ -76,87 +68,39 @@ func ScrapeWorkflow(ctx workflow.Context, params ScrapeParams) (*ScrapeResult, e
 		return &ScrapeResult{}, nil
 	}
 
-	// Track progress for query handler.
-	progress := &ScrapeProgress{
-		Total: len(selectResult.ScraperNames),
-	}
-	outcomes := make([]ScraperOutcome, 0, len(selectResult.ScraperNames))
-
-	// Register query handler for scrape_progress.
-	err = workflow.SetQueryHandler(ctx, "scrape_progress", func() (*ScrapeProgress, error) {
-		return progress, nil
-	})
+	// Delegate to the shared fan-out pattern.
+	fanResult, err := sdk.FanOut(ctx, sdk.FanOutParams{
+		Items:            selectResult.ScraperNames,
+		Concurrency:      5,
+		QueryName:        "scrape_progress",
+		WorkflowIDPrefix: "geo-scrape",
+	}, ScrapeSingleWorkflow)
 	if err != nil {
-		return nil, fmt.Errorf("register query handler: %w", err)
+		return nil, err
 	}
 
-	// Fan out child workflows with max 5 concurrent.
-	const maxConcurrent = 5
-	sem := workflow.NewSemaphore(ctx, int64(maxConcurrent))
-
-	for _, name := range selectResult.ScraperNames {
-		_ = sem.Acquire(ctx, 1)
-		progress.Running++
-
-		workflow.Go(ctx, func(gCtx workflow.Context) {
-			defer sem.Release(1)
-
-			var outcome ScraperOutcome
-			outcome.Scraper = name
-
-			childCtx := workflow.WithChildOptions(gCtx, workflow.ChildWorkflowOptions{
-				WorkflowID: fmt.Sprintf("geo-scrape-%s-%s",
-					name, workflow.GetInfo(gCtx).WorkflowExecution.RunID),
-			})
-
-			var childResult ScrapeSingleResult
-			err := workflow.ExecuteChildWorkflow(childCtx, ScrapeSingleWorkflow, ScrapeSingleParams{
-				Scraper: name,
-			}).Get(gCtx, &childResult)
-
-			if err != nil {
-				outcome.Status = "failed"
-				outcome.Error = err.Error()
-			} else {
-				outcome.Status = "complete"
-				outcome.RowsSynced = childResult.RowsSynced
-			}
-
-			// Direct append is safe — Temporal coroutines are cooperative (single-threaded).
-			outcomes = append(outcomes, outcome)
-			progress.Running--
-			if outcome.Status == "complete" {
-				progress.Completed++
-			} else {
-				progress.Failed++
-			}
-			progress.Outcomes = outcomes
-		})
+	// Convert SDK outcomes to domain types.
+	outcomes := make([]ScraperOutcome, len(fanResult.Outcomes))
+	for i, o := range fanResult.Outcomes {
+		outcomes[i] = ScraperOutcome{
+			Scraper:    o.Name,
+			Status:     o.Status,
+			RowsSynced: o.RowsSynced,
+			Error:      o.Error,
+		}
 	}
 
-	// Wait for all in-flight goroutines to complete.
-	for i := 0; i < maxConcurrent; i++ {
-		_ = sem.Acquire(ctx, 1)
-	}
-
-	result := &ScrapeResult{
+	return &ScrapeResult{
 		Outcomes: outcomes,
-		Synced:   progress.Completed,
-		Failed:   progress.Failed,
-	}
-	return result, nil
+		Synced:   fanResult.Synced,
+		Failed:   fanResult.Failed,
+	}, nil
 }
 
 // ScrapeSingleWorkflow orchestrates the sync of a single geo scraper:
 // StartSyncLog → SyncScraper → CompleteSyncLog/FailSyncLog.
 func ScrapeSingleWorkflow(ctx workflow.Context, params ScrapeSingleParams) (*ScrapeSingleResult, error) {
-	// Short-lived activity options for sync log operations.
-	logCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 30 * time.Second,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumAttempts: 3,
-		},
-	})
+	logCtx := workflow.WithActivityOptions(ctx, sdk.LogActivityOptions())
 
 	// Long-running activity options for the actual scraper sync.
 	syncCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
@@ -171,29 +115,29 @@ func ScrapeSingleWorkflow(ctx workflow.Context, params ScrapeSingleParams) (*Scr
 	})
 
 	// 1. Start sync log.
-	var startResult StartSyncLogResult
+	var startResult sdk.StartSyncLogResult
 	err := workflow.ExecuteActivity(logCtx, (*Activities).StartSyncLog,
-		StartSyncLogParams(params)).Get(ctx, &startResult)
+		sdk.StartSyncLogParams{Name: params.Name}).Get(ctx, &startResult)
 	if err != nil {
-		return nil, fmt.Errorf("start sync log for %s: %w", params.Scraper, err)
+		return nil, fmt.Errorf("start sync log for %s: %w", params.Name, err)
 	}
 
 	// 2. Run the actual scraper sync.
 	var syncResult SyncScraperResult
 	syncErr := workflow.ExecuteActivity(syncCtx, (*Activities).SyncScraper,
-		SyncScraperParams(params)).Get(ctx, &syncResult)
+		SyncScraperParams{Scraper: params.Name}).Get(ctx, &syncResult)
 
 	// 3. Complete or fail the sync log.
 	if syncErr != nil {
-		_ = workflow.ExecuteActivity(logCtx, (*Activities).FailSyncLog, FailSyncLogParams{
+		_ = workflow.ExecuteActivity(logCtx, (*Activities).FailSyncLog, sdk.FailSyncLogParams{
 			SyncID: startResult.SyncID,
 			Error:  syncErr.Error(),
 		}).Get(ctx, nil)
-		return nil, fmt.Errorf("sync scraper %s: %w", params.Scraper, syncErr)
+		return nil, fmt.Errorf("sync scraper %s: %w", params.Name, syncErr)
 	}
 
 	// Log completion failure is non-fatal — the sync itself succeeded.
-	_ = workflow.ExecuteActivity(logCtx, (*Activities).CompleteSyncLog, CompleteSyncLogParams{
+	_ = workflow.ExecuteActivity(logCtx, (*Activities).CompleteSyncLog, sdk.CompleteSyncLogParams{
 		SyncID:     startResult.SyncID,
 		RowsSynced: syncResult.RowsSynced,
 		Metadata:   syncResult.Metadata,

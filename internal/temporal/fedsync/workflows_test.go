@@ -6,6 +6,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/testsuite"
+
+	"github.com/sells-group/research-cli/internal/temporal/sdk"
 )
 
 func TestRunWorkflow_NoDatasets(t *testing.T) {
@@ -53,9 +55,9 @@ func TestRunWorkflow_PartialFailure(t *testing.T) {
 	env.OnActivity((*Activities).SelectDatasets, mock.Anything, mock.Anything, mock.Anything).
 		Return(&SelectDatasetsResult{DatasetNames: []string{"cbp", "fpds"}}, nil)
 
-	env.OnWorkflow(DatasetSyncWorkflow, mock.Anything, DatasetSyncParams{Dataset: "cbp"}).
+	env.OnWorkflow(DatasetSyncWorkflow, mock.Anything, sdk.SyncItemParams{Name: "cbp"}).
 		Return(&DatasetSyncResult{RowsSynced: 100}, nil)
-	env.OnWorkflow(DatasetSyncWorkflow, mock.Anything, DatasetSyncParams{Dataset: "fpds"}).
+	env.OnWorkflow(DatasetSyncWorkflow, mock.Anything, sdk.SyncItemParams{Name: "fpds"}).
 		Return(nil, testsuite.ErrMockStartChildWorkflowFailed)
 
 	env.ExecuteWorkflow(RunWorkflow, RunParams{Force: true})
@@ -73,13 +75,13 @@ func TestDatasetSyncWorkflow_Success(t *testing.T) {
 	env := ts.NewTestWorkflowEnvironment()
 
 	env.OnActivity((*Activities).StartSyncLog, mock.Anything, mock.Anything, mock.Anything).
-		Return(&StartSyncLogResult{SyncID: 42}, nil)
+		Return(&sdk.StartSyncLogResult{SyncID: 42}, nil)
 	env.OnActivity((*Activities).SyncDataset, mock.Anything, mock.Anything, mock.Anything).
 		Return(&SyncDatasetResult{RowsSynced: 150}, nil)
 	env.OnActivity((*Activities).CompleteSyncLog, mock.Anything, mock.Anything, mock.Anything).
 		Return(nil)
 
-	env.ExecuteWorkflow(DatasetSyncWorkflow, DatasetSyncParams{Dataset: "cbp"})
+	env.ExecuteWorkflow(DatasetSyncWorkflow, DatasetSyncParams{Name: "cbp"})
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
 
@@ -93,13 +95,13 @@ func TestDatasetSyncWorkflow_SyncFails(t *testing.T) {
 	env := ts.NewTestWorkflowEnvironment()
 
 	env.OnActivity((*Activities).StartSyncLog, mock.Anything, mock.Anything, mock.Anything).
-		Return(&StartSyncLogResult{SyncID: 42}, nil)
+		Return(&sdk.StartSyncLogResult{SyncID: 42}, nil)
 	env.OnActivity((*Activities).SyncDataset, mock.Anything, mock.Anything, mock.Anything).
 		Return(nil, testsuite.ErrMockStartChildWorkflowFailed)
 	env.OnActivity((*Activities).FailSyncLog, mock.Anything, mock.Anything, mock.Anything).
 		Return(nil)
 
-	env.ExecuteWorkflow(DatasetSyncWorkflow, DatasetSyncParams{Dataset: "cbp"})
+	env.ExecuteWorkflow(DatasetSyncWorkflow, DatasetSyncParams{Name: "cbp"})
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError())
 }
@@ -122,7 +124,7 @@ func TestRunWorkflow_ProgressQuery(t *testing.T) {
 	// progress was tracked correctly.
 	result, err := env.QueryWorkflow("fedsync_progress")
 	require.NoError(t, err)
-	var progress Progress
+	var progress sdk.FanOutProgress
 	require.NoError(t, result.Get(&progress))
 	require.Equal(t, 1, progress.Total)
 	require.Equal(t, 1, progress.Completed)
