@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/rotisserie/eris"
-	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 	"go.uber.org/zap"
 
@@ -16,13 +15,15 @@ import (
 	"github.com/sells-group/research-cli/internal/fedsync"
 	"github.com/sells-group/research-cli/internal/fedsync/dataset"
 	"github.com/sells-group/research-cli/internal/fetcher"
+	"github.com/sells-group/research-cli/internal/temporal/sdk"
 )
 
 // Activities holds dependencies for fedsync Temporal activities.
 type Activities struct {
+	sdk.SyncLogActivities
+
 	pool    db.Pool
 	fetcher fetcher.Fetcher
-	syncLog *fedsync.SyncLog
 	reg     *dataset.Registry
 	tempDir string
 	cfg     *config.Config
@@ -31,12 +32,12 @@ type Activities struct {
 // NewActivities creates a new fedsync Activities instance.
 func NewActivities(pool db.Pool, f fetcher.Fetcher, syncLog *fedsync.SyncLog, reg *dataset.Registry, tempDir string, cfg *config.Config) *Activities {
 	return &Activities{
-		pool:    pool,
-		fetcher: f,
-		syncLog: syncLog,
-		reg:     reg,
-		tempDir: tempDir,
-		cfg:     cfg,
+		SyncLogActivities: sdk.SyncLogActivities{SyncLog: syncLog},
+		pool:              pool,
+		fetcher:           f,
+		reg:               reg,
+		tempDir:           tempDir,
+		cfg:               cfg,
 	}
 }
 
@@ -76,7 +77,7 @@ func (a *Activities) SelectDatasets(ctx context.Context, params SelectDatasetsPa
 			names = append(names, ds.Name())
 			continue
 		}
-		lastSync, err := a.syncLog.LastSuccess(ctx, ds.Name())
+		lastSync, err := a.SyncLog.LastSuccess(ctx, ds.Name())
 		if err != nil {
 			return nil, eris.Wrapf(err, "check last sync for %s", ds.Name())
 		}
@@ -88,25 +89,6 @@ func (a *Activities) SelectDatasets(ctx context.Context, params SelectDatasetsPa
 	return &SelectDatasetsResult{DatasetNames: names}, nil
 }
 
-// StartSyncLogParams is the input for StartSyncLog.
-type StartSyncLogParams struct {
-	Dataset string `json:"dataset"`
-}
-
-// StartSyncLogResult is the output of StartSyncLog.
-type StartSyncLogResult struct {
-	SyncID int64 `json:"sync_id"`
-}
-
-// StartSyncLog records the beginning of a dataset sync run.
-func (a *Activities) StartSyncLog(ctx context.Context, params StartSyncLogParams) (*StartSyncLogResult, error) {
-	syncID, err := a.syncLog.Start(ctx, params.Dataset)
-	if err != nil {
-		return nil, eris.Wrapf(err, "start sync log for %s", params.Dataset)
-	}
-	return &StartSyncLogResult{SyncID: syncID}, nil
-}
-
 // SyncDatasetParams is the input for SyncDataset.
 type SyncDatasetParams struct {
 	Dataset string `json:"dataset"`
@@ -114,10 +96,7 @@ type SyncDatasetParams struct {
 }
 
 // SyncDatasetResult is the output of SyncDataset.
-type SyncDatasetResult struct {
-	RowsSynced int64          `json:"rows_synced"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-}
+type SyncDatasetResult = sdk.SyncItemResult
 
 // SyncDataset runs the actual data download, parse, and load for a single dataset.
 // It sends heartbeats every 30 seconds for liveness detection.
@@ -131,70 +110,26 @@ func (a *Activities) SyncDataset(ctx context.Context, params SyncDatasetParams) 
 			"UnknownDataset", lookupErr)
 	}
 
-	// Start heartbeat goroutine.
-	heartbeatDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				activity.RecordHeartbeat(ctx, fmt.Sprintf("syncing %s", params.Dataset))
-			case <-heartbeatDone:
-				return
-			case <-ctx.Done():
-				return
+	var result *dataset.SyncResult
+	syncErr := sdk.RunWithHeartbeat(ctx, fmt.Sprintf("syncing %s", params.Dataset), 30*time.Second, func(ctx context.Context) error {
+		var err error
+		if params.Full {
+			if fs, ok := ds.(dataset.FullSyncer); ok {
+				log.Info("running full sync via Temporal")
+				result, err = fs.SyncFull(ctx, a.pool, a.fetcher, a.tempDir)
+				return err
 			}
 		}
-	}()
-	defer close(heartbeatDone)
-
-	var result *dataset.SyncResult
-	var err error
-
-	if params.Full {
-		if fs, ok := ds.(dataset.FullSyncer); ok {
-			log.Info("running full sync via Temporal")
-			result, err = fs.SyncFull(ctx, a.pool, a.fetcher, a.tempDir)
-		} else {
-			result, err = ds.Sync(ctx, a.pool, a.fetcher, a.tempDir)
-		}
-	} else {
 		result, err = ds.Sync(ctx, a.pool, a.fetcher, a.tempDir)
-	}
+		return err
+	})
 
-	if err != nil {
-		return nil, eris.Wrapf(err, "sync dataset %s", params.Dataset)
+	if syncErr != nil {
+		return nil, eris.Wrapf(syncErr, "sync dataset %s", params.Dataset)
 	}
 
 	return &SyncDatasetResult{
 		RowsSynced: result.RowsSynced,
 		Metadata:   result.Metadata,
 	}, nil
-}
-
-// CompleteSyncLogParams is the input for CompleteSyncLog.
-type CompleteSyncLogParams struct {
-	SyncID     int64          `json:"sync_id"`
-	RowsSynced int64          `json:"rows_synced"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-}
-
-// CompleteSyncLog marks a sync run as successfully completed.
-func (a *Activities) CompleteSyncLog(ctx context.Context, params CompleteSyncLogParams) error {
-	return a.syncLog.Complete(ctx, params.SyncID, &fedsync.SyncResult{
-		RowsSynced: params.RowsSynced,
-		Metadata:   params.Metadata,
-	})
-}
-
-// FailSyncLogParams is the input for FailSyncLog.
-type FailSyncLogParams struct {
-	SyncID int64  `json:"sync_id"`
-	Error  string `json:"error"`
-}
-
-// FailSyncLog marks a sync run as failed.
-func (a *Activities) FailSyncLog(ctx context.Context, params FailSyncLogParams) error {
-	return a.syncLog.Fail(ctx, params.SyncID, params.Error)
 }

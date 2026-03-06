@@ -8,6 +8,45 @@ import (
 	"go.uber.org/zap"
 )
 
+// WorkflowProgress handles GET /api/workflows/{workflowID}/progress.
+// Queries any Temporal workflow's progress using the specified query name.
+// Defaults to "progress" if no query param is provided.
+func (h *Handlers) WorkflowProgress(w http.ResponseWriter, r *http.Request) {
+	if h.temporalClient == nil {
+		WriteError(w, r, http.StatusServiceUnavailable, "no_temporal", "Temporal client not configured")
+		return
+	}
+
+	workflowID := chi.URLParam(r, "workflowID")
+	if workflowID == "" {
+		WriteError(w, r, http.StatusBadRequest, "missing_workflow_id", "workflowID path param required")
+		return
+	}
+
+	queryName := r.URL.Query().Get("query")
+	if queryName == "" {
+		queryName = "progress"
+	}
+
+	resp, err := h.temporalClient.QueryWorkflow(r.Context(), workflowID, "", queryName)
+	if err != nil {
+		zap.L().Warn("workflow progress query failed",
+			zap.String("workflow_id", workflowID),
+			zap.String("query", queryName),
+			zap.Error(err),
+		)
+		WriteError(w, r, http.StatusInternalServerError, "query_failed", err.Error())
+		return
+	}
+
+	var progress json.RawMessage
+	if err := resp.Get(&progress); err != nil {
+		WriteError(w, r, http.StatusInternalServerError, "decode_failed", err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, progress)
+}
+
 // FedsyncProgress handles GET /api/workflows/fedsync/progress.
 // Queries the Temporal workflow for fedsync_progress.
 func (h *Handlers) FedsyncProgress(w http.ResponseWriter, r *http.Request) {

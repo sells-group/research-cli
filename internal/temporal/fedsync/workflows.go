@@ -6,6 +6,8 @@ import (
 
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
+
+	"github.com/sells-group/research-cli/internal/temporal/sdk"
 )
 
 // RunParams is the input for RunWorkflow.
@@ -45,12 +47,7 @@ type Progress struct {
 // with a max concurrency of 5.
 func RunWorkflow(ctx workflow.Context, params RunParams) (*RunResult, error) {
 	// Activity options for the lightweight selection activity.
-	selectCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 2 * time.Minute,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumAttempts: 3,
-		},
-	})
+	selectCtx := workflow.WithActivityOptions(ctx, sdk.ShortActivityOptions())
 
 	// Select datasets that need syncing.
 	var selectResult SelectDatasetsResult
@@ -67,100 +64,46 @@ func RunWorkflow(ctx workflow.Context, params RunParams) (*RunResult, error) {
 		return &RunResult{}, nil
 	}
 
-	// Track progress for query handler.
-	progress := &Progress{
-		Total: len(selectResult.DatasetNames),
-	}
-	outcomes := make([]DatasetOutcome, 0, len(selectResult.DatasetNames))
-
-	// Register query handler for fedsync_progress.
-	err = workflow.SetQueryHandler(ctx, "fedsync_progress", func() (*Progress, error) {
-		return progress, nil
-	})
+	// Delegate to the shared fan-out pattern.
+	fanResult, err := sdk.FanOut(ctx, sdk.FanOutParams{
+		Items:            selectResult.DatasetNames,
+		Concurrency:      5,
+		QueryName:        "fedsync_progress",
+		WorkflowIDPrefix: "dataset-sync",
+		Full:             params.Full,
+	}, DatasetSyncWorkflow)
 	if err != nil {
-		return nil, fmt.Errorf("register query handler: %w", err)
+		return nil, err
 	}
 
-	// Fan out child workflows with max 5 concurrent.
-	const maxConcurrent = 5
-	sem := workflow.NewSemaphore(ctx, int64(maxConcurrent))
-
-	for _, dsName := range selectResult.DatasetNames {
-		_ = sem.Acquire(ctx, 1)
-		progress.Running++
-
-		workflow.Go(ctx, func(gCtx workflow.Context) {
-			defer sem.Release(1)
-
-			var outcome DatasetOutcome
-			outcome.Dataset = dsName
-
-			childCtx := workflow.WithChildOptions(gCtx, workflow.ChildWorkflowOptions{
-				WorkflowID: fmt.Sprintf("dataset-sync-%s-%s",
-					dsName, workflow.GetInfo(gCtx).WorkflowExecution.RunID),
-			})
-
-			var childResult DatasetSyncResult
-			err := workflow.ExecuteChildWorkflow(childCtx, DatasetSyncWorkflow, DatasetSyncParams{
-				Dataset: dsName,
-				Full:    params.Full,
-			}).Get(gCtx, &childResult)
-
-			if err != nil {
-				outcome.Status = "failed"
-				outcome.Error = err.Error()
-			} else {
-				outcome.Status = "complete"
-				outcome.RowsSynced = childResult.RowsSynced
-			}
-
-			// Direct append is safe — Temporal coroutines are cooperative (single-threaded).
-			outcomes = append(outcomes, outcome)
-			progress.Running--
-			if outcome.Status == "complete" {
-				progress.Completed++
-			} else {
-				progress.Failed++
-			}
-			progress.Outcomes = outcomes
-		})
+	// Convert SDK outcomes to domain types.
+	outcomes := make([]DatasetOutcome, len(fanResult.Outcomes))
+	for i, o := range fanResult.Outcomes {
+		outcomes[i] = DatasetOutcome{
+			Dataset:    o.Name,
+			Status:     o.Status,
+			RowsSynced: o.RowsSynced,
+			Error:      o.Error,
+		}
 	}
 
-	// Wait for all in-flight goroutines to complete.
-	for i := 0; i < maxConcurrent; i++ {
-		_ = sem.Acquire(ctx, 1)
-	}
-
-	result := &RunResult{
+	return &RunResult{
 		Outcomes: outcomes,
-		Synced:   progress.Completed,
-		Failed:   progress.Failed,
-	}
-	return result, nil
+		Synced:   fanResult.Synced,
+		Failed:   fanResult.Failed,
+	}, nil
 }
 
 // DatasetSyncParams is the input for DatasetSyncWorkflow.
-type DatasetSyncParams struct {
-	Dataset string `json:"dataset"`
-	Full    bool   `json:"full"`
-}
+type DatasetSyncParams = sdk.SyncItemParams
 
 // DatasetSyncResult is the output of DatasetSyncWorkflow.
-type DatasetSyncResult struct {
-	RowsSynced int64          `json:"rows_synced"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-}
+type DatasetSyncResult = sdk.SyncItemResult
 
 // DatasetSyncWorkflow orchestrates the sync of a single dataset:
 // StartSyncLog → SyncDataset → CompleteSyncLog/FailSyncLog.
 func DatasetSyncWorkflow(ctx workflow.Context, params DatasetSyncParams) (*DatasetSyncResult, error) {
-	// Short-lived activity options for sync log operations.
-	logCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 30 * time.Second,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumAttempts: 3,
-		},
-	})
+	logCtx := workflow.WithActivityOptions(ctx, sdk.LogActivityOptions())
 
 	// Long-running activity options for the actual dataset sync.
 	syncCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
@@ -175,29 +118,32 @@ func DatasetSyncWorkflow(ctx workflow.Context, params DatasetSyncParams) (*Datas
 	})
 
 	// 1. Start sync log.
-	var startResult StartSyncLogResult
-	err := workflow.ExecuteActivity(logCtx, (*Activities).StartSyncLog, StartSyncLogParams{
-		Dataset: params.Dataset,
+	var startResult sdk.StartSyncLogResult
+	err := workflow.ExecuteActivity(logCtx, (*Activities).StartSyncLog, sdk.StartSyncLogParams{
+		Name: params.Name,
 	}).Get(ctx, &startResult)
 	if err != nil {
-		return nil, fmt.Errorf("start sync log for %s: %w", params.Dataset, err)
+		return nil, fmt.Errorf("start sync log for %s: %w", params.Name, err)
 	}
 
 	// 2. Run the actual dataset sync.
 	var syncResult SyncDatasetResult
-	syncErr := workflow.ExecuteActivity(syncCtx, (*Activities).SyncDataset, SyncDatasetParams(params)).Get(ctx, &syncResult)
+	syncErr := workflow.ExecuteActivity(syncCtx, (*Activities).SyncDataset, SyncDatasetParams{
+		Dataset: params.Name,
+		Full:    params.Full,
+	}).Get(ctx, &syncResult)
 
 	// 3. Complete or fail the sync log.
 	if syncErr != nil {
-		_ = workflow.ExecuteActivity(logCtx, (*Activities).FailSyncLog, FailSyncLogParams{
+		_ = workflow.ExecuteActivity(logCtx, (*Activities).FailSyncLog, sdk.FailSyncLogParams{
 			SyncID: startResult.SyncID,
 			Error:  syncErr.Error(),
 		}).Get(ctx, nil)
-		return nil, fmt.Errorf("sync dataset %s: %w", params.Dataset, syncErr)
+		return nil, fmt.Errorf("sync dataset %s: %w", params.Name, syncErr)
 	}
 
 	// Log completion failure is non-fatal — the sync itself succeeded.
-	_ = workflow.ExecuteActivity(logCtx, (*Activities).CompleteSyncLog, CompleteSyncLogParams{
+	_ = workflow.ExecuteActivity(logCtx, (*Activities).CompleteSyncLog, sdk.CompleteSyncLogParams{
 		SyncID:     startResult.SyncID,
 		RowsSynced: syncResult.RowsSynced,
 		Metadata:   syncResult.Metadata,

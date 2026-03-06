@@ -57,6 +57,30 @@ func (s *SyncLog) LastSuccess(ctx context.Context, dataset string) (*time.Time, 
 	return &t, nil
 }
 
+// LastSuccessWithMeta returns the started_at time AND metadata from the last successful sync.
+// Returns nil time if the dataset has never been synced successfully.
+func (s *SyncLog) LastSuccessWithMeta(ctx context.Context, dataset string) (*time.Time, map[string]any, error) {
+	var t time.Time
+	var metaJSON []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT started_at, metadata FROM fed_data.sync_log
+		 WHERE dataset = $1 AND status = 'complete'
+		 ORDER BY started_at DESC LIMIT 1`,
+		dataset,
+	).Scan(&t, &metaJSON)
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return nil, nil, nil
+		}
+		return nil, nil, eris.Wrapf(err, "synclog: last success with meta for %s", dataset)
+	}
+	var meta map[string]any
+	if metaJSON != nil {
+		_ = json.Unmarshal(metaJSON, &meta)
+	}
+	return &t, meta, nil
+}
+
 // Start records the beginning of a sync run and returns its ID.
 func (s *SyncLog) Start(ctx context.Context, dataset string) (int64, error) {
 	var id int64
