@@ -6,6 +6,8 @@ import (
 
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
+
+	"github.com/sells-group/research-cli/internal/temporal/sdk"
 )
 
 // BackfillParams is the input for BackfillWorkflow.
@@ -41,7 +43,7 @@ type BackfillProgress struct {
 
 // BackfillWorkflow orchestrates geo backfill for a given source.
 // It queries unlinked records, splits them into batches, and processes
-// each batch as an activity.
+// each batch as an activity using sdk.SequentialBatch.
 func BackfillWorkflow(ctx workflow.Context, params BackfillParams) (*BackfillResult, error) {
 	if params.BatchSize <= 0 {
 		params.BatchSize = 100
@@ -100,40 +102,39 @@ func BackfillWorkflow(ctx workflow.Context, params BackfillParams) (*BackfillRes
 	result := &BackfillResult{
 		TotalRecords: len(queryResult.Records),
 	}
+	records := queryResult.Records
 
-	for i := 0; i < len(queryResult.Records); i += params.BatchSize {
-		end := i + params.BatchSize
-		if end > len(queryResult.Records) {
-			end = len(queryResult.Records)
-		}
-		batch := queryResult.Records[i:end]
+	_, _ = sdk.SequentialBatch(ctx, len(records), params.BatchSize,
+		func(_ workflow.Context, start, end int) error {
+			batch := records[start:end]
 
-		var batchResult ProcessBatchResult
-		err := workflow.ExecuteActivity(processCtx, (*Activities).ProcessGeoBackfillBatch, ProcessBatchParams{
-			Source:  params.Source,
-			Records: batch,
-			SkipMSA: params.SkipMSA,
-		}).Get(ctx, &batchResult)
+			var batchResult ProcessBatchResult
+			err := workflow.ExecuteActivity(processCtx, (*Activities).ProcessGeoBackfillBatch, ProcessBatchParams{
+				Source:  params.Source,
+				Records: batch,
+				SkipMSA: params.SkipMSA,
+			}).Get(ctx, &batchResult)
 
-		if err != nil {
-			// Log batch failure but continue with remaining batches.
-			progress.Failed += len(batch)
-			result.Failed += len(batch)
-		} else {
-			result.Created += batchResult.Created
-			result.Geocoded += batchResult.Geocoded
-			result.Linked += batchResult.Linked
-			result.MSAs += batchResult.MSAs
-			result.Branches += batchResult.Branches
-			result.Failed += batchResult.Failed
+			if err != nil {
+				// Continue on error — track failures but don't stop.
+				progress.Failed += len(batch)
+				result.Failed += len(batch)
+			} else {
+				result.Created += batchResult.Created
+				result.Geocoded += batchResult.Geocoded
+				result.Linked += batchResult.Linked
+				result.MSAs += batchResult.MSAs
+				result.Branches += batchResult.Branches
+				result.Failed += batchResult.Failed
 
-			progress.Created += batchResult.Created
-			progress.Geocoded += batchResult.Geocoded
-			progress.Linked += batchResult.Linked
-			progress.Failed += batchResult.Failed
-		}
-		progress.BatchesDone++
-	}
+				progress.Created += batchResult.Created
+				progress.Geocoded += batchResult.Geocoded
+				progress.Linked += batchResult.Linked
+				progress.Failed += batchResult.Failed
+			}
+			progress.BatchesDone++
+			return nil // always continue
+		})
 
 	return result, nil
 }

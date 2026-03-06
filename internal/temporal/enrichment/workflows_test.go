@@ -10,6 +10,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/temporal/sdk"
 )
 
 func TestEnrichCompanyWorkflow_Success(t *testing.T) {
@@ -149,10 +150,10 @@ func TestBatchEnrichWorkflow_ProgressQuery(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
 
-	// Query after completion to verify handler was registered.
+	// Query returns sdk.FanOutProgress since we use the SDK FanOut.
 	result, err := env.QueryWorkflow("batch_progress")
 	require.NoError(t, err)
-	var progress BatchProgress
+	var progress sdk.FanOutProgress
 	require.NoError(t, result.Get(&progress))
 	require.Equal(t, 1, progress.Total)
 	require.Equal(t, 1, progress.Completed)

@@ -6,6 +6,8 @@ import (
 
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
+
+	"github.com/sells-group/research-cli/internal/temporal/sdk"
 )
 
 // SyncWorkflowParams configures the ADV document sync workflow.
@@ -28,25 +30,19 @@ func DocumentSyncWorkflow(ctx workflow.Context, params SyncWorkflowParams) error
 	}
 
 	// Long-running activity options for download/extract.
-	longOpts := workflow.ActivityOptions{
+	longCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 5 * time.Minute,
 		RetryPolicy:         retryPolicy,
-	}
-	longCtx := workflow.WithActivityOptions(ctx, longOpts)
+	})
 
 	// Shorter timeout for individual PDF processing.
-	pdfOpts := workflow.ActivityOptions{
-		StartToCloseTimeout: 2 * time.Minute,
-		RetryPolicy:         retryPolicy,
-	}
-	pdfCtx := workflow.WithActivityOptions(ctx, pdfOpts)
+	pdfCtx := workflow.WithActivityOptions(ctx, sdk.ShortActivityOptions())
 
 	// Upsert activity options.
-	upsertOpts := workflow.ActivityOptions{
+	upsertCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 5 * time.Minute,
 		RetryPolicy:         retryPolicy,
-	}
-	upsertCtx := workflow.WithActivityOptions(ctx, upsertOpts)
+	})
 
 	// Step 1: Download ZIP.
 	var zipPath string
@@ -95,13 +91,16 @@ func DocumentSyncWorkflow(ctx workflow.Context, params SyncWorkflowParams) error
 		})
 	}
 
-	// Collect results.
-	var docRows [][]any
-	var sectionRows [][]any
-	batchSize := params.BatchSize
-	if batchSize <= 0 {
-		batchSize = 500
-	}
+	// Collect results using BatchFlusher for auto-flushing at threshold.
+	docFlusher := sdk.NewBatchFlusher(params.BatchSize, func(items [][]any) error {
+		var n int64
+		return workflow.ExecuteActivity(upsertCtx, (*Activities).UpsertDocumentBatch, UpsertParams{
+			Table:        params.Table,
+			Columns:      params.Columns,
+			ConflictKeys: params.ConflictKeys,
+			Rows:         items,
+		}).Get(ctx, &n)
+	})
 
 	for _, f := range futures {
 		var result ProcessPDFResult
@@ -110,42 +109,22 @@ func DocumentSyncWorkflow(ctx workflow.Context, params SyncWorkflowParams) error
 			continue
 		}
 
-		docRows = append(docRows, []any{
+		row := []any{
 			result.CRDNumber, result.DocID, result.DateFiled,
 			result.FullText, workflow.Now(ctx),
-		})
-
-		// Flush doc batch if large enough.
-		if len(docRows) >= batchSize {
-			var n int64
-			err := workflow.ExecuteActivity(upsertCtx, (*Activities).UpsertDocumentBatch, UpsertParams{
-				Table:        params.Table,
-				Columns:      params.Columns,
-				ConflictKeys: params.ConflictKeys,
-				Rows:         docRows,
-			}).Get(ctx, &n)
-			if err != nil {
-				return err
-			}
-			docRows = docRows[:0]
 		}
-	}
-
-	// Flush remaining doc rows.
-	if len(docRows) > 0 {
-		var n int64
-		err := workflow.ExecuteActivity(upsertCtx, (*Activities).UpsertDocumentBatch, UpsertParams{
-			Table:        params.Table,
-			Columns:      params.Columns,
-			ConflictKeys: params.ConflictKeys,
-			Rows:         docRows,
-		}).Get(ctx, &n)
-		if err != nil {
+		if err := docFlusher.Add(row); err != nil {
 			return err
 		}
 	}
 
-	// Flush remaining section rows.
+	// Flush remaining doc rows.
+	if err := docFlusher.Flush(); err != nil {
+		return err
+	}
+
+	// Flush remaining section rows (currently unused but preserved for future use).
+	var sectionRows [][]any
 	if len(sectionRows) > 0 {
 		var n int64
 		err := workflow.ExecuteActivity(upsertCtx, (*Activities).UpsertSectionBatch, UpsertSectionParams{

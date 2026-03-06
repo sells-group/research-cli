@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
+
+	"github.com/sells-group/research-cli/internal/temporal/sdk"
 )
 
 func TestWorkflow_Success(t *testing.T) {
@@ -141,12 +143,12 @@ func TestWorkflow_ProgressQuery(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
 
-	// Query after completion to verify handler was registered.
+	// Query returns sdk.FanOutProgress since we use the SDK FanOut.
 	result, err := env.QueryWorkflow("tiger_load_progress")
 	require.NoError(t, err)
-	var progress Progress
+	var progress sdk.FanOutProgress
 	require.NoError(t, result.Get(&progress))
-	require.Equal(t, 1, progress.TotalStates)
+	require.Equal(t, 1, progress.Total)
 	require.Equal(t, 1, progress.Completed)
 }
 

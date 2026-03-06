@@ -7,6 +7,8 @@ import (
 
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
+
+	"github.com/sells-group/research-cli/internal/temporal/sdk"
 )
 
 // Params is the input for Workflow.
@@ -107,7 +109,7 @@ func Workflow(ctx workflow.Context, params Params) (*Result, error) {
 		return nil, fmt.Errorf("load national products: %w", err)
 	}
 
-	// 3. Resolve state list for progress tracking.
+	// 3. Resolve state list for fan-out.
 	var resolveResult ResolveStatesResult
 	err = workflow.ExecuteActivity(shortCtx, (*Activities).ResolveStates, ResolveStatesParams{
 		States: params.States,
@@ -116,69 +118,40 @@ func Workflow(ctx workflow.Context, params Params) (*Result, error) {
 		return nil, fmt.Errorf("resolve states: %w", err)
 	}
 
-	// Track progress for query handler.
-	progress := &Progress{
-		TotalStates: len(resolveResult.States),
-	}
-	outcomes := make([]StateOutcome, 0, len(resolveResult.States))
-
-	err = workflow.SetQueryHandler(ctx, "tiger_load_progress", func() (*Progress, error) {
-		return progress, nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("register query handler: %w", err)
+	// Build item list and state lookup for fan-out.
+	items := make([]string, len(resolveResult.States))
+	stateMap := make(map[string]StateFIPS, len(resolveResult.States))
+	for i, st := range resolveResult.States {
+		items[i] = st.Abbr
+		stateMap[st.Abbr] = st
 	}
 
-	// Fan out child workflows with semaphore.
-	sem := workflow.NewSemaphore(ctx, int64(params.Concurrency))
-
-	for _, st := range resolveResult.States {
-		_ = sem.Acquire(ctx, 1)
-		progress.Running++
-
-		workflow.Go(ctx, func(gCtx workflow.Context) {
-			defer sem.Release(1)
-
-			var outcome StateOutcome
-			outcome.State = st.Abbr
-
-			childCtx := workflow.WithChildOptions(gCtx, workflow.ChildWorkflowOptions{
-				WorkflowID: fmt.Sprintf("tiger-state-%s-%s",
-					st.Abbr, workflow.GetInfo(gCtx).WorkflowExecution.RunID),
-			})
-
-			var childResult TigerStateResult
-			err := workflow.ExecuteChildWorkflow(childCtx, TigerStateWorkflow, TigerStateParams{
+	// Fan out child workflows per state via SDK.
+	fanOutResult, err := sdk.FanOut(ctx, sdk.FanOutParams{
+		Items:            items,
+		Concurrency:      params.Concurrency,
+		QueryName:        "tiger_load_progress",
+		WorkflowIDPrefix: "tiger-state",
+		ChildParamsFn: func(item string) []interface{} {
+			st := stateMap[item]
+			return []interface{}{TigerStateParams{
 				State:       st.Abbr,
 				FIPS:        st.FIPS,
 				Year:        params.Year,
 				Products:    params.Tables,
 				Incremental: params.Incremental,
-			}).Get(gCtx, &childResult)
-
-			if err != nil {
-				outcome.Status = "failed"
-				outcome.Error = err.Error()
-			} else {
-				outcome.Status = "complete"
-				outcome.RowsLoaded = childResult.RowsLoaded
+			}}
+		},
+		ResultHandlerFn: func(item string, gCtx workflow.Context, f workflow.ChildWorkflowFuture) sdk.ItemOutcome {
+			var childResult TigerStateResult
+			if err := f.Get(gCtx, &childResult); err != nil {
+				return sdk.ItemOutcome{Name: item, Status: "failed", Error: err.Error()}
 			}
-
-			// Direct append is safe — Temporal coroutines are cooperative (single-threaded).
-			outcomes = append(outcomes, outcome)
-			progress.Running--
-			if outcome.Status == "complete" {
-				progress.Completed++
-			} else {
-				progress.Failed++
-			}
-			progress.Outcomes = outcomes
-		})
-	}
-
-	// Wait for all in-flight goroutines to complete.
-	for i := 0; i < params.Concurrency; i++ {
-		_ = sem.Acquire(ctx, 1)
+			return sdk.ItemOutcome{Name: item, Status: "complete", RowsSynced: childResult.RowsLoaded}
+		},
+	}, TigerStateWorkflow)
+	if err != nil {
+		return nil, err
 	}
 
 	// 4. Populate lookup tables.
@@ -187,13 +160,23 @@ func Workflow(ctx workflow.Context, params Params) (*Result, error) {
 		return nil, fmt.Errorf("populate lookups: %w", err)
 	}
 
-	result := &Result{
-		Outcomes: outcomes,
-		National: nationalResult.Loaded,
-		Loaded:   progress.Completed,
-		Failed:   progress.Failed,
+	// Convert SDK outcomes to domain-specific StateOutcomes.
+	stateOutcomes := make([]StateOutcome, len(fanOutResult.Outcomes))
+	for i, o := range fanOutResult.Outcomes {
+		stateOutcomes[i] = StateOutcome{
+			State:      o.Name,
+			Status:     o.Status,
+			RowsLoaded: o.RowsSynced,
+			Error:      o.Error,
+		}
 	}
-	return result, nil
+
+	return &Result{
+		Outcomes: stateOutcomes,
+		National: nationalResult.Loaded,
+		Loaded:   fanOutResult.Synced,
+		Failed:   fanOutResult.Failed,
+	}, nil
 }
 
 // TigerStateWorkflow loads all per-state products for a single state sequentially.

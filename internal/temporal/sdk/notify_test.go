@@ -63,3 +63,11 @@ func TestNotifyComplete_ConnectionError(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "notify: send webhook")
 }
+
+func TestNotifyComplete_InvalidURL(t *testing.T) {
+	// Control character in URL triggers NewRequestWithContext error.
+	a := &NotifyActivities{WebhookURL: "http://\x00invalid"}
+	err := a.NotifyComplete(context.Background(), NotifyParams{Domain: "test"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "notify: create request")
+}

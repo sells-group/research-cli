@@ -6,6 +6,9 @@ import (
 
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
+
+	"github.com/sells-group/research-cli/internal/model"
+	"github.com/sells-group/research-cli/internal/temporal/sdk"
 )
 
 // EnrichCompanyWorkflow orchestrates the enrichment of a single company.
@@ -67,97 +70,48 @@ func EnrichCompanyWorkflow(ctx workflow.Context, params EnrichCompanyParams) (*E
 }
 
 // BatchEnrichWorkflow fans out EnrichCompanyWorkflow child workflows
-// with bounded concurrency. Supports pause/resume signals.
+// with bounded concurrency. Supports pause/resume signals via the SDK FanOut.
 func BatchEnrichWorkflow(ctx workflow.Context, params BatchEnrichParams) (*BatchEnrichResult, error) {
 	if params.Concurrency <= 0 {
 		params.Concurrency = 15
 	}
 
-	progress := &BatchProgress{
-		Total: len(params.Companies),
-	}
-	paused := false
-
-	// Register query handler.
-	err := workflow.SetQueryHandler(ctx, "batch_progress", func() (*BatchProgress, error) {
-		return progress, nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("register query handler: %w", err)
+	// Build item list and company lookup from the Companies slice.
+	items := make([]string, len(params.Companies))
+	companyMap := make(map[string]model.Company, len(params.Companies))
+	for i, c := range params.Companies {
+		items[i] = c.URL
+		companyMap[c.URL] = c
 	}
 
-	// Register signal handlers for pause/resume.
-	pauseCh := workflow.GetSignalChannel(ctx, "pause_batch")
-	resumeCh := workflow.GetSignalChannel(ctx, "resume_batch")
-
-	// Handle signals in a goroutine.
-	workflow.Go(ctx, func(gCtx workflow.Context) {
-		for {
-			sel := workflow.NewSelector(gCtx)
-			sel.AddReceive(pauseCh, func(ch workflow.ReceiveChannel, _ bool) {
-				var signal interface{}
-				ch.Receive(gCtx, &signal)
-				paused = true
-				progress.Paused = true
-			})
-			sel.AddReceive(resumeCh, func(ch workflow.ReceiveChannel, _ bool) {
-				var signal interface{}
-				ch.Receive(gCtx, &signal)
-				paused = false
-				progress.Paused = false
-			})
-			sel.Select(gCtx)
-		}
-	})
-
-	// Fan out with bounded concurrency.
-	sem := workflow.NewSemaphore(ctx, int64(params.Concurrency))
-	resultCh := workflow.NewChannel(ctx)
-
-	for _, company := range params.Companies {
-		// Check for pause.
-		for paused {
-			if err := workflow.Sleep(ctx, 5*time.Second); err != nil {
-				return nil, fmt.Errorf("sleep during pause: %w", err)
-			}
-		}
-
-		_ = sem.Acquire(ctx, 1)
-		progress.Running++
-
-		workflow.Go(ctx, func(gCtx workflow.Context) {
-			defer sem.Release(1)
-
-			childCtx := workflow.WithChildOptions(gCtx, workflow.ChildWorkflowOptions{
-				WorkflowID: fmt.Sprintf("enrich-%s-%s",
-					company.URL, workflow.GetInfo(gCtx).WorkflowExecution.RunID),
-			})
-
+	result, err := sdk.FanOut(ctx, sdk.FanOutParams{
+		Items:            items,
+		Concurrency:      params.Concurrency,
+		QueryName:        "batch_progress",
+		WorkflowIDPrefix: "enrich",
+		PauseSignal:      "pause_batch",
+		ResumeSignal:     "resume_batch",
+		ChildParamsFn: func(item string) []interface{} {
+			return []interface{}{EnrichCompanyParams{Company: companyMap[item]}}
+		},
+		ResultHandlerFn: func(item string, gCtx workflow.Context, f workflow.ChildWorkflowFuture) sdk.ItemOutcome {
 			var childResult EnrichCompanyResult
-			err := workflow.ExecuteChildWorkflow(childCtx, EnrichCompanyWorkflow, EnrichCompanyParams{
-				Company: company,
-			}).Get(gCtx, &childResult)
-
-			success := err == nil && childResult.Error == ""
-			resultCh.Send(gCtx, success)
-		})
+			err := f.Get(gCtx, &childResult)
+			if err != nil {
+				return sdk.ItemOutcome{Name: item, Status: "failed", Error: err.Error()}
+			}
+			if childResult.Error != "" {
+				return sdk.ItemOutcome{Name: item, Status: "failed", Error: childResult.Error}
+			}
+			return sdk.ItemOutcome{Name: item, Status: "complete"}
+		},
+	}, EnrichCompanyWorkflow)
+	if err != nil {
+		return nil, err
 	}
 
-	// Collect results.
-	result := &BatchEnrichResult{}
-	for range params.Companies {
-		var success bool
-		resultCh.Receive(ctx, &success)
-
-		progress.Running--
-		if success {
-			progress.Completed++
-			result.Succeeded++
-		} else {
-			progress.Failed++
-			result.Failed++
-		}
-	}
-
-	return result, nil
+	return &BatchEnrichResult{
+		Succeeded: result.Synced,
+		Failed:    result.Failed,
+	}, nil
 }
