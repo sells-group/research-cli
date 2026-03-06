@@ -3,23 +3,16 @@ primary_region = "dfw"
 
 [build]
 
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = "stop"
-  auto_start_machines = true
-  min_machines_running = 0
+[processes]
+  geo-worker = "temporal-worker geo"
+  fedsync-worker = "temporal-worker fedsync"
 
 [[vm]]
   size = "performance-4x"
   memory = "8gb"
+  processes = ["geo-worker"]
 
-[checks]
-  [checks.health]
-    type = "http"
-    port = 8080
-    interval = "15s"
-    timeout = "5s"
-    grace_period = "30s"
-    method = "GET"
-    path = "/health"
+[[vm]]
+  size = "performance-2x"
+  memory = "4gb"
+  processes = ["fedsync-worker"]
