@@ -10,9 +10,12 @@ import (
 
 	"github.com/sells-group/research-cli/internal/docling"
 	"github.com/sells-group/research-cli/internal/fetcher"
-	tmprl "github.com/sells-group/research-cli/internal/temporal"
+	temporalpkg "github.com/sells-group/research-cli/internal/temporal"
+	temporaladv "github.com/sells-group/research-cli/internal/temporal/adv"
 )
 
+// workerCmd is the legacy "fedsync worker" subcommand for the ADV document worker.
+// Prefer "temporal-worker adv" instead.
 var workerCmd = &cobra.Command{
 	Use:   "worker",
 	Short: "Start Temporal worker for ADV document workflows",
@@ -20,7 +23,7 @@ var workerCmd = &cobra.Command{
 		ctx := rootCmd.Context()
 
 		// Connect to Temporal.
-		tc, err := tmprl.NewClient(cfg.Temporal)
+		tc, err := temporalpkg.NewClient(cfg.Temporal)
 		if err != nil {
 			return eris.Wrap(err, "worker: create temporal client")
 		}
@@ -44,19 +47,19 @@ var workerCmd = &cobra.Command{
 		dc := docling.NewClient(cfg.Fedsync.DoclingURL, cfg.Fedsync.DoclingAPIKey)
 
 		// Build activities.
-		activities := &tmprl.Activities{
+		activities := &temporaladv.Activities{
 			Pool:    pool,
 			Fetcher: f,
 			Docling: dc,
 		}
 
 		// Create and configure worker.
-		w := worker.New(tc, tmprl.ADVDocumentQueue, worker.Options{})
-		w.RegisterWorkflow(tmprl.ADVDocumentSyncWorkflow)
+		w := worker.New(tc, temporalpkg.ADVDocumentQueue, worker.Options{})
+		w.RegisterWorkflow(temporaladv.DocumentSyncWorkflow)
 		w.RegisterActivity(activities)
 
 		zap.L().Info("starting temporal worker",
-			zap.String("task_queue", tmprl.ADVDocumentQueue),
+			zap.String("task_queue", temporalpkg.ADVDocumentQueue),
 			zap.String("host_port", cfg.Temporal.HostPort),
 		)
 

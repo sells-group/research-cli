@@ -56,6 +56,9 @@ func Router(h *Handlers) chi.Router {
 
 	// Temporal workflow progress/control endpoints.
 	r.Route("/api/workflows", func(r chi.Router) {
+		// Generic progress endpoint — works with any workflow domain.
+		r.Get("/{workflowID}/progress", h.WorkflowProgress)
+		// Domain-specific endpoints (backward compatible).
 		r.Get("/fedsync/progress", h.FedsyncProgress)
 		r.Get("/enrichment/{runID}", h.EnrichmentProgress)
 		r.Post("/batch/pause", h.BatchPause)
