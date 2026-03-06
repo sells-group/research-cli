@@ -22,6 +22,7 @@ type FanOutProgress struct {
 	Completed int           `json:"completed"`
 	Failed    int           `json:"failed"`
 	Running   int           `json:"running"`
+	Paused    bool          `json:"paused,omitempty"`
 	Outcomes  []ItemOutcome `json:"outcomes"`
 }
 
