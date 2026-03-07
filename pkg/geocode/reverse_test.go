@@ -23,7 +23,7 @@ func TestReverseGeocode_Success(t *testing.T) {
 	mock.ExpectQuery(`SELECT\s+pprint_addy`).
 		WithArgs(-80.19, 25.77).
 		WillReturnRows(
-			pgxmock.NewRows([]string{"pprint_addy", "stateusps", "zip", "county_fips", "rating"}).
+			pgxmock.NewRows([]string{"pprint_addy", "stateabbrev", "zip", "county_fips", "rating"}).
 				AddRow(fullAddr, state, zip, countyFIPS, 3),
 		)
 
@@ -84,7 +84,7 @@ func TestReverseGeocode_NullFields(t *testing.T) {
 	mock.ExpectQuery(`SELECT\s+pprint_addy`).
 		WithArgs(-80.19, 25.77).
 		WillReturnRows(
-			pgxmock.NewRows([]string{"pprint_addy", "stateusps", "zip", "county_fips", "rating"}).
+			pgxmock.NewRows([]string{"pprint_addy", "stateabbrev", "zip", "county_fips", "rating"}).
 				AddRow(sql.NullString{}, sql.NullString{String: "FL", Valid: true}, sql.NullString{}, sql.NullString{}, 50),
 		)
 
