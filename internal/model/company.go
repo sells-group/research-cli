@@ -135,17 +135,18 @@ type GeoData struct {
 
 // EnrichmentResult is the final output of the pipeline.
 type EnrichmentResult struct {
-	Company     Company               `json:"company"`
-	RunID       string                `json:"run_id"`
-	Score       float64               `json:"score"`
-	Answers     []ExtractionAnswer    `json:"answers"`
-	FieldValues map[string]FieldValue `json:"field_values"`
-	PPPMatches  []ppp.LoanMatch       `json:"ppp_matches,omitempty"`
-	GeoData     *GeoData              `json:"geo_data,omitempty"`
-	Report      string                `json:"report"`
-	Phases      []PhaseResult         `json:"phases"`
-	TotalTokens int                   `json:"total_tokens"`
-	TotalCost   float64               `json:"total_cost"`
+	Company        Company               `json:"company"`
+	RunID          string                `json:"run_id"`
+	Score          float64               `json:"score"`
+	Answers        []ExtractionAnswer    `json:"answers"`
+	FieldValues    map[string]FieldValue `json:"field_values"`
+	PPPMatches     []ppp.LoanMatch       `json:"ppp_matches,omitempty"`
+	GeoData        *GeoData              `json:"geo_data,omitempty"`
+	FederalContext any                   `json:"federal_context,omitempty"` // *pipeline.FederalContext (typed as any to avoid import cycle)
+	Report         string                `json:"report"`
+	Phases         []PhaseResult         `json:"phases"`
+	TotalTokens    int                   `json:"total_tokens"`
+	TotalCost      float64               `json:"total_cost"`
 }
 
 // FieldValue is a resolved value ready for Salesforce.

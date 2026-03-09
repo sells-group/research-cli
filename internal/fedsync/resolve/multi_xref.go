@@ -414,6 +414,88 @@ func allPasses() []passSpec {
 			),
 		},
 
+		// NCUA ↔ operational datasets (name+zip)
+		{
+			name: "name_zip_ncua_fpds",
+			sql: exactNameGeoSQL(
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
+				"fpds_contracts", "contract_id", "vendor_name", "vendor_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_ncua_ppp",
+			sql: exactNameGeoSQL(
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
+				"ppp_loans", "loannumber", "borrowername", "borrowerzip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_ncua_osha",
+			sql: exactNameGeoSQL(
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
+				"osha_inspections", "activity_nr", "estab_name", "site_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_ncua_epa",
+			sql: exactNameGeoSQL(
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
+				"epa_facilities", "registry_id", "fac_name", "fac_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_ncua_5500",
+			sql: exactNameGeoSQL(
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_mail_us_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_ncua_eobmf",
+			sql: exactNameGeoSQL(
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
+				"eo_bmf", "ein", "name", "zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_ncua_fdic",
+			sql: exactNameGeoSQL(
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
+				"fdic_institutions", "cert", "name", "zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_ncua_usa",
+			sql: exactNameGeoSQL(
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
+				"usaspending_awards", "award_id", "recipient_name", "recipient_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_ncua_sba",
+			sql: exactNameGeoSQL(
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
+				"sba_loans", "l2locid", "borrname", "borrzip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_ncua_ncen",
+			sql: exactNameGeoSQL(
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
+				"ncen_registrants", "accession_number", "registrant_name", "zip",
+				"zip", 0.90, normName,
+			),
+		},
+
 		// Cross-dataset (new ↔ new, both have zip)
 		{
 			name: "name_zip_5500_fdic",
@@ -452,6 +534,38 @@ func allPasses() []passSpec {
 			sql: exactNameGeoSQL(
 				"fdic_institutions", "cert", "name", "zip",
 				"usaspending_awards", "award_id", "recipient_name", "recipient_zip",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_5500_ncua",
+			sql: exactNameGeoSQL(
+				"form_5500", "ack_id", "sponsor_dfe_name", "spons_dfe_mail_us_zip",
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_eobmf_ncua",
+			sql: exactNameGeoSQL(
+				"eo_bmf", "ein", "name", "zip",
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_fdic_ncua",
+			sql: exactNameGeoSQL(
+				"fdic_institutions", "cert", "name", "zip",
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
+				"zip", 0.90, normName,
+			),
+		},
+		{
+			name: "name_zip_usa_ncua",
+			sql: exactNameGeoSQL(
+				"usaspending_awards", "award_id", "recipient_name", "recipient_zip",
+				"ncua_call_reports", "cu_number", "cu_name", "zip_code",
 				"zip", 0.90, normName,
 			),
 		},
@@ -618,6 +732,24 @@ func allPasses() []passSpec {
 			sql: exactNameGeoSQL(
 				"edgar_entities", "cik", "entity_name", "state_of_business",
 				"epa_facilities", "registry_id", "fac_name", "fac_state",
+				"state", 0.88, normName,
+			),
+		},
+
+		// NCUA ↔ hub datasets (name+state)
+		{
+			name: "name_state_ncua_adv",
+			sql: exactNameGeoSQL(
+				"ncua_call_reports", "cu_number", "cu_name", "state",
+				"adv_firms", "crd_number", "firm_name", "state",
+				"state", 0.88, normName,
+			),
+		},
+		{
+			name: "name_state_ncua_edgar",
+			sql: exactNameGeoSQL(
+				"ncua_call_reports", "cu_number", "cu_name", "state",
+				"edgar_entities", "cik", "entity_name", "state_of_business",
 				"state", 0.88, normName,
 			),
 		},

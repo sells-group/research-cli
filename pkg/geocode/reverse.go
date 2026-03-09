@@ -29,13 +29,19 @@ func ReverseGeocode(ctx context.Context, pool db.Pool, lat, lng float64) (*Rever
 	var rating int
 
 	err := pool.QueryRow(ctx, `
+		WITH r AS (
+			SELECT (addy)[1] AS addy
+			FROM reverse_geocode(ST_SetSRID(ST_MakePoint($1, $2), 4326), 1)
+		)
 		SELECT
-			pprint_addy(addy),
-			(addy).stateusps,
-			(addy).zip,
-			(addy).statefp || (addy).countyfp,
-			rating
-		FROM reverse_geocode(ST_SetSRID(ST_MakePoint($1, $2), 4326), 1)`,
+			pprint_addy(r.addy),
+			(r.addy).stateabbrev,
+			(r.addy).zip,
+			c.statefp || c.countyfp,
+			0 AS rating
+		FROM r
+		LEFT JOIN tiger_data.county_all c
+			ON ST_Within(ST_SetSRID(ST_MakePoint($1, $2), 4326), c.the_geom)`,
 		lng, lat,
 	).Scan(&fullAddr, &state, &zip, &countyFIPS, &rating)
 	if err != nil {

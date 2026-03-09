@@ -117,8 +117,8 @@ type Address struct {
 	Confidence     *float64   `json:"confidence,omitempty" db:"confidence"`
 	IsPrimary      bool       `json:"is_primary" db:"is_primary"`
 	CountyFIPS     string     `json:"county_fips,omitempty" db:"county_fips"`
-	GeocodeSource  string     `json:"geocode_source,omitempty" db:"geocode_source"`
-	GeocodeQuality string     `json:"geocode_quality,omitempty" db:"geocode_quality"`
+	GeocodeSource  *string    `json:"geocode_source,omitempty" db:"geocode_source"`
+	GeocodeQuality *string    `json:"geocode_quality,omitempty" db:"geocode_quality"`
 	GeocodedAt     *time.Time `json:"geocoded_at,omitempty" db:"geocoded_at"`
 	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at" db:"updated_at"`

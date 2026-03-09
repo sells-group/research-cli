@@ -553,6 +553,51 @@ func PopulateLookups(ctx context.Context, pool db.Pool) error {
 				JOIN tiger_data.state_all s ON c.statefp = s.statefp
 				ON CONFLICT DO NOTHING`,
 		},
+		{
+			name: "zip_state",
+			sql: `INSERT INTO tiger.zip_state (zip, stusps, statefp)
+				SELECT DISTINCT a.zip, s.stusps, a.statefp
+				FROM tiger.addr a
+				JOIN tiger_data.state_all s ON a.statefp = s.statefp
+				WHERE a.zip IS NOT NULL AND a.zip != '' AND a.statefp IS NOT NULL
+				ON CONFLICT DO NOTHING`,
+		},
+		{
+			name: "zip_state_loc",
+			sql: `INSERT INTO tiger.zip_state_loc (zip, stusps, statefp, place)
+				SELECT DISTINCT z.zcta5ce, s.stusps, z.statefp, p.name
+				FROM tiger.zcta5 z
+				JOIN tiger_data.state_all s ON z.statefp = s.statefp
+				JOIN tiger.place p ON z.statefp = p.statefp
+					AND ST_Intersects(ST_Centroid(z.the_geom), p.the_geom)
+				WHERE z.statefp IS NOT NULL AND p.name IS NOT NULL
+				ON CONFLICT DO NOTHING`,
+		},
+		{
+			name: "zip_lookup_base",
+			sql: `INSERT INTO tiger.zip_lookup_base (zip, state, county, city, statefp)
+				SELECT DISTINCT ON (a.zip, a.statefp) a.zip, s.stusps, '', '', a.statefp
+				FROM tiger.addr a
+				JOIN tiger_data.state_all s ON a.statefp = s.statefp
+				WHERE a.zip IS NOT NULL AND a.zip != '' AND a.statefp IS NOT NULL
+				ORDER BY a.zip, a.statefp
+				ON CONFLICT DO NOTHING`,
+		},
+		{
+			name: "zip_lookup",
+			sql: `INSERT INTO tiger.zip_lookup (zip, st_code, state, co_code, county, cs_code, cousub, pl_code, place, cnt)
+				SELECT CAST(z.zip AS integer), z.st_code, z.state, 0, '', 0, '', 0, '', z.cnt
+				FROM tiger.zip_lookup_all z
+				ON CONFLICT DO NOTHING`,
+		},
+		{
+			name: "zcta5_statefp",
+			sql: `UPDATE tiger.zcta5 z
+				SET statefp = s.statefp
+				FROM tiger_data.state_all s
+				WHERE ST_Within(ST_Centroid(z.the_geom), s.the_geom)
+					AND z.statefp IS NULL`,
+		},
 	}
 
 	for _, q := range lookupQueries {
@@ -563,5 +608,21 @@ func PopulateLookups(ctx context.Context, pool db.Pool) error {
 	}
 
 	log.Info("lookup tables populated")
+
+	// ANALYZE critical tables so the query planner has accurate statistics
+	// for geocode() and reverse_geocode() functions.
+	analyzeTables := []string{
+		"tiger.addr", "tiger.edges", "tiger.faces", "tiger.featnames",
+		"tiger.place", "tiger.county", "tiger.cousub", "tiger.zcta5",
+		"tiger.zip_state", "tiger.zip_state_loc", "tiger.zip_lookup_base",
+		"tiger.state_lookup",
+	}
+	for _, tbl := range analyzeTables {
+		if _, err := pool.Exec(ctx, "ANALYZE "+tbl); err != nil {
+			log.Warn("failed to analyze table", zap.String("table", tbl), zap.Error(err))
+		}
+	}
+	log.Info("table statistics updated")
+
 	return nil
 }

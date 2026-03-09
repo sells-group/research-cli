@@ -21,6 +21,7 @@ import (
 // Activities holds dependencies for fedsync Temporal activities.
 type Activities struct {
 	sdk.SyncLogActivities
+	sdk.NotifyActivities
 
 	pool    db.Pool
 	fetcher fetcher.Fetcher
@@ -33,6 +34,7 @@ type Activities struct {
 func NewActivities(pool db.Pool, f fetcher.Fetcher, syncLog *fedsync.SyncLog, reg *dataset.Registry, tempDir string, cfg *config.Config) *Activities {
 	return &Activities{
 		SyncLogActivities: sdk.SyncLogActivities{SyncLog: syncLog},
+		NotifyActivities:  sdk.NotifyActivities{WebhookURL: cfg.Fedsync.N8NWebhook},
 		pool:              pool,
 		fetcher:           f,
 		reg:               reg,

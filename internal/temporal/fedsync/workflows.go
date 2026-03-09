@@ -87,6 +87,26 @@ func RunWorkflow(ctx workflow.Context, params RunParams) (*RunResult, error) {
 		}
 	}
 
+	// Check for overdue datasets and include in notification.
+	lagCtx := workflow.WithActivityOptions(ctx, sdk.ShortActivityOptions())
+	var lagResult SyncLagResult
+	lagErr := workflow.ExecuteActivity(lagCtx, (*Activities).CheckSyncLag).Get(ctx, &lagResult)
+
+	overdueMsg := ""
+	if lagErr == nil && len(lagResult.Overdue) > 0 {
+		overdueMsg = fmt.Sprintf(" (%d overdue datasets)", len(lagResult.Overdue))
+	}
+
+	// Send completion notification.
+	notifyCtx := workflow.WithActivityOptions(ctx, sdk.ShortActivityOptions())
+	_ = workflow.ExecuteActivity(notifyCtx, (*Activities).NotifyComplete, sdk.NotifyParams{
+		Domain:  "fedsync",
+		Synced:  fanResult.Synced,
+		Failed:  fanResult.Failed,
+		Total:   len(selectResult.DatasetNames),
+		Message: fmt.Sprintf("Fedsync run: %d synced, %d failed out of %d%s", fanResult.Synced, fanResult.Failed, len(selectResult.DatasetNames), overdueMsg),
+	}).Get(ctx, nil)
+
 	return &RunResult{
 		Outcomes: outcomes,
 		Synced:   fanResult.Synced,
@@ -105,9 +125,21 @@ type DatasetSyncResult = sdk.SyncItemResult
 func DatasetSyncWorkflow(ctx workflow.Context, params DatasetSyncParams) (*DatasetSyncResult, error) {
 	logCtx := workflow.WithActivityOptions(ctx, sdk.LogActivityOptions())
 
+	// Determine timeout based on dataset type.
+	syncTimeout := 60 * time.Minute
+	ocrHeavy := map[string]bool{
+		"adv_part2":      true,
+		"adv_part3":      true,
+		"adv_enrichment": true,
+		"adv_extract":    true,
+	}
+	if ocrHeavy[params.Name] {
+		syncTimeout = 120 * time.Minute
+	}
+
 	// Long-running activity options for the actual dataset sync.
 	syncCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 60 * time.Minute,
+		StartToCloseTimeout: syncTimeout,
 		HeartbeatTimeout:    2 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    5 * time.Second,

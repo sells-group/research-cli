@@ -50,12 +50,14 @@ func (p *TigerProvider) Geocode(ctx context.Context, addr AddressInput) (*Result
 
 	row := p.pool.QueryRow(ctx, `
 		SELECT
-			ST_Y(geomout) AS lat,
-			ST_X(geomout) AS lon,
-			rating,
-			pprint_addy(addy) AS matched_address,
-			(addy).statefp || (addy).countyfp AS county_fips
-		FROM geocode($1, 1)`,
+			ST_Y(g.geomout) AS lat,
+			ST_X(g.geomout) AS lon,
+			g.rating,
+			pprint_addy(g.addy) AS matched_address,
+			c.statefp || c.countyfp AS county_fips
+		FROM geocode($1, 1) g
+		LEFT JOIN tiger_data.county_all c
+			ON ST_Within(g.geomout, c.the_geom)`,
 		oneLine,
 	)
 

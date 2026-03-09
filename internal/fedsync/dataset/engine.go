@@ -195,6 +195,7 @@ var entityBearingDatasets = map[string]bool{
 	"osha_ita":          true,
 	"epa_echo":          true,
 	"sba_7a_504":        true,
+	"ncua_call_reports": true,
 }
 
 // xrefInSelection returns true if entity_xref is already part of the dataset

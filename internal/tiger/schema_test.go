@@ -464,7 +464,7 @@ func TestPopulateLookups(t *testing.T) {
 	require.NoError(t, err)
 	defer mock.Close()
 
-	// Expect all 5 lookup INSERT queries to succeed.
+	// Expect all lookup INSERT/UPDATE queries to succeed.
 	mock.ExpectExec("INSERT INTO tiger.state_lookup").
 		WillReturnResult(pgxmock.NewResult("INSERT", 51))
 	mock.ExpectExec("INSERT INTO tiger.county_lookup").
@@ -475,6 +475,22 @@ func TestPopulateLookups(t *testing.T) {
 		WillReturnResult(pgxmock.NewResult("INSERT", 41000))
 	mock.ExpectExec("INSERT INTO tiger.countysub_lookup").
 		WillReturnResult(pgxmock.NewResult("INSERT", 35000))
+	mock.ExpectExec("INSERT INTO tiger.zip_state").
+		WillReturnResult(pgxmock.NewResult("INSERT", 38000))
+	mock.ExpectExec("INSERT INTO tiger.zip_state_loc").
+		WillReturnResult(pgxmock.NewResult("INSERT", 11000))
+	mock.ExpectExec("INSERT INTO tiger.zip_lookup_base").
+		WillReturnResult(pgxmock.NewResult("INSERT", 37000))
+	mock.ExpectExec("INSERT INTO tiger.zip_lookup").
+		WillReturnResult(pgxmock.NewResult("INSERT", 37000))
+	mock.ExpectExec("UPDATE tiger.zcta5").
+		WillReturnResult(pgxmock.NewResult("UPDATE", 33000))
+	// ANALYZE for each critical table.
+	mock.MatchExpectationsInOrder(false)
+	for range 12 {
+		mock.ExpectExec("ANALYZE").
+			WillReturnResult(pgxmock.NewResult("ANALYZE", 0))
+	}
 
 	err = PopulateLookups(context.Background(), mock)
 	require.NoError(t, err)

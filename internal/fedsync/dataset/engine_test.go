@@ -496,10 +496,10 @@ func TestEngine_Run_AutoTriggerXref(t *testing.T) {
 			WillReturnResult(pgxmock.NewResult("INSERT", 0))
 	}
 
-	// Stage 2: multi xref builder — truncate + 69 passes
+	// Stage 2: multi xref builder — truncate + 85 passes
 	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref_multi").
 		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
-	for range 69 {
+	for range 85 {
 		mock.ExpectExec("INSERT INTO fed_data.entity_xref_multi").
 			WillReturnResult(pgxmock.NewResult("INSERT", 0))
 	}
@@ -554,10 +554,10 @@ func TestEngine_Run_NoAutoTriggerWhenXrefSelected(t *testing.T) {
 		mock.ExpectExec("INSERT INTO fed_data.entity_xref").
 			WillReturnResult(pgxmock.NewResult("INSERT", 0))
 	}
-	// Stage 2 — truncate + 69 passes
+	// Stage 2 — truncate + 85 passes
 	mock.ExpectExec("TRUNCATE TABLE fed_data.entity_xref_multi").
 		WillReturnResult(pgxmock.NewResult("TRUNCATE", 0))
-	for range 69 {
+	for range 85 {
 		mock.ExpectExec("INSERT INTO fed_data.entity_xref_multi").
 			WillReturnResult(pgxmock.NewResult("INSERT", 0))
 	}
@@ -581,6 +581,7 @@ func TestEntityBearingDatasets(t *testing.T) {
 		"edgar_submissions", "form_d", "ncen", "form_5500",
 		"eo_bmf", "fdic_bankfind", "usaspending", "fpds",
 		"ppp", "osha_ita", "epa_echo", "sba_7a_504",
+		"ncua_call_reports",
 	}
 	for _, name := range expected {
 		assert.True(t, entityBearingDatasets[name], "missing entity-bearing dataset: %s", name)
@@ -617,6 +618,7 @@ func TestEntityBearingDatasets_HaveXrefPasses(t *testing.T) {
 		"osha_ita":          {"osha_inspections"},
 		"epa_echo":          {"epa_facilities"},
 		"sba_7a_504":        {"sba_loans"},
+		"ncua_call_reports": {"ncua_call_reports"},
 	}
 
 	allSQL := resolve.AllPassSQL()
