@@ -68,7 +68,7 @@ func (h *HIFLDCemeteries) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetc
 	}
 
 	err := arcgis.QueryAll(ctx, f, arcgis.QueryConfig{
-		BaseURL: hifldURL(h.baseURL, "Cemeteries"),
+		BaseURL: hifldURL(h.baseURL, cemeteriesBaseURL),
 	}, func(features []arcgis.Feature) error {
 		for _, feat := range features {
 			if feat.Geometry == nil {

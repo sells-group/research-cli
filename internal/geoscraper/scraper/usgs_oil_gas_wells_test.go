@@ -63,8 +63,8 @@ func TestOilGasWells_Sync(t *testing.T) {
 func TestOilGasWells_NullGeometry(t *testing.T) {
 	data := []byte(`{
 		"features": [
-			{"attributes": {"OBJECTID": 1, "WELL_NAME": "Good"}, "geometry": {"x": -95.0, "y": 30.0}},
-			{"attributes": {"OBJECTID": 2, "WELL_NAME": "Bad"}, "geometry": null}
+			{"attributes": {"OBJECTID": 1, "Well_ident": "W001", "Well_name": "Good"}, "geometry": {"x": -95.0, "y": 30.0}},
+			{"attributes": {"OBJECTID": 2, "Well_ident": "W002", "Well_name": "Bad"}, "geometry": null}
 		],
 		"exceededTransferLimit": false
 	}`)

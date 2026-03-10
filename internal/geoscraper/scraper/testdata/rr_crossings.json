@@ -3,10 +3,10 @@
     {
       "attributes": {
         "OBJECTID": 1,
-        "CROSSING": "DOT-726281X",
-        "TYPEXING": "AT GRADE",
-        "STATE": "TX",
-        "COUNTY": "Travis"
+        "Crossing_ID": "726281X",
+        "Crossing_Type": "AT GRADE",
+        "State_Name": "TX",
+        "County_Name": "Travis"
       },
       "geometry": {
         "x": -97.7431,
@@ -16,10 +16,10 @@
     {
       "attributes": {
         "OBJECTID": 2,
-        "CROSSING": "DOT-098452Y",
-        "TYPEXING": "OVERPASS",
-        "STATE": "CA",
-        "COUNTY": "Los Angeles"
+        "Crossing_ID": "098452Y",
+        "Crossing_Type": "OVERPASS",
+        "State_Name": "CA",
+        "County_Name": "Los Angeles"
       },
       "geometry": {
         "x": -118.2437,

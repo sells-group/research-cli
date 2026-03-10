@@ -69,7 +69,7 @@ func (h *HIFLDFireEMS) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher
 	}
 
 	err := arcgis.QueryAll(ctx, f, arcgis.QueryConfig{
-		BaseURL: hifldURL(h.baseURL, "Fire_Stations"),
+		BaseURL: hifldURL(h.baseURL, fireEMSBaseURL),
 	}, func(features []arcgis.Feature) error {
 		for _, feat := range features {
 			if feat.Geometry == nil {

@@ -15,15 +15,15 @@ import (
 	"github.com/sells-group/research-cli/internal/geoscraper/arcgis"
 )
 
-// epaBrownfieldsBaseURL is the EPA Brownfields MapServer endpoint.
-const epaBrownfieldsBaseURL = "https://geodata.epa.gov/arcgis/rest/services/OEI/FRS_Brownfields/MapServer/0/query"
+// epaBrownfieldsBaseURL is the EPA FRS Interests MapServer endpoint (filtered to brownfields).
+const epaBrownfieldsBaseURL = "https://geodata.epa.gov/arcgis/rest/services/OEI/FRS_INTERESTS/MapServer/0/query"
 
 // brownfieldExclude lists attribute keys stored in dedicated columns.
 var brownfieldExclude = map[string]bool{
 	"OBJECTID":      true,
-	"NAME":          true,
-	"PROPERTY_TYPE": true,
-	"ACRES":         true,
+	"REGISTRY_ID":   true,
+	"PRIMARY_NAME":  true,
+	"INTEREST_TYPE": true,
 }
 
 // EPABrownfields scrapes brownfield site locations from the EPA Brownfields ArcGIS service.
@@ -80,6 +80,7 @@ func (e *EPABrownfields) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetch
 
 	err := arcgis.QueryAll(ctx, f, arcgis.QueryConfig{
 		BaseURL: baseURL,
+		Where:   "INTEREST_TYPE = 'BROWNFIELDS PROPERTY'",
 	}, func(features []arcgis.Feature) error {
 		for _, feat := range features {
 			if feat.Geometry == nil {
@@ -89,13 +90,13 @@ func (e *EPABrownfields) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetch
 			}
 
 			lat, lon := feat.Geometry.Centroid()
-			sourceID := fmt.Sprintf("%v", feat.Attributes["OBJECTID"])
+			sourceID := fmt.Sprintf("%v", feat.Attributes["REGISTRY_ID"])
 
 			row := []any{
-				hifldString(feat.Attributes, "NAME"),
+				hifldString(feat.Attributes, "PRIMARY_NAME"),
 				"brownfield",
-				hifldString(feat.Attributes, "PROPERTY_TYPE"),
-				hifldFloat64(feat.Attributes, "ACRES"),
+				hifldString(feat.Attributes, "INTEREST_TYPE"),
+				0.0,
 				lat,
 				lon,
 				"epa",

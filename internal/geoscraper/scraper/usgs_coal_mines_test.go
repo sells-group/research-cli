@@ -63,8 +63,8 @@ func TestCoalMines_Sync(t *testing.T) {
 func TestCoalMines_NullGeometry(t *testing.T) {
 	data := []byte(`{
 		"features": [
-			{"attributes": {"OBJECTID": 1, "MINE_NAME": "Good"}, "geometry": {"x": -95.0, "y": 30.0}},
-			{"attributes": {"OBJECTID": 2, "MINE_NAME": "Bad"}, "geometry": null}
+			{"attributes": {"OBJECTID": 1, "MSHA_ID": "M001", "MINE_NAME": "Good"}, "geometry": {"x": -95.0, "y": 30.0}},
+			{"attributes": {"OBJECTID": 2, "MSHA_ID": "M002", "MINE_NAME": "Bad"}, "geometry": null}
 		],
 		"exceededTransferLimit": false
 	}`)

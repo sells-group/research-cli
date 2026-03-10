@@ -63,8 +63,8 @@ func TestBrownfields_Sync(t *testing.T) {
 func TestBrownfields_NullGeometry(t *testing.T) {
 	data := []byte(`{
 		"features": [
-			{"attributes": {"OBJECTID": 1, "NAME": "Good"}, "geometry": {"x": -95.0, "y": 30.0}},
-			{"attributes": {"OBJECTID": 2, "NAME": "Bad"}, "geometry": null}
+			{"attributes": {"OBJECTID": 1, "REGISTRY_ID": "R001", "PRIMARY_NAME": "Good"}, "geometry": {"x": -95.0, "y": 30.0}},
+			{"attributes": {"OBJECTID": 2, "REGISTRY_ID": "R002", "PRIMARY_NAME": "Bad"}, "geometry": null}
 		],
 		"exceededTransferLimit": false
 	}`)

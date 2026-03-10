@@ -17,7 +17,9 @@ import (
 
 // coalMineExclude lists attribute keys stored in dedicated columns.
 var coalMineExclude = map[string]bool{
+	"FID":       true,
 	"OBJECTID":  true,
+	"MSHA_ID":   true,
 	"MINE_NAME": true,
 	"MINE_TYPE": true,
 }
@@ -80,7 +82,7 @@ func (h *USGSCoalMines) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetche
 			}
 
 			lat, lon := feat.Geometry.Centroid()
-			sourceID := fmt.Sprintf("%v", feat.Attributes["OBJECTID"])
+			sourceID := fmt.Sprintf("%v", feat.Attributes["MSHA_ID"])
 
 			row := []any{
 				hifldString(feat.Attributes, "MINE_NAME"),

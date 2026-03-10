@@ -63,8 +63,8 @@ func TestBridges_Sync(t *testing.T) {
 func TestBridges_NullGeometry(t *testing.T) {
 	data := []byte(`{
 		"features": [
-			{"attributes": {"OBJECTID": 1, "FACILITY_CARRIED": "Good"}, "geometry": {"x": -95.0, "y": 30.0}},
-			{"attributes": {"OBJECTID": 2, "FACILITY_CARRIED": "Bad"}, "geometry": null}
+			{"attributes": {"OBJECTID": 1, "STRUCTURE_NUMBER_008": "001", "FACILITY_CARRIED_007": "Good"}, "geometry": {"x": -95.0, "y": 30.0}},
+			{"attributes": {"OBJECTID": 2, "STRUCTURE_NUMBER_008": "002", "FACILITY_CARRIED_007": "Bad"}, "geometry": null}
 		],
 		"exceededTransferLimit": false
 	}`)

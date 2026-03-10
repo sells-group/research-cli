@@ -63,8 +63,8 @@ func TestWastewater_Sync(t *testing.T) {
 func TestWastewater_NullGeometry(t *testing.T) {
 	data := []byte(`{
 		"features": [
-			{"attributes": {"OBJECTID": 1, "FAC_NAME": "Good", "REGISTRY_ID": "110000001"}, "geometry": {"x": -95.0, "y": 30.0}},
-			{"attributes": {"OBJECTID": 2, "FAC_NAME": "Bad", "REGISTRY_ID": "110000002"}, "geometry": null}
+			{"attributes": {"OBJECTID": 1, "CWP_NAME": "Good", "SOURCE_ID": "TX0001"}, "geometry": {"x": -95.0, "y": 30.0}},
+			{"attributes": {"OBJECTID": 2, "CWP_NAME": "Bad", "SOURCE_ID": "TX0002"}, "geometry": null}
 		],
 		"exceededTransferLimit": false
 	}`)

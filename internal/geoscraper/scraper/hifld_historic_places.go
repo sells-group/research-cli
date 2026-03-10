@@ -16,9 +16,10 @@ import (
 
 // historicPlaceExclude lists attribute keys stored in dedicated columns.
 var historicPlaceExclude = map[string]bool{
-	"OBJECTID": true,
-	"NAME":     true,
-	"RESTYPE":  true,
+	"OBJECTID":    true,
+	"NRIS_Refnum": true,
+	"RESNAME":     true,
+	"ResType":     true,
 }
 
 // HIFLDHistoricPlaces scrapes National Register of Historic Places locations from the HIFLD ArcGIS service.
@@ -69,7 +70,7 @@ func (h *HIFLDHistoricPlaces) Sync(ctx context.Context, pool db.Pool, f fetcher.
 	}
 
 	err := arcgis.QueryAll(ctx, f, arcgis.QueryConfig{
-		BaseURL: hifldURL(h.baseURL, "National_Register_of_Historic_Places"),
+		BaseURL: hifldURL(h.baseURL, historicPlacesURL),
 	}, func(features []arcgis.Feature) error {
 		for _, feat := range features {
 			if feat.Geometry == nil {
@@ -79,12 +80,12 @@ func (h *HIFLDHistoricPlaces) Sync(ctx context.Context, pool db.Pool, f fetcher.
 			}
 
 			lat, lon := feat.Geometry.Centroid()
-			sourceID := fmt.Sprintf("%v", feat.Attributes["OBJECTID"])
+			sourceID := fmt.Sprintf("%v", feat.Attributes["NRIS_Refnum"])
 
 			row := []any{
-				hifldString(feat.Attributes, "NAME"),
+				hifldString(feat.Attributes, "RESNAME"),
 				"historic_place",
-				hifldString(feat.Attributes, "RESTYPE"),
+				hifldString(feat.Attributes, "ResType"),
 				0.0,
 				lat,
 				lon,

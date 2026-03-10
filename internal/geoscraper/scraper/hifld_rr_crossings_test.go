@@ -63,8 +63,8 @@ func TestRRCrossings_Sync(t *testing.T) {
 func TestRRCrossings_NullGeometry(t *testing.T) {
 	data := []byte(`{
 		"features": [
-			{"attributes": {"OBJECTID": 1, "CROSSING": "Good"}, "geometry": {"x": -95.0, "y": 30.0}},
-			{"attributes": {"OBJECTID": 2, "CROSSING": "Bad"}, "geometry": null}
+			{"attributes": {"OBJECTID": 1, "Crossing_ID": "Good"}, "geometry": {"x": -95.0, "y": 30.0}},
+			{"attributes": {"OBJECTID": 2, "Crossing_ID": "Bad"}, "geometry": null}
 		],
 		"exceededTransferLimit": false
 	}`)

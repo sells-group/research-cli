@@ -16,10 +16,11 @@ import (
 
 // bridgeExclude lists attribute keys stored in dedicated columns.
 var bridgeExclude = map[string]bool{
-	"OBJECTID":         true,
-	"STRUCTURE_TYPE":   true,
-	"STRUCTURE_LEN":    true,
-	"FACILITY_CARRIED": true,
+	"OBJECTID":             true,
+	"STRUCTURE_NUMBER_008": true,
+	"FACILITY_CARRIED_007": true,
+	"YEAR_BUILT_027":       true,
+	"DECK_AREA":            true,
 }
 
 // HIFLDBridges scrapes bridge locations from the HIFLD ArcGIS service.
@@ -70,7 +71,7 @@ func (h *HIFLDBridges) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher
 	}
 
 	err := arcgis.QueryAll(ctx, f, arcgis.QueryConfig{
-		BaseURL: hifldURL(h.baseURL, "Bridges"),
+		BaseURL: hifldURL(h.baseURL, bridgesBaseURL),
 	}, func(features []arcgis.Feature) error {
 		for _, feat := range features {
 			if feat.Geometry == nil {
@@ -80,13 +81,13 @@ func (h *HIFLDBridges) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher
 			}
 
 			lat, lon := feat.Geometry.Centroid()
-			sourceID := fmt.Sprintf("%v", feat.Attributes["OBJECTID"])
+			sourceID := fmt.Sprintf("%v", feat.Attributes["STRUCTURE_NUMBER_008"])
 
 			row := []any{
-				hifldString(feat.Attributes, "FACILITY_CARRIED"),
+				hifldString(feat.Attributes, "FACILITY_CARRIED_007"),
 				"bridge",
-				hifldString(feat.Attributes, "STRUCTURE_TYPE"),
-				hifldFloat64(feat.Attributes, "STRUCTURE_LEN"),
+				hifldString(feat.Attributes, "YEAR_BUILT_027"),
+				hifldFloat64(feat.Attributes, "DECK_AREA"),
 				lat,
 				lon,
 				hifldSource,

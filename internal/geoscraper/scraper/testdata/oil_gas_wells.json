@@ -3,11 +3,12 @@
     {
       "attributes": {
         "OBJECTID": 401,
-        "WELL_NAME": "Permian Basin #1",
-        "WELL_STATUS": "PRODUCING",
-        "WELL_DEPTH": 8500.0,
-        "STATE": "TX",
-        "COUNTY": "Midland"
+        "Well_ident": "PB001",
+        "Well_name": "Permian Basin #1",
+        "Type": "OIL",
+        "Status": "PRODUCING",
+        "State": "TX",
+        "County": "Midland"
       },
       "geometry": {
         "x": -97.7431,
@@ -17,11 +18,12 @@
     {
       "attributes": {
         "OBJECTID": 402,
-        "WELL_NAME": "Eagle Ford #7",
-        "WELL_STATUS": "ABANDONED",
-        "WELL_DEPTH": 6200.0,
-        "STATE": "TX",
-        "COUNTY": "DeWitt"
+        "Well_ident": "EF007",
+        "Well_name": "Eagle Ford #7",
+        "Type": "GAS",
+        "Status": "ABANDONED",
+        "State": "TX",
+        "County": "DeWitt"
       },
       "geometry": {
         "x": -95.3698,

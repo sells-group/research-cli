@@ -70,7 +70,7 @@ func (h *HIFLDSchools) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher
 	}
 
 	err := arcgis.QueryAll(ctx, f, arcgis.QueryConfig{
-		BaseURL: hifldURL(h.baseURL, "Public_Schools"),
+		BaseURL: hifldURL(h.baseURL, schoolsBaseURL),
 	}, func(features []arcgis.Feature) error {
 		for _, feat := range features {
 			if feat.Geometry == nil {

@@ -2,7 +2,6 @@ package scraper
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/rotisserie/eris"
@@ -15,15 +14,15 @@ import (
 	"github.com/sells-group/research-cli/internal/geoscraper/arcgis"
 )
 
-// epaCWABaseURL is the EPA Clean Water Act facility MapServer endpoint.
-const epaCWABaseURL = "https://geodata.epa.gov/arcgis/rest/services/OEI/FRS_CWA/MapServer/0/query"
+// epaCWABaseURL is the EPA Clean Water Act wastewater MapServer endpoint.
+const epaCWABaseURL = "https://geodata.epa.gov/arcgis/rest/services/OEI/FRS_Wastewater/MapServer/0/query"
 
 // wastewaterExclude lists attribute keys stored in dedicated columns.
 var wastewaterExclude = map[string]bool{
-	"OBJECTID":    true,
-	"FAC_NAME":    true,
-	"DESIGN_FLO":  true,
-	"REGISTRY_ID": true,
+	"OBJECTID":   true,
+	"OBJECTID_1": true,
+	"SOURCE_ID":  true,
+	"CWP_NAME":   true,
 }
 
 // EPAWastewater scrapes wastewater treatment plant locations from the EPA CWA ArcGIS service.
@@ -88,19 +87,19 @@ func (e *EPAWastewater) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetche
 				continue
 			}
 
-			registryID := hifldString(feat.Attributes, "REGISTRY_ID")
-			if registryID == "" {
+			sourceIDVal := hifldString(feat.Attributes, "SOURCE_ID")
+			if sourceIDVal == "" {
 				continue
 			}
 
 			lat, lon := feat.Geometry.Centroid()
-			sourceID := fmt.Sprintf("%v", feat.Attributes["REGISTRY_ID"])
+			sourceID := sourceIDVal
 
 			row := []any{
-				hifldString(feat.Attributes, "FAC_NAME"),
+				hifldString(feat.Attributes, "CWP_NAME"),
 				"wastewater_plant",
 				"",
-				hifldFloat64(feat.Attributes, "DESIGN_FLO"),
+				0.0,
 				lat,
 				lon,
 				"epa",

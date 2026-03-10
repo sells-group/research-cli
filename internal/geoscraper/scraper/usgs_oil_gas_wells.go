@@ -16,10 +16,11 @@ import (
 
 // oilGasWellExclude lists attribute keys stored in dedicated columns.
 var oilGasWellExclude = map[string]bool{
-	"OBJECTID":    true,
-	"WELL_NAME":   true,
-	"WELL_STATUS": true,
-	"WELL_DEPTH":  true,
+	"OBJECTID":   true,
+	"Well_ident": true,
+	"Well_name":  true,
+	"Status":     true,
+	"Type":       true,
 }
 
 // USGSOilGasWells scrapes oil and natural gas well locations from the Esri Living Atlas ArcGIS service.
@@ -80,13 +81,13 @@ func (h *USGSOilGasWells) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetc
 			}
 
 			lat, lon := feat.Geometry.Centroid()
-			sourceID := fmt.Sprintf("%v", feat.Attributes["OBJECTID"])
+			sourceID := fmt.Sprintf("%v", feat.Attributes["Well_ident"])
 
 			row := []any{
-				hifldString(feat.Attributes, "WELL_NAME"),
+				hifldString(feat.Attributes, "Well_name"),
 				"oil_gas_well",
-				hifldString(feat.Attributes, "WELL_STATUS"),
-				hifldFloat64(feat.Attributes, "WELL_DEPTH"),
+				hifldString(feat.Attributes, "Status"),
+				0.0,
 				lat,
 				lon,
 				usgsSource,

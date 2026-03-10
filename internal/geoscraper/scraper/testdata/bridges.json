@@ -3,11 +3,11 @@
     {
       "attributes": {
         "OBJECTID": 201,
-        "FACILITY_CARRIED": "I-35 NB",
-        "STRUCTURE_TYPE": "STEEL",
-        "STRUCTURE_LEN": 150.5,
-        "STATE": "TX",
-        "COUNTY": "Travis"
+        "STRUCTURE_NUMBER_008": "4800001",
+        "FACILITY_CARRIED_007": "I-35 NB",
+        "YEAR_BUILT_027": "1975",
+        "DECK_AREA": 150.5,
+        "STATE_CODE_001": "48"
       },
       "geometry": {
         "x": -97.7431,
@@ -17,11 +17,11 @@
     {
       "attributes": {
         "OBJECTID": 202,
-        "FACILITY_CARRIED": "US-290 WB",
-        "STRUCTURE_TYPE": "CONCRETE",
-        "STRUCTURE_LEN": 225.0,
-        "STATE": "TX",
-        "COUNTY": "Harris"
+        "STRUCTURE_NUMBER_008": "4800002",
+        "FACILITY_CARRIED_007": "US-290 WB",
+        "YEAR_BUILT_027": "1990",
+        "DECK_AREA": 225.0,
+        "STATE_CODE_001": "48"
       },
       "geometry": {
         "x": -95.3698,

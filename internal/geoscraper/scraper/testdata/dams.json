@@ -3,8 +3,9 @@
     {
       "attributes": {
         "OBJECTID": 1,
+        "NIDID": "TX00001",
         "NAME": "Mansfield Dam",
-        "DAM_TYPE": "EARTH",
+        "PRIMARY_DAM_TYPE": "EARTH",
         "NID_HEIGHT": 266.0,
         "STATE": "TX",
         "COUNTY": "Travis"
@@ -17,8 +18,9 @@
     {
       "attributes": {
         "OBJECTID": 2,
+        "NIDID": "NV00001",
         "NAME": "Hoover Dam",
-        "DAM_TYPE": "GRAVITY",
+        "PRIMARY_DAM_TYPE": "GRAVITY",
         "NID_HEIGHT": 726.0,
         "STATE": "NV",
         "COUNTY": "Clark"

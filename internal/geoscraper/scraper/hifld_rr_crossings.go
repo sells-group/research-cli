@@ -16,9 +16,9 @@ import (
 
 // rrCrossingExclude lists attribute keys stored in dedicated columns.
 var rrCrossingExclude = map[string]bool{
-	"OBJECTID": true,
-	"CROSSING": true,
-	"TYPEXING": true,
+	"OBJECTID":      true,
+	"Crossing_ID":   true,
+	"Crossing_Type": true,
 }
 
 // HIFLDRRCrossings scrapes highway-rail grade crossing locations from the HIFLD ArcGIS service.
@@ -69,7 +69,7 @@ func (h *HIFLDRRCrossings) Sync(ctx context.Context, pool db.Pool, f fetcher.Fet
 	}
 
 	err := arcgis.QueryAll(ctx, f, arcgis.QueryConfig{
-		BaseURL: hifldURL(h.baseURL, "Highway_Rail_Grade_Crossings"),
+		BaseURL: hifldURL(h.baseURL, rrCrossingsBaseURL),
 	}, func(features []arcgis.Feature) error {
 		for _, feat := range features {
 			if feat.Geometry == nil {
@@ -82,9 +82,9 @@ func (h *HIFLDRRCrossings) Sync(ctx context.Context, pool db.Pool, f fetcher.Fet
 			sourceID := fmt.Sprintf("%v", feat.Attributes["OBJECTID"])
 
 			row := []any{
-				hifldString(feat.Attributes, "CROSSING"),
+				hifldString(feat.Attributes, "Crossing_ID"),
 				"rr_crossing",
-				hifldString(feat.Attributes, "TYPEXING"),
+				hifldString(feat.Attributes, "Crossing_Type"),
 				0.0,
 				lat,
 				lon,

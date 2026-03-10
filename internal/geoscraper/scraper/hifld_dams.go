@@ -16,10 +16,11 @@ import (
 
 // damExclude lists attribute keys stored in dedicated columns.
 var damExclude = map[string]bool{
-	"OBJECTID":   true,
-	"NAME":       true,
-	"DAM_TYPE":   true,
-	"NID_HEIGHT": true,
+	"OBJECTID":         true,
+	"NIDID":            true,
+	"NAME":             true,
+	"PRIMARY_DAM_TYPE": true,
+	"NID_HEIGHT":       true,
 }
 
 // HIFLDDams scrapes dam locations from the HIFLD ArcGIS service.
@@ -70,7 +71,7 @@ func (h *HIFLDDams) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _
 	}
 
 	err := arcgis.QueryAll(ctx, f, arcgis.QueryConfig{
-		BaseURL: hifldURL(h.baseURL, "National_Inventory_of_Dams"),
+		BaseURL: hifldURL(h.baseURL, damsBaseURL),
 	}, func(features []arcgis.Feature) error {
 		for _, feat := range features {
 			if feat.Geometry == nil {
@@ -80,12 +81,12 @@ func (h *HIFLDDams) Sync(ctx context.Context, pool db.Pool, f fetcher.Fetcher, _
 			}
 
 			lat, lon := feat.Geometry.Centroid()
-			sourceID := fmt.Sprintf("%v", feat.Attributes["OBJECTID"])
+			sourceID := fmt.Sprintf("%v", feat.Attributes["NIDID"])
 
 			row := []any{
 				hifldString(feat.Attributes, "NAME"),
 				"dam",
-				hifldString(feat.Attributes, "DAM_TYPE"),
+				hifldString(feat.Attributes, "PRIMARY_DAM_TYPE"),
 				hifldFloat64(feat.Attributes, "NID_HEIGHT"),
 				lat,
 				lon,
