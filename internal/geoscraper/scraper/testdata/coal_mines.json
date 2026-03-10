@@ -1,0 +1,31 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 701,
+        "MINE_NAME": "Black Thunder Mine",
+        "MINE_TYPE": "Surface",
+        "STATE": "WY",
+        "COUNTY": "Campbell"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 702,
+        "MINE_NAME": "Consol No. 5",
+        "MINE_TYPE": "Underground",
+        "STATE": "WV",
+        "COUNTY": "Marion"
+      },
+      "geometry": {
+        "x": -95.3698,
+        "y": 29.7604
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

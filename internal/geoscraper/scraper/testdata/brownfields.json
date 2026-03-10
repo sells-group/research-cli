@@ -1,0 +1,33 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 801,
+        "NAME": "Former Industrial Site",
+        "PROPERTY_TYPE": "BROWNFIELDS",
+        "ACRES": 15.5,
+        "STATE": "TX",
+        "CITY": "Austin"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 802,
+        "NAME": "Abandoned Rail Yard",
+        "PROPERTY_TYPE": "BROWNFIELDS",
+        "ACRES": 8.2,
+        "STATE": "TX",
+        "CITY": "Houston"
+      },
+      "geometry": {
+        "x": -95.3698,
+        "y": 29.7604
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

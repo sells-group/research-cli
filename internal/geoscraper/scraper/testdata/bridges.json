@@ -1,0 +1,33 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 201,
+        "FACILITY_CARRIED": "I-35 NB",
+        "STRUCTURE_TYPE": "STEEL",
+        "STRUCTURE_LEN": 150.5,
+        "STATE": "TX",
+        "COUNTY": "Travis"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 202,
+        "FACILITY_CARRIED": "US-290 WB",
+        "STRUCTURE_TYPE": "CONCRETE",
+        "STRUCTURE_LEN": 225.0,
+        "STATE": "TX",
+        "COUNTY": "Harris"
+      },
+      "geometry": {
+        "x": -95.3698,
+        "y": 29.7604
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

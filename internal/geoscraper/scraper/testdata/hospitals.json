@@ -1,0 +1,33 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "NAME": "St. Mary General Hospital",
+        "TYPE": "GENERAL ACUTE CARE",
+        "BEDS": 350.0,
+        "STATE": "TX",
+        "CITY": "Austin"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "NAME": "Pacific Medical Center",
+        "TYPE": "GENERAL ACUTE CARE",
+        "BEDS": 500.0,
+        "STATE": "CA",
+        "CITY": "Los Angeles"
+      },
+      "geometry": {
+        "x": -118.2437,
+        "y": 34.0522
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

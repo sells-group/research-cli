@@ -1,0 +1,31 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "CROSSING": "DOT-726281X",
+        "TYPEXING": "AT GRADE",
+        "STATE": "TX",
+        "COUNTY": "Travis"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "CROSSING": "DOT-098452Y",
+        "TYPEXING": "OVERPASS",
+        "STATE": "CA",
+        "COUNTY": "Los Angeles"
+      },
+      "geometry": {
+        "x": -118.2437,
+        "y": 34.0522
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

@@ -1,0 +1,33 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 401,
+        "WELL_NAME": "Permian Basin #1",
+        "WELL_STATUS": "PRODUCING",
+        "WELL_DEPTH": 8500.0,
+        "STATE": "TX",
+        "COUNTY": "Midland"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 402,
+        "WELL_NAME": "Eagle Ford #7",
+        "WELL_STATUS": "ABANDONED",
+        "WELL_DEPTH": 6200.0,
+        "STATE": "TX",
+        "COUNTY": "DeWitt"
+      },
+      "geometry": {
+        "x": -95.3698,
+        "y": 29.7604
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

@@ -1,0 +1,31 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "NAME": "Driskill Hotel",
+        "RESTYPE": "BUILDING",
+        "STATE": "TX",
+        "COUNTY": "Travis"
+      },
+      "geometry": {
+        "x": -97.7394,
+        "y": 30.2682
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "NAME": "Griffith Observatory",
+        "RESTYPE": "SITE",
+        "STATE": "CA",
+        "COUNTY": "Los Angeles"
+      },
+      "geometry": {
+        "x": -118.3004,
+        "y": 34.1185
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

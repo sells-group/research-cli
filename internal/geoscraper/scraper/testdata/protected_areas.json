@@ -1,0 +1,31 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 301,
+        "Unit_Nm": "Rocky Mountain National Park",
+        "GAP_Sts": "1",
+        "GIS_Acres": 5000.0,
+        "State_Nm": "CO",
+        "Mang_Name": "National Park Service"
+      },
+      "geometry": {
+        "rings": [[[-105.0, 40.0], [-104.0, 40.0], [-104.0, 41.0], [-105.0, 41.0], [-105.0, 40.0]]]
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 302,
+        "Unit_Nm": "Grand Mesa National Forest",
+        "GAP_Sts": "2",
+        "GIS_Acres": 12000.0,
+        "State_Nm": "CO",
+        "Mang_Name": "US Forest Service"
+      },
+      "geometry": {
+        "rings": [[[-108.0, 39.0], [-107.0, 39.0], [-107.0, 40.0], [-108.0, 40.0], [-108.0, 39.0]]]
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

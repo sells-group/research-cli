@@ -87,3 +87,8 @@ func hifldProperties(attrs map[string]any, exclude map[string]bool) []byte {
 func hifldShouldRun(now time.Time, lastSync *time.Time) bool {
 	return dataset.QuarterlyAfterDelay(now, lastSync, 0)
 }
+
+// hifldAnnualShouldRun returns true if an annual HIFLD scraper is due.
+func hifldAnnualShouldRun(now time.Time, lastSync *time.Time) bool {
+	return dataset.AnnualAfter(now, lastSync, time.January)
+}
