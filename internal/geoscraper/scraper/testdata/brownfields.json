@@ -1,0 +1,33 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 801,
+        "REGISTRY_ID": "110000801",
+        "PRIMARY_NAME": "Former Industrial Site",
+        "INTEREST_TYPE": "BROWNFIELDS PROPERTY",
+        "STATE_CODE": "TX",
+        "CITY_NAME": "Austin"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 802,
+        "REGISTRY_ID": "110000802",
+        "PRIMARY_NAME": "Abandoned Rail Yard",
+        "INTEREST_TYPE": "BROWNFIELDS PROPERTY",
+        "STATE_CODE": "TX",
+        "CITY_NAME": "Houston"
+      },
+      "geometry": {
+        "x": -95.3698,
+        "y": 29.7604
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

@@ -15,11 +15,20 @@ func TestRegisterHIFLD(t *testing.T) {
 	RegisterHIFLD(reg)
 
 	names := reg.AllNames()
-	require.Len(t, names, 4)
+	require.Len(t, names, 13)
 	assert.Equal(t, "hifld_power_plants", names[0])
 	assert.Equal(t, "hifld_substations", names[1])
 	assert.Equal(t, "hifld_transmission_lines", names[2])
 	assert.Equal(t, "hifld_pipelines", names[3])
+	assert.Equal(t, "hifld_schools", names[4])
+	assert.Equal(t, "hifld_fire_ems", names[5])
+	assert.Equal(t, "hifld_hospitals", names[6])
+	assert.Equal(t, "hifld_dams", names[7])
+	assert.Equal(t, "hifld_cemeteries", names[8])
+	assert.Equal(t, "hifld_historic_places", names[9])
+	assert.Equal(t, "hifld_rr_crossings", names[10])
+	assert.Equal(t, "hifld_airports", names[11])
+	assert.Equal(t, "hifld_bridges", names[12])
 }
 
 func TestRegisterAll(t *testing.T) {
@@ -27,7 +36,7 @@ func TestRegisterAll(t *testing.T) {
 	RegisterAll(reg, nil)
 
 	names := reg.AllNames()
-	require.Len(t, names, 14) // 4 HIFLD + 1 FEMA + 1 EPA + 1 Census + 2 FCC + 1 NWI + 1 NRCS + 2 TIGER + 1 OSM
+	require.Len(t, names, 29) // 13 HIFLD + 1 FEMA + 3 EPA + 1 Census + 2 FCC + 1 NWI + 1 NRCS + 4 USGS + 2 TIGER + 1 OSM
 
 	// All should be National category.
 	for _, s := range reg.All() {
@@ -44,7 +53,7 @@ func TestRegisterAll_WithConfig(t *testing.T) {
 	RegisterAll(reg, cfg)
 
 	names := reg.AllNames()
-	require.Len(t, names, 14)
+	require.Len(t, names, 29)
 }
 
 func TestRegisterAll_NoDuplicates(t *testing.T) {
@@ -74,4 +83,19 @@ var (
 	_ geoscraper.GeoScraper = (*TIGERBoundaries)(nil)
 	_ geoscraper.GeoScraper = (*TIGERRoads)(nil)
 	_ geoscraper.GeoScraper = (*OSMPOI)(nil)
+	_ geoscraper.GeoScraper = (*HIFLDSchools)(nil)
+	_ geoscraper.GeoScraper = (*HIFLDFireEMS)(nil)
+	_ geoscraper.GeoScraper = (*HIFLDHospitals)(nil)
+	_ geoscraper.GeoScraper = (*HIFLDDams)(nil)
+	_ geoscraper.GeoScraper = (*HIFLDCemeteries)(nil)
+	_ geoscraper.GeoScraper = (*HIFLDHistoricPlaces)(nil)
+	_ geoscraper.GeoScraper = (*HIFLDRRCrossings)(nil)
+	_ geoscraper.GeoScraper = (*HIFLDAirports)(nil)
+	_ geoscraper.GeoScraper = (*HIFLDBridges)(nil)
+	_ geoscraper.GeoScraper = (*USGSProtectedAreas)(nil)
+	_ geoscraper.GeoScraper = (*USGSOilGasWells)(nil)
+	_ geoscraper.GeoScraper = (*USGSWaterways)(nil)
+	_ geoscraper.GeoScraper = (*USGSCoalMines)(nil)
+	_ geoscraper.GeoScraper = (*EPAWastewater)(nil)
+	_ geoscraper.GeoScraper = (*EPABrownfields)(nil)
 )

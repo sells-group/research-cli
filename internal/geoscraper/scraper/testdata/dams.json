@@ -1,0 +1,35 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "NIDID": "TX00001",
+        "NAME": "Mansfield Dam",
+        "PRIMARY_DAM_TYPE": "EARTH",
+        "NID_HEIGHT": 266.0,
+        "STATE": "TX",
+        "COUNTY": "Travis"
+      },
+      "geometry": {
+        "x": -97.9231,
+        "y": 30.3921
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "NIDID": "NV00001",
+        "NAME": "Hoover Dam",
+        "PRIMARY_DAM_TYPE": "GRAVITY",
+        "NID_HEIGHT": 726.0,
+        "STATE": "NV",
+        "COUNTY": "Clark"
+      },
+      "geometry": {
+        "x": -114.7372,
+        "y": 36.0160
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

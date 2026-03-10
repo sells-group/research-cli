@@ -1,0 +1,33 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "NRIS_Refnum": "78002972",
+        "RESNAME": "Driskill Hotel",
+        "ResType": "BUILDING",
+        "State": "TX",
+        "County": "Travis"
+      },
+      "geometry": {
+        "x": -97.7394,
+        "y": 30.2682
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "NRIS_Refnum": "76000469",
+        "RESNAME": "Griffith Observatory",
+        "ResType": "SITE",
+        "State": "CA",
+        "County": "Los Angeles"
+      },
+      "geometry": {
+        "x": -118.3004,
+        "y": 34.1185
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

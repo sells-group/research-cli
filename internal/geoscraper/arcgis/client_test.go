@@ -342,7 +342,7 @@ func TestQueryAll_OutSR(t *testing.T) {
 	assert.Contains(t, receivedURL, "outSR=4326")
 }
 
-func TestQueryAll_OutSR_Zero(t *testing.T) {
+func TestQueryAll_OutSR_DefaultsTo4326(t *testing.T) {
 	var receivedURL string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedURL = r.URL.String()
@@ -357,7 +357,7 @@ func TestQueryAll_OutSR_Zero(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	assert.NotContains(t, receivedURL, "outSR")
+	assert.Contains(t, receivedURL, "outSR=4326")
 }
 
 func TestQueryAll_PolygonResponse(t *testing.T) {

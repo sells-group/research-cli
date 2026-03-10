@@ -31,41 +31,56 @@
 | 18 | `nrcs_soils` | Geo | NRCS | NRCS SSURGO ArcGIS | Annual | `geo.demographics` | Merged | — | SELDEV-648 |
 | 19 | `tiger_roads` | Geo | TIGER | Census TIGER/Line | Annual | `geo.infrastructure` | Merged | — | SELDEV-649 |
 | 20 | `osm_poi` | Geo | OSM | OpenStreetMap Overpass | Monthly | `geo.poi` | Merged | — | SELDEV-650 |
-| 21 | `cbp` | Fedsync | Census | Census CBP ZIP | Annual | `fed_data.cbp_data` | Implemented | `internal/fedsync/dataset/cbp.go` | — |
-| 22 | `susb` | Fedsync | Census | Census SUSB TXT | Annual | `fed_data.susb_data` | Implemented | `internal/fedsync/dataset/susb.go` | — |
-| 23 | `qcew` | Fedsync | BLS | BLS QCEW ZIP | Quarterly | `fed_data.qcew_data` | Implemented | `internal/fedsync/dataset/qcew.go` | — |
-| 24 | `oews` | Fedsync | BLS | BLS OEWS ZIP | Annual | `fed_data.oews_data` | Implemented | `internal/fedsync/dataset/oews.go` | — |
-| 25 | `fpds` | Fedsync | SAM.gov | SAM.gov API | Daily | `fed_data.fpds_contracts` | Implemented | `internal/fedsync/dataset/fpds.go` | — |
-| 26 | `econ_census` | Fedsync | Census | Census API | Annual | `fed_data.economic_census` | Implemented | `internal/fedsync/dataset/econ_census.go` | — |
-| 27 | `ppp` | Fedsync | SBA | SBA CKAN | One-time | `fed_data.ppp_loans` | Implemented | `internal/fedsync/dataset/ppp.go` | — |
-| 28 | `adv_part1` | Fedsync | SEC | IAPD FOIA | Monthly | `fed_data.adv_filings` | Implemented | `internal/fedsync/dataset/adv_part1.go` | — |
-| 29 | `ia_compilation` | Fedsync | SEC | IARD XML | Daily | `fed_data.adv_firms` | Implemented | `internal/fedsync/dataset/ia_compilation.go` | — |
-| 30 | `holdings_13f` | Fedsync | SEC | EFTS → 13F XML | Quarterly | `fed_data.f13_holdings` | Implemented | `internal/fedsync/dataset/holdings_13f.go` | — |
-| 31 | `form_d` | Fedsync | SEC | EFTS → Form D XML | Daily | `fed_data.form_d` | Implemented | `internal/fedsync/dataset/form_d.go` | — |
-| 32 | `edgar_submissions` | Fedsync | SEC | EDGAR bulk ZIP | Weekly | `fed_data.edgar_entities` | Implemented | `internal/fedsync/dataset/edgar_submissions.go` | — |
-| 33 | `entity_xref` | Fedsync | Internal | CRD↔CIK matching | Monthly | `fed_data.entity_xref` | Implemented | `internal/fedsync/dataset/entity_xref.go` | — |
-| 34 | `adv_part2` | Fedsync | SEC | IAPD → PDF OCR | Monthly | `fed_data.adv_brochures` | Implemented | `internal/fedsync/dataset/adv_part2.go` | — |
-| 35 | `brokercheck` | Fedsync | FINRA | FINRA ZIP | Monthly | `fed_data.brokercheck` | Implemented | `internal/fedsync/dataset/brokercheck.go` | — |
-| 36 | `sec_enforcement` | Fedsync | SEC | EFTS search | Monthly | `fed_data.sec_enforcement_actions` | Implemented | `internal/fedsync/dataset/sec_enforcement.go` | — |
-| 37 | `form_bd` | Fedsync | SEC | SEC ZIP | Monthly | `fed_data.form_bd` | Implemented | `internal/fedsync/dataset/form_bd.go` | — |
-| 38 | `osha_ita` | Fedsync | OSHA | OSHA ZIP | Annual | `fed_data.osha_inspections` | Implemented | `internal/fedsync/dataset/osha_ita.go` | — |
-| 39 | `epa_echo` | Fedsync | EPA | EPA ECHO ZIP | Monthly | `fed_data.epa_facilities` | Implemented | `internal/fedsync/dataset/epa_echo.go` | — |
-| 40 | `nes` | Fedsync | Census | Census API | Annual | `fed_data.nes_data` | Implemented | `internal/fedsync/dataset/nes.go` | — |
-| 41 | `asm` | Fedsync | Census | Census API | Annual | `fed_data.asm_data` | Implemented | `internal/fedsync/dataset/asm.go` | — |
-| 42 | `eci` | Fedsync | BLS | BLS API | Quarterly | `fed_data.eci_data` | Implemented | `internal/fedsync/dataset/eci.go` | — |
-| 43 | `adv_part3` | Fedsync | SEC | IAPD → CRS PDF OCR | Monthly | `fed_data.adv_crs` | Implemented | `internal/fedsync/dataset/adv_part3.go` | — |
-| 44 | `adv_enrichment` | Fedsync | Internal | LLM (Haiku) | Monthly | `fed_data.adv_brochure_enrichment` | Implemented | `internal/fedsync/dataset/adv_enrichment.go` | — |
-| 45 | `adv_extract` | Fedsync | Internal | LLM (Haiku T1) | Monthly | `fed_data.adv_advisor_answers` | Implemented | `internal/fedsync/dataset/adv_extract.go` | — |
-| 46 | `xbrl_facts` | Fedsync | SEC | EDGAR XBRL JSON | Daily | `fed_data.xbrl_facts` | Implemented | `internal/fedsync/dataset/xbrl_facts.go` | — |
-| 47 | `fred` | Fedsync | FRED | FRED API | Monthly | `fed_data.fred_series` | Implemented | `internal/fedsync/dataset/fred.go` | — |
-| 48 | `abs` | Fedsync | Census | Census API | Annual | `fed_data.abs_data` | Implemented | `internal/fedsync/dataset/abs.go` | — |
-| 49 | `cps_laus` | Fedsync | BLS | BLS API | Monthly | `fed_data.laus_data` | Implemented | `internal/fedsync/dataset/cps_laus.go` | — |
-| 50 | `m3` | Fedsync | Census | Census API | Monthly | `fed_data.m3_data` | Implemented | `internal/fedsync/dataset/m3.go` | — |
-| 51 | `form_5500` | Fedsync | DOL | DOL EFAST2 FOIA bulk CSV/ZIP | Annual | `fed_data.form_5500` + 3 | Implemented | `internal/fedsync/dataset/form_5500.go` | — |
-| 52 | `eo_bmf` | Fedsync | IRS | IRS SOI Exempt Org BMF CSV | Monthly | `fed_data.eo_bmf` | Implemented | `internal/fedsync/dataset/eo_bmf.go` | SELDEV-737 |
-| 53 | `fdic_bankfind` | Fedsync | FDIC | FDIC BankFind REST API | Weekly | `fed_data.fdic_institutions` | Implemented | `internal/fedsync/dataset/fdic_bankfind.go` | SELDEV-736 |
+| 21 | `hifld_schools` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_schools.go` | SELDEV-695 |
+| 22 | `hifld_fire_ems` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_fire_ems.go` | SELDEV-695 |
+| 23 | `hifld_hospitals` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_hospitals.go` | SELDEV-695 |
+| 24 | `hifld_dams` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_dams.go` | SELDEV-695 |
+| 25 | `hifld_cemeteries` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_cemeteries.go` | SELDEV-695 |
+| 26 | `hifld_historic_places` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_historic_places.go` | SELDEV-695 |
+| 27 | `hifld_rr_crossings` | Geo | HIFLD | HIFLD ArcGIS | Quarterly | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_rr_crossings.go` | SELDEV-695 |
+| 28 | `hifld_airports` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_airports.go` | SELDEV-696 |
+| 29 | `hifld_bridges` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_bridges.go` | SELDEV-696 |
+| 30 | `usgs_protected_areas` | Geo | USGS | PAD-US ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/usgs_protected_areas.go` | SELDEV-696 |
+| 31 | `usgs_oil_gas_wells` | Geo | USGS | Esri Living Atlas ArcGIS | Quarterly | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/usgs_oil_gas_wells.go` | SELDEV-696 |
+| 32 | `usgs_waterways` | Geo | USGS | USGS NHD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/usgs_waterways.go` | SELDEV-696 |
+| 33 | `epa_wastewater` | Geo | EPA | EPA FRS CWA ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/epa_wastewater.go` | SELDEV-696 |
+| 34 | `usgs_coal_mines` | Geo | USGS | USGS Coal Mines ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/usgs_coal_mines.go` | SELDEV-696 |
+| 35 | `epa_brownfields` | Geo | EPA | EPA Brownfields ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/epa_brownfields.go` | SELDEV-696 |
+| 36 | `cbp` | Fedsync | Census | Census CBP ZIP | Annual | `fed_data.cbp_data` | Implemented | `internal/fedsync/dataset/cbp.go` | — |
+| 37 | `susb` | Fedsync | Census | Census SUSB TXT | Annual | `fed_data.susb_data` | Implemented | `internal/fedsync/dataset/susb.go` | — |
+| 38 | `qcew` | Fedsync | BLS | BLS QCEW ZIP | Quarterly | `fed_data.qcew_data` | Implemented | `internal/fedsync/dataset/qcew.go` | — |
+| 39 | `oews` | Fedsync | BLS | BLS OEWS ZIP | Annual | `fed_data.oews_data` | Implemented | `internal/fedsync/dataset/oews.go` | — |
+| 40 | `fpds` | Fedsync | SAM.gov | SAM.gov API | Daily | `fed_data.fpds_contracts` | Implemented | `internal/fedsync/dataset/fpds.go` | — |
+| 41 | `econ_census` | Fedsync | Census | Census API | Annual | `fed_data.economic_census` | Implemented | `internal/fedsync/dataset/econ_census.go` | — |
+| 42 | `ppp` | Fedsync | SBA | SBA CKAN | One-time | `fed_data.ppp_loans` | Implemented | `internal/fedsync/dataset/ppp.go` | — |
+| 43 | `adv_part1` | Fedsync | SEC | IAPD FOIA | Monthly | `fed_data.adv_filings` | Implemented | `internal/fedsync/dataset/adv_part1.go` | — |
+| 44 | `ia_compilation` | Fedsync | SEC | IARD XML | Daily | `fed_data.adv_firms` | Implemented | `internal/fedsync/dataset/ia_compilation.go` | — |
+| 45 | `holdings_13f` | Fedsync | SEC | EFTS → 13F XML | Quarterly | `fed_data.f13_holdings` | Implemented | `internal/fedsync/dataset/holdings_13f.go` | — |
+| 46 | `form_d` | Fedsync | SEC | EFTS → Form D XML | Daily | `fed_data.form_d` | Implemented | `internal/fedsync/dataset/form_d.go` | — |
+| 47 | `edgar_submissions` | Fedsync | SEC | EDGAR bulk ZIP | Weekly | `fed_data.edgar_entities` | Implemented | `internal/fedsync/dataset/edgar_submissions.go` | — |
+| 48 | `entity_xref` | Fedsync | Internal | CRD↔CIK matching | Monthly | `fed_data.entity_xref` | Implemented | `internal/fedsync/dataset/entity_xref.go` | — |
+| 49 | `adv_part2` | Fedsync | SEC | IAPD → PDF OCR | Monthly | `fed_data.adv_brochures` | Implemented | `internal/fedsync/dataset/adv_part2.go` | — |
+| 50 | `brokercheck` | Fedsync | FINRA | FINRA ZIP | Monthly | `fed_data.brokercheck` | Implemented | `internal/fedsync/dataset/brokercheck.go` | — |
+| 51 | `sec_enforcement` | Fedsync | SEC | EFTS search | Monthly | `fed_data.sec_enforcement_actions` | Implemented | `internal/fedsync/dataset/sec_enforcement.go` | — |
+| 52 | `form_bd` | Fedsync | SEC | SEC ZIP | Monthly | `fed_data.form_bd` | Implemented | `internal/fedsync/dataset/form_bd.go` | — |
+| 53 | `osha_ita` | Fedsync | OSHA | OSHA ZIP | Annual | `fed_data.osha_inspections` | Implemented | `internal/fedsync/dataset/osha_ita.go` | — |
+| 54 | `epa_echo` | Fedsync | EPA | EPA ECHO ZIP | Monthly | `fed_data.epa_facilities` | Implemented | `internal/fedsync/dataset/epa_echo.go` | — |
+| 55 | `nes` | Fedsync | Census | Census API | Annual | `fed_data.nes_data` | Implemented | `internal/fedsync/dataset/nes.go` | — |
+| 56 | `asm` | Fedsync | Census | Census API | Annual | `fed_data.asm_data` | Implemented | `internal/fedsync/dataset/asm.go` | — |
+| 57 | `eci` | Fedsync | BLS | BLS API | Quarterly | `fed_data.eci_data` | Implemented | `internal/fedsync/dataset/eci.go` | — |
+| 58 | `adv_part3` | Fedsync | SEC | IAPD → CRS PDF OCR | Monthly | `fed_data.adv_crs` | Implemented | `internal/fedsync/dataset/adv_part3.go` | — |
+| 59 | `adv_enrichment` | Fedsync | Internal | LLM (Haiku) | Monthly | `fed_data.adv_brochure_enrichment` | Implemented | `internal/fedsync/dataset/adv_enrichment.go` | — |
+| 60 | `adv_extract` | Fedsync | Internal | LLM (Haiku T1) | Monthly | `fed_data.adv_advisor_answers` | Implemented | `internal/fedsync/dataset/adv_extract.go` | — |
+| 61 | `xbrl_facts` | Fedsync | SEC | EDGAR XBRL JSON | Daily | `fed_data.xbrl_facts` | Implemented | `internal/fedsync/dataset/xbrl_facts.go` | — |
+| 62 | `fred` | Fedsync | FRED | FRED API | Monthly | `fed_data.fred_series` | Implemented | `internal/fedsync/dataset/fred.go` | — |
+| 63 | `abs` | Fedsync | Census | Census API | Annual | `fed_data.abs_data` | Implemented | `internal/fedsync/dataset/abs.go` | — |
+| 64 | `cps_laus` | Fedsync | BLS | BLS API | Monthly | `fed_data.laus_data` | Implemented | `internal/fedsync/dataset/cps_laus.go` | — |
+| 65 | `m3` | Fedsync | Census | Census API | Monthly | `fed_data.m3_data` | Implemented | `internal/fedsync/dataset/m3.go` | — |
+| 66 | `form_5500` | Fedsync | DOL | DOL EFAST2 FOIA bulk CSV/ZIP | Annual | `fed_data.form_5500` + 3 | Implemented | `internal/fedsync/dataset/form_5500.go` | — |
+| 67 | `eo_bmf` | Fedsync | IRS | IRS SOI Exempt Org BMF CSV | Monthly | `fed_data.eo_bmf` | Implemented | `internal/fedsync/dataset/eo_bmf.go` | SELDEV-737 |
+| 68 | `fdic_bankfind` | Fedsync | FDIC | FDIC BankFind REST API | Weekly | `fed_data.fdic_institutions` | Implemented | `internal/fedsync/dataset/fdic_bankfind.go` | SELDEV-736 |
 
-**Counts:** 9 enrichment + 7 geo (on main) + 4 geo (merged, other branch) + 33 fedsync = **53 implemented/merged**.
+**Counts:** 9 enrichment + 22 geo (on main) + 4 geo (merged, other branch) + 33 fedsync = **68 implemented/merged**.
 Planned scrapers are listed in [Planned Scrapers & Roadmap](#planned-scrapers--roadmap).
 
 ---

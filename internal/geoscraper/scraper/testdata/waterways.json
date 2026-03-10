@@ -1,0 +1,29 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 501,
+        "GNIS_Name": "Colorado River",
+        "FTYPE_DESC": "StreamRiver",
+        "LENGTHKM": 2330.0,
+        "STATE": "CO"
+      },
+      "geometry": {
+        "paths": [[[-98.0, 29.0], [-97.0, 30.0], [-96.0, 31.0]]]
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 502,
+        "GNIS_Name": "Brazos River",
+        "FTYPE_DESC": "StreamRiver",
+        "LENGTHKM": 1860.0,
+        "STATE": "TX"
+      },
+      "geometry": {
+        "paths": [[[-99.0, 32.0], [-97.0, 31.0], [-95.0, 29.0]]]
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

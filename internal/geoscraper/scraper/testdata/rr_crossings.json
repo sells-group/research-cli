@@ -1,0 +1,31 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "Crossing_ID": "726281X",
+        "Crossing_Type": "AT GRADE",
+        "State_Name": "TX",
+        "County_Name": "Travis"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "Crossing_ID": "098452Y",
+        "Crossing_Type": "OVERPASS",
+        "State_Name": "CA",
+        "County_Name": "Los Angeles"
+      },
+      "geometry": {
+        "x": -118.2437,
+        "y": 34.0522
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

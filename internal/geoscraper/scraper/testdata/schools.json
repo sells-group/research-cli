@@ -1,0 +1,33 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "NAME": "Lincoln Elementary",
+        "LEVEL_": "ELEMENTARY",
+        "ENROLLMENT": 450.0,
+        "STATE": "TX",
+        "CITY": "Austin"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "NAME": "Roosevelt High School",
+        "LEVEL_": "HIGH",
+        "ENROLLMENT": 1200.0,
+        "STATE": "CA",
+        "CITY": "Los Angeles"
+      },
+      "geometry": {
+        "x": -118.2437,
+        "y": 34.0522
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

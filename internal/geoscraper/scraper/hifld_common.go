@@ -7,19 +7,32 @@ import (
 	"time"
 
 	"github.com/sells-group/research-cli/internal/fedsync/dataset"
-	"github.com/sells-group/research-cli/internal/geoscraper/arcgis"
 )
 
 // hifldSource is the source identifier for all HIFLD scrapers.
 const hifldSource = "hifld"
 
-// hifldURL returns the base URL, falling back to the default ArcGIS endpoint
-// for the given layer if override is empty. The override is used for testing.
-func hifldURL(override, layer string) string {
+// Per-dataset ArcGIS FeatureServer/MapServer base URLs.
+// The old HIFLD org (Hp6G80Pky0om6HgA) is dead; each dataset is now hosted
+// on a different ArcGIS server.
+const (
+	schoolsBaseURL     = "https://services1.arcgis.com/Ua5sjt3LWTPigjyD/arcgis/rest/services/Public_School_Locations_Current/FeatureServer/0/query"
+	fireEMSBaseURL     = "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/Structures_Medical_Emergency_Response_v1/FeatureServer/2/query"
+	hospitalsBaseURL   = "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/Hospitals_hifld/FeatureServer/0/query"
+	damsBaseURL        = "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/NID_v1/FeatureServer/0/query"
+	cemeteriesBaseURL  = "https://carto.nationalmap.gov/arcgis/rest/services/structures/MapServer/2/query"
+	historicPlacesURL  = "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/nrhp_points_v1/FeatureServer/0/query"
+	rrCrossingsBaseURL = "https://services1.arcgis.com/4yjifSiIG17X0gW4/arcgis/rest/services/FRA_Crossing_Inventory_Form_71_Current/FeatureServer/0/query"
+	airportsBaseURL    = "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/US_Airport/FeatureServer/0/query"
+	bridgesBaseURL     = "https://services.arcgis.com/xOi1kZaI0eWDREZv/arcgis/rest/services/NTAD_National_Bridge_Inventory/FeatureServer/0/query"
+)
+
+// hifldURL returns the override URL if set, otherwise the default.
+func hifldURL(override, defaultURL string) string {
 	if override != "" {
 		return override
 	}
-	return arcgis.FormatURL(layer)
+	return defaultURL
 }
 
 // hifldBatchSize is the number of rows per BulkUpsert batch.
@@ -86,4 +99,9 @@ func hifldProperties(attrs map[string]any, exclude map[string]bool) []byte {
 // hifldShouldRun returns true if a quarterly HIFLD scraper is due.
 func hifldShouldRun(now time.Time, lastSync *time.Time) bool {
 	return dataset.QuarterlyAfterDelay(now, lastSync, 0)
+}
+
+// hifldAnnualShouldRun returns true if an annual HIFLD scraper is due.
+func hifldAnnualShouldRun(now time.Time, lastSync *time.Time) bool {
+	return dataset.AnnualAfter(now, lastSync, time.January)
 }

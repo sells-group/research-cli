@@ -1,0 +1,33 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 601,
+        "OBJECTID_1": 601,
+        "SOURCE_ID": "TX0001",
+        "CWP_NAME": "Austin Southside WWTP",
+        "CWP_STATE": "TX",
+        "CWP_CITY": "Austin"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 602,
+        "OBJECTID_1": 602,
+        "SOURCE_ID": "TX0002",
+        "CWP_NAME": "Houston North WWTP",
+        "CWP_STATE": "TX",
+        "CWP_CITY": "Houston"
+      },
+      "geometry": {
+        "x": -95.3698,
+        "y": 29.7604
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

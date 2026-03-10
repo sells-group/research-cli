@@ -1,0 +1,31 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "NAME": "Central Fire Station",
+        "TYPE": "FIRE",
+        "STATE": "TX",
+        "CITY": "Austin"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "NAME": "Westside EMS",
+        "TYPE": "EMS",
+        "STATE": "CA",
+        "CITY": "Los Angeles"
+      },
+      "geometry": {
+        "x": -118.2437,
+        "y": 34.0522
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

@@ -11,6 +11,15 @@ func RegisterHIFLD(reg *geoscraper.Registry) {
 	reg.Register(&HIFLDSubstations{})
 	reg.Register(&HIFLDTransmissionLines{})
 	reg.Register(&HIFLDPipelines{})
+	reg.Register(&HIFLDSchools{})
+	reg.Register(&HIFLDFireEMS{})
+	reg.Register(&HIFLDHospitals{})
+	reg.Register(&HIFLDDams{})
+	reg.Register(&HIFLDCemeteries{})
+	reg.Register(&HIFLDHistoricPlaces{})
+	reg.Register(&HIFLDRRCrossings{})
+	reg.Register(&HIFLDAirports{})
+	reg.Register(&HIFLDBridges{})
 }
 
 // RegisterFEMA registers all FEMA scrapers.
@@ -21,6 +30,8 @@ func RegisterFEMA(reg *geoscraper.Registry) {
 // RegisterEPA registers all EPA scrapers.
 func RegisterEPA(reg *geoscraper.Registry) {
 	reg.Register(&EPASites{})
+	reg.Register(&EPAWastewater{})
+	reg.Register(&EPABrownfields{})
 }
 
 // RegisterCensus registers all Census ACS scrapers.
@@ -58,6 +69,14 @@ func RegisterTIGER(reg *geoscraper.Registry) {
 	reg.Register(&TIGERRoads{})
 }
 
+// RegisterUSGS registers all USGS/USGS-adjacent scrapers.
+func RegisterUSGS(reg *geoscraper.Registry) {
+	reg.Register(&USGSProtectedAreas{})
+	reg.Register(&USGSOilGasWells{})
+	reg.Register(&USGSWaterways{})
+	reg.Register(&USGSCoalMines{})
+}
+
 // RegisterOSM registers all OpenStreetMap scrapers.
 func RegisterOSM(reg *geoscraper.Registry) {
 	reg.Register(&OSMPOI{})
@@ -72,6 +91,7 @@ func RegisterAll(reg *geoscraper.Registry, cfg *config.Config) {
 	RegisterFCC(reg, cfg)
 	RegisterNWI(reg)
 	RegisterNRCS(reg)
+	RegisterUSGS(reg)
 	RegisterTIGER(reg)
 	RegisterOSM(reg)
 }

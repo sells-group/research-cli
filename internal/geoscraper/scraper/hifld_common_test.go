@@ -67,14 +67,13 @@ func TestHifldShouldRun_NeverSynced(t *testing.T) {
 }
 
 func TestHifldURL_Override(t *testing.T) {
-	got := hifldURL("http://test.local/query", "Power_Plants")
+	got := hifldURL("http://test.local/query", schoolsBaseURL)
 	assert.Equal(t, "http://test.local/query", got)
 }
 
 func TestHifldURL_Default(t *testing.T) {
-	got := hifldURL("", "Power_Plants")
-	assert.Contains(t, got, "Power_Plants/FeatureServer/0/query")
-	assert.Contains(t, got, "services1.arcgis.com")
+	got := hifldURL("", schoolsBaseURL)
+	assert.Equal(t, schoolsBaseURL, got)
 }
 
 func TestHifldProperties_Empty(t *testing.T) {

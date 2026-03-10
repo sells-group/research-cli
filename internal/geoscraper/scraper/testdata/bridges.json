@@ -1,0 +1,33 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 201,
+        "STRUCTURE_NUMBER_008": "4800001",
+        "FACILITY_CARRIED_007": "I-35 NB",
+        "YEAR_BUILT_027": "1975",
+        "DECK_AREA": 150.5,
+        "STATE_CODE_001": "48"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 202,
+        "STRUCTURE_NUMBER_008": "4800002",
+        "FACILITY_CARRIED_007": "US-290 WB",
+        "YEAR_BUILT_027": "1990",
+        "DECK_AREA": 225.0,
+        "STATE_CODE_001": "48"
+      },
+      "geometry": {
+        "x": -95.3698,
+        "y": 29.7604
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}

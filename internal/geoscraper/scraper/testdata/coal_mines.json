@@ -1,0 +1,35 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "FID": 1,
+        "OBJECTID": 701,
+        "MSHA_ID": "4801234",
+        "MINE_NAME": "Black Thunder Mine",
+        "MINE_TYPE": "Surface",
+        "MINE_STATE": "WY",
+        "MINE_COUNT": "Campbell"
+      },
+      "geometry": {
+        "x": -97.7431,
+        "y": 30.2672
+      }
+    },
+    {
+      "attributes": {
+        "FID": 2,
+        "OBJECTID": 702,
+        "MSHA_ID": "4605678",
+        "MINE_NAME": "Consol No. 5",
+        "MINE_TYPE": "Underground",
+        "MINE_STATE": "WV",
+        "MINE_COUNT": "Marion"
+      },
+      "geometry": {
+        "x": -95.3698,
+        "y": 29.7604
+      }
+    }
+  ],
+  "exceededTransferLimit": false
+}
