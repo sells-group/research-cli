@@ -26,7 +26,7 @@ type QueryConfig struct {
 	Where     string   // SQL WHERE clause (default "1=1")
 	OutFields []string // fields to return (default ["*"])
 	PageSize  int      // records per request (default 2000)
-	OutSR     int      // output spatial reference WKID (e.g., 4326 for WGS84); 0 = server default
+	OutSR     int      // output spatial reference WKID (e.g., 4326 for WGS84); 0 = default to 4326
 }
 
 // Feature represents a single ArcGIS feature with attributes and geometry.
@@ -237,9 +237,10 @@ func buildURL(baseURL, where, outFields string, pageSize, offset, outSR int) (st
 	q.Set("f", "json")
 	q.Set("resultRecordCount", strconv.Itoa(pageSize))
 	q.Set("resultOffset", strconv.Itoa(offset))
-	if outSR > 0 {
-		q.Set("outSR", strconv.Itoa(outSR))
+	if outSR <= 0 {
+		outSR = 4326 // default to WGS84 geographic coordinates
 	}
+	q.Set("outSR", strconv.Itoa(outSR))
 	u.RawQuery = q.Encode()
 
 	return u.String(), nil
