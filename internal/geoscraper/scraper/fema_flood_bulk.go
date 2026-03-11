@@ -226,7 +226,7 @@ func newNFHLRow(raw []any) ([]any, bool) {
 	return []any{
 		zoneCode,
 		floodType,
-		wkb, // geom (WKB → PostGIS auto-casts to geometry)
+		wkbToWGS84(wkb),
 		femaSource,
 		sourceID,
 		props,

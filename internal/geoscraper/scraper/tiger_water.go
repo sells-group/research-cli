@@ -227,7 +227,7 @@ func newAreaWaterRow(raw []any) []any {
 		fullname,
 		classifyWater(mtfcc),
 		mtfcc,
-		raw[8], // geom (WKB)
+		wkbToWGS84(raw[8]), // geom (WKB, SRID 4269→4326)
 		lat, lon,
 		tigerGeoSource,
 		sourceID,
@@ -252,8 +252,8 @@ func newLinearWaterRow(raw []any) []any {
 		fullname,
 		classifyWater(mtfcc),
 		mtfcc,
-		raw[4],   // geom (WKB)
-		0.0, 0.0, // linear water has no centroid in shapefile
+		wkbToWGS84(raw[4]), // geom (WKB, SRID 4269→4326)
+		0.0, 0.0,           // linear water has no centroid in shapefile
 		tigerGeoSource,
 		sourceID,
 		props,

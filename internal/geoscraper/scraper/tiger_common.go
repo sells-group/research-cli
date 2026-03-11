@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -459,6 +460,34 @@ func newRoadRow(raw []any) []any {
 		fmt.Sprintf("tiger/%s", linearID),
 		props,
 	}
+}
+
+// rewriteEWKBSRID replaces the SRID in an EWKB byte slice.
+// TIGER shapefiles encode WKB with SRID 4269 (NAD83), but geo.* tables
+// use SRID 4326 (WGS84). This rewrites the embedded SRID.
+// EWKB NDR: byte[0]=0x01, bytes[1:5]=type with SRID flag (0x20), bytes[5:9]=SRID (uint32 LE).
+func rewriteEWKBSRID(data []byte, newSRID int) []byte {
+	if len(data) < 9 {
+		return data
+	}
+	// Check NDR byte order and SRID flag.
+	if data[0] != 0x01 || data[3]&0x20 == 0 {
+		return data
+	}
+	out := make([]byte, len(data))
+	copy(out, data)
+	binary.LittleEndian.PutUint32(out[5:9], uint32(newSRID)) // #nosec G115
+	return out
+}
+
+// wkbToWGS84 extracts WKB bytes from a raw row value and rewrites SRID to 4326.
+// Returns nil if the value is not a []byte.
+func wkbToWGS84(v any) []byte {
+	b, ok := v.([]byte)
+	if !ok || b == nil {
+		return nil
+	}
+	return rewriteEWKBSRID(b, 4326)
 }
 
 // --- Shared helpers ---

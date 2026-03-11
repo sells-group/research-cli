@@ -164,13 +164,13 @@ func newCousubRow(raw []any) []any {
 	)
 	return []any{
 		geoid,
-		strVal(raw, 0), // state_fips
-		strVal(raw, 1), // county_fips
-		strVal(raw, 2), // cousub_fips
-		strVal(raw, 5), // name
-		strVal(raw, 7), // lsad
-		strVal(raw, 8), // class_fips
-		raw[15],        // geom (WKB)
+		strVal(raw, 0),      // state_fips
+		strVal(raw, 1),      // county_fips
+		strVal(raw, 2),      // cousub_fips
+		strVal(raw, 5),      // name
+		strVal(raw, 7),      // lsad
+		strVal(raw, 8),      // class_fips
+		wkbToWGS84(raw[15]), // geom (WKB, SRID 4269→4326)
 		lat, lon,
 		tigerGeoSource,
 		fmt.Sprintf("tiger/%s", geoid),

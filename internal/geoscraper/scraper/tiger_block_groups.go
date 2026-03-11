@@ -163,11 +163,11 @@ func newBlockGroupRow(raw []any) []any {
 	)
 	return []any{
 		geoid,
-		strVal(raw, 0), // state_fips
-		strVal(raw, 1), // county_fips
-		strVal(raw, 2), // tract_ce
-		strVal(raw, 3), // blkgrp_ce
-		raw[12],        // geom (WKB)
+		strVal(raw, 0),      // state_fips
+		strVal(raw, 1),      // county_fips
+		strVal(raw, 2),      // tract_ce
+		strVal(raw, 3),      // blkgrp_ce
+		wkbToWGS84(raw[12]), // geom (WKB, SRID 4269→4326)
 		lat, lon,
 		tigerGeoSource,
 		fmt.Sprintf("tiger/%s", geoid),
