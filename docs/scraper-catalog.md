@@ -55,7 +55,12 @@
 | 42 | `bts_amtrak_stations` | Geo | BTS NTAD | ArcGIS FeatureServer | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/bts_amtrak_stations.go` | — |
 | 43 | `bts_freight_rail` | Geo | BTS NTAD | ArcGIS FeatureServer | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/bts_freight_rail.go` | — |
 | 44 | `fhwa_hpms` | Geo | FHWA | ArcGIS FeatureServer | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/fhwa_hpms.go` | — |
-| 45 | `cbp` | Fedsync | Census | Census CBP ZIP | Annual | `fed_data.cbp_data` | Implemented | `internal/fedsync/dataset/cbp.go` | — |
+| 45 | `tiger_block_groups` | Geo | TIGER | Census TIGER/Line shapefile | Annual | `geo.block_groups` | Implemented | `internal/geoscraper/scraper/tiger_block_groups.go` | SELDEV-723 |
+| 46 | `tiger_cousub` | Geo | TIGER | Census TIGER/Line shapefile | Annual | `geo.county_subdivisions` | Implemented | `internal/geoscraper/scraper/tiger_cousub.go` | SELDEV-723 |
+| 47 | `tiger_water` | Geo | TIGER | Census TIGER/Line shapefile | Annual | `geo.water_features` | Implemented | `internal/geoscraper/scraper/tiger_water.go` | SELDEV-723 |
+| 48 | `fema_flood_bulk` | Geo | FEMA | FEMA NFHL county shapefiles | Annual | `geo.flood_zones` | Implemented | `internal/geoscraper/scraper/fema_flood_bulk.go` | SELDEV-722 |
+| 49 | `eia_plants` | Geo | EIA | EIA-860 annual XLSX | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/eia_plants.go` | SELDEV-724 |
+| 50 | `cbp` | Fedsync | Census | Census CBP ZIP | Annual | `fed_data.cbp_data` | Implemented | `internal/fedsync/dataset/cbp.go` | — |
 | 37 | `susb` | Fedsync | Census | Census SUSB TXT | Annual | `fed_data.susb_data` | Implemented | `internal/fedsync/dataset/susb.go` | — |
 | 38 | `qcew` | Fedsync | BLS | BLS QCEW ZIP | Quarterly | `fed_data.qcew_data` | Implemented | `internal/fedsync/dataset/qcew.go` | — |
 | 39 | `oews` | Fedsync | BLS | BLS OEWS ZIP | Annual | `fed_data.oews_data` | Implemented | `internal/fedsync/dataset/oews.go` | — |
