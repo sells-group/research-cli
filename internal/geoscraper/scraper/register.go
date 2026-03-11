@@ -25,6 +25,7 @@ func RegisterHIFLD(reg *geoscraper.Registry) {
 // RegisterFEMA registers all FEMA scrapers.
 func RegisterFEMA(reg *geoscraper.Registry) {
 	reg.Register(&FEMAFloodZones{})
+	reg.Register(&FEMAFloodBulk{})
 }
 
 // RegisterEPA registers all EPA scrapers.
@@ -67,6 +68,9 @@ func RegisterNRCS(reg *geoscraper.Registry) {
 func RegisterTIGER(reg *geoscraper.Registry) {
 	reg.Register(&TIGERBoundaries{})
 	reg.Register(&TIGERRoads{})
+	reg.Register(&TIGERBlockGroups{})
+	reg.Register(&TIGERCousub{})
+	reg.Register(&TIGERWater{})
 }
 
 // RegisterUSGS registers all USGS/USGS-adjacent scrapers.
@@ -103,6 +107,11 @@ func RegisterNTAD(reg *geoscraper.Registry) {
 	reg.Register(&FHWAHPMs{})
 }
 
+// RegisterEIA registers all EIA scrapers.
+func RegisterEIA(reg *geoscraper.Registry) {
+	reg.Register(&EIAPlants{})
+}
+
 // RegisterAll registers all geo scraper implementations.
 func RegisterAll(reg *geoscraper.Registry, cfg *config.Config) {
 	RegisterHIFLD(reg)
@@ -117,4 +126,5 @@ func RegisterAll(reg *geoscraper.Registry, cfg *config.Config) {
 	RegisterOSM(reg)
 	RegisterBulkCSV(reg, cfg)
 	RegisterNTAD(reg)
+	RegisterEIA(reg)
 }
