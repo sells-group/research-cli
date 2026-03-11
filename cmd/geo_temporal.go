@@ -12,8 +12,65 @@ import (
 
 	temporalpkg "github.com/sells-group/research-cli/internal/temporal"
 	temporalgeo "github.com/sells-group/research-cli/internal/temporal/geo"
+	temporalgeoscraper "github.com/sells-group/research-cli/internal/temporal/geoscraper"
 	temporaltigerload "github.com/sells-group/research-cli/internal/temporal/tigerload"
 )
+
+// runGeoScrapeViaTemporal starts a ScrapeWorkflow via Temporal with the given flags.
+func runGeoScrapeViaTemporal(ctx context.Context, cmd *cobra.Command) error {
+	c, err := temporalpkg.NewClient(cfg.Temporal)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	categoryStr, _ := cmd.Flags().GetString("category")
+	sourcesStr, _ := cmd.Flags().GetString("sources")
+	statesStr, _ := cmd.Flags().GetString("states")
+	force, _ := cmd.Flags().GetBool("force")
+
+	params := temporalgeoscraper.ScrapeParams{
+		Force: force,
+	}
+	if categoryStr != "" {
+		params.Category = &categoryStr
+	}
+	if sourcesStr != "" {
+		params.Sources = splitAndTrim(sourcesStr)
+	}
+	if statesStr != "" {
+		params.States = splitAndTrim(statesStr)
+	}
+
+	workflowID := fmt.Sprintf("geo-scrape-%d", time.Now().UnixNano())
+	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: temporalpkg.GeoTaskQueue,
+	}, temporalgeoscraper.ScrapeWorkflow, params)
+	if err != nil {
+		return eris.Wrap(err, "start geo scrape workflow")
+	}
+
+	zap.L().Info("geo scrape workflow started",
+		zap.String("workflow_id", run.GetID()),
+		zap.String("run_id", run.GetRunID()),
+	)
+
+	var result temporalgeoscraper.ScrapeResult
+	if err := run.Get(ctx, &result); err != nil {
+		return eris.Wrap(err, "geo scrape workflow failed")
+	}
+
+	fmt.Printf("Geo scrape complete: %d synced, %d failed\n", result.Synced, result.Failed)
+	for _, o := range result.Outcomes {
+		if o.Status == "complete" {
+			fmt.Printf("  %s: %d rows\n", o.Scraper, o.RowsSynced)
+		} else {
+			fmt.Printf("  %s: FAILED (%s)\n", o.Scraper, o.Error)
+		}
+	}
+	return nil
+}
 
 // runGeoBackfillViaTemporal starts a GeoBackfillWorkflow for the given source.
 func runGeoBackfillViaTemporal(ctx context.Context, cmd *cobra.Command, source string) error {

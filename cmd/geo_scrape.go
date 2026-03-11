@@ -32,6 +32,11 @@ Use --force to ignore ShouldRun() scheduling logic.`,
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
+		useTemporal, _ := cmd.Flags().GetBool("temporal")
+		if useTemporal {
+			return runGeoScrapeViaTemporal(ctx, cmd)
+		}
+
 		if err := cfg.Validate("fedsync"); err != nil {
 			return err
 		}
@@ -100,6 +105,7 @@ func init() {
 	geoScrapeCmd.Flags().String("sources", "", "comma-separated scraper names (e.g., hifld,fema_flood)")
 	geoScrapeCmd.Flags().String("states", "", "comma-separated state FIPS codes (e.g., 48,12,06)")
 	geoScrapeCmd.Flags().Bool("force", false, "ignore ShouldRun() scheduling logic")
+	geoScrapeCmd.Flags().Bool("temporal", false, "run via Temporal workflow instead of locally")
 	geoCmd.AddCommand(geoScrapeCmd)
 }
 
