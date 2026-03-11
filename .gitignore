@@ -41,6 +41,7 @@ comparison-report*.md
 
 # CSV inputs (may contain PII)
 *.csv
+!**/testdata/*.csv
 
 # Fedsync temp downloads
 /tmp/fedsync/
