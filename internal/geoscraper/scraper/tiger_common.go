@@ -471,7 +471,9 @@ func rewriteEWKBSRID(data []byte, newSRID int) []byte {
 		return data
 	}
 	// Check NDR byte order and SRID flag.
-	if data[0] != 0x01 || data[3]&0x20 == 0 {
+	// EWKB NDR type is uint32 LE at bytes[1:5]; the SRID flag (0x20000000)
+	// lands in byte[4] when stored in little-endian order.
+	if data[0] != 0x01 || data[4]&0x20 == 0 {
 		return data
 	}
 	out := make([]byte, len(data))
