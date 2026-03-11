@@ -1,0 +1,3 @@
+id,Station Name,EV Connector Types,EV Level2 EVSE Num,EV DC Fast Count,Latitude,Longitude,State,City
+10001,Tesla Supercharger Austin,J1772 CCS,0,12,30.2672,-97.7431,TX,Austin
+10002,ChargePoint Downtown,J1772,8,0,29.7604,-95.3698,TX,Houston

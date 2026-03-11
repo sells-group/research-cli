@@ -82,6 +82,27 @@ func RegisterOSM(reg *geoscraper.Registry) {
 	reg.Register(&OSMPOI{})
 }
 
+// RegisterBulkCSV registers CSV-based scrapers that replace ArcGIS equivalents.
+func RegisterBulkCSV(reg *geoscraper.Registry, cfg *config.Config) {
+	var nrelKey string
+	if cfg != nil {
+		nrelKey = cfg.Fedsync.NRELKey
+	}
+	reg.Register(&FHWABridges{})
+	reg.Register(&FAAAirports{})
+	reg.Register(&USACEDams{})
+	reg.Register(&FRARRCrossings{})
+	reg.Register(&AFDCEVCharging{apiKey: nrelKey})
+}
+
+// RegisterNTAD registers all NTAD/DOT transportation scrapers.
+func RegisterNTAD(reg *geoscraper.Registry) {
+	reg.Register(&NTADPorts{})
+	reg.Register(&BTSAmtrakStations{})
+	reg.Register(&BTSFreightRail{})
+	reg.Register(&FHWAHPMs{})
+}
+
 // RegisterAll registers all geo scraper implementations.
 func RegisterAll(reg *geoscraper.Registry, cfg *config.Config) {
 	RegisterHIFLD(reg)
@@ -94,4 +115,6 @@ func RegisterAll(reg *geoscraper.Registry, cfg *config.Config) {
 	RegisterUSGS(reg)
 	RegisterTIGER(reg)
 	RegisterOSM(reg)
+	RegisterBulkCSV(reg, cfg)
+	RegisterNTAD(reg)
 }

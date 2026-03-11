@@ -1,0 +1,13 @@
+{
+  "features": [
+    {
+      "attributes": {"OBJECTID": 1, "fid": 1, "FRAARCID": 1234, "STATEAB": "TX", "PASSNGR": "N", "TRACKS": 2, "MILES": 125.3, "Shape__Length": 0.5},
+      "geometry": {"paths": [[[-96.7970, 32.7767], [-96.8000, 32.7800]]]}
+    },
+    {
+      "attributes": {"OBJECTID": 2, "fid": 2, "FRAARCID": 5678, "STATEAB": "CA", "PASSNGR": "Y", "TRACKS": 1, "MILES": 89.7, "Shape__Length": 0.3},
+      "geometry": {"paths": [[[-118.2437, 34.0522], [-118.2500, 34.0600]]]}
+    }
+  ],
+  "exceededTransferLimit": false
+}

@@ -169,6 +169,7 @@ type FedsyncConfig struct {
 	OCR            OCRConfig `yaml:"ocr" mapstructure:"ocr"`
 	DoclingURL     string    `yaml:"docling_url" mapstructure:"docling_url"`
 	DoclingAPIKey  string    `yaml:"docling_api_key" mapstructure:"docling_api_key"`
+	NRELKey        string    `yaml:"nrel_api_key" mapstructure:"nrel_api_key"`
 }
 
 // OCRConfig configures PDF text extraction.
@@ -524,6 +525,7 @@ func Load() (*Config, error) {
 	v.SetDefault("fedsync.ocr.provider", "local")
 	v.SetDefault("fedsync.ocr.pdftotext_path", "pdftotext")
 	v.SetDefault("fedsync.docling_url", "http://localhost:5001")
+	v.SetDefault("fedsync.nrel_api_key", "")
 	v.SetDefault("discovery.google_places_rate_limit", 10.0)
 	v.SetDefault("discovery.max_candidates_per_run", 10000)
 	v.SetDefault("discovery.ppp_min_approval", 150000.0)

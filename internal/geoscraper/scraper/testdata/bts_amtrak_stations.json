@@ -1,0 +1,13 @@
+{
+  "features": [
+    {
+      "attributes": {"OBJECTID": 1, "Code": "NYP", "StationName": "New York Penn Station", "StnType": "Station", "State": "NY", "City": "New York", "lat": 40.7505, "lon": -73.9935},
+      "geometry": {"x": -73.9935, "y": 40.7505}
+    },
+    {
+      "attributes": {"OBJECTID": 2, "Code": "WAS", "StationName": "Washington Union Station", "StnType": "Station", "State": "DC", "City": "Washington", "lat": 38.8971, "lon": -77.0065},
+      "geometry": {"x": -77.0065, "y": 38.8971}
+    }
+  ],
+  "exceededTransferLimit": false
+}

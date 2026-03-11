@@ -1,0 +1,13 @@
+{
+  "features": [
+    {
+      "attributes": {"OBJECTID": 1, "state_code": 48, "route_id": "IH0035", "begin_poin": 0.0, "f_system": 1, "aadt": 150000, "through_la": 6, "Shape__Length": 1.2},
+      "geometry": {"paths": [[[-97.7431, 30.2672], [-97.7500, 30.2700]]]}
+    },
+    {
+      "attributes": {"OBJECTID": 2, "state_code": 6, "route_id": "US0101", "begin_poin": 10.5, "f_system": 2, "aadt": 45000, "through_la": 4, "Shape__Length": 0.8},
+      "geometry": {"paths": [[[-122.4194, 37.7749], [-122.4200, 37.7800]]]}
+    }
+  ],
+  "exceededTransferLimit": false
+}

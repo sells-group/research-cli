@@ -34,19 +34,28 @@
 | 21 | `hifld_schools` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_schools.go` | SELDEV-695 |
 | 22 | `hifld_fire_ems` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_fire_ems.go` | SELDEV-695 |
 | 23 | `hifld_hospitals` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_hospitals.go` | SELDEV-695 |
-| 24 | `hifld_dams` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_dams.go` | SELDEV-695 |
+| 24 | `hifld_dams` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Deprecated (use `usace_dams`) | `internal/geoscraper/scraper/hifld_dams.go` | SELDEV-695 |
 | 25 | `hifld_cemeteries` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_cemeteries.go` | SELDEV-695 |
 | 26 | `hifld_historic_places` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_historic_places.go` | SELDEV-695 |
-| 27 | `hifld_rr_crossings` | Geo | HIFLD | HIFLD ArcGIS | Quarterly | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_rr_crossings.go` | SELDEV-695 |
-| 28 | `hifld_airports` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_airports.go` | SELDEV-696 |
-| 29 | `hifld_bridges` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/hifld_bridges.go` | SELDEV-696 |
+| 27 | `hifld_rr_crossings` | Geo | HIFLD | HIFLD ArcGIS | Quarterly | `geo.infrastructure` | Deprecated (use `fra_rr_crossings`) | `internal/geoscraper/scraper/hifld_rr_crossings.go` | SELDEV-695 |
+| 28 | `hifld_airports` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Deprecated (use `faa_airports`) | `internal/geoscraper/scraper/hifld_airports.go` | SELDEV-696 |
+| 29 | `hifld_bridges` | Geo | HIFLD | HIFLD ArcGIS | Annual | `geo.infrastructure` | Deprecated (use `fhwa_bridges`) | `internal/geoscraper/scraper/hifld_bridges.go` | SELDEV-696 |
 | 30 | `usgs_protected_areas` | Geo | USGS | PAD-US ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/usgs_protected_areas.go` | SELDEV-696 |
 | 31 | `usgs_oil_gas_wells` | Geo | USGS | Esri Living Atlas ArcGIS | Quarterly | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/usgs_oil_gas_wells.go` | SELDEV-696 |
 | 32 | `usgs_waterways` | Geo | USGS | USGS NHD ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/usgs_waterways.go` | SELDEV-696 |
 | 33 | `epa_wastewater` | Geo | EPA | EPA FRS CWA ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/epa_wastewater.go` | SELDEV-696 |
 | 34 | `usgs_coal_mines` | Geo | USGS | USGS Coal Mines ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/usgs_coal_mines.go` | SELDEV-696 |
 | 35 | `epa_brownfields` | Geo | EPA | EPA Brownfields ArcGIS | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/epa_brownfields.go` | SELDEV-696 |
-| 36 | `cbp` | Fedsync | Census | Census CBP ZIP | Annual | `fed_data.cbp_data` | Implemented | `internal/fedsync/dataset/cbp.go` | — |
+| 36 | `fhwa_bridges` | Geo | FHWA | FHWA NBI CSV/ZIP | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/fhwa_bridges.go` | SELDEV-725 |
+| 37 | `faa_airports` | Geo | FAA | FAA NASR CSV/ZIP | Monthly | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/faa_airports.go` | SELDEV-725 |
+| 38 | `usace_dams` | Geo | USACE | USACE NID CSV | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/usace_dams.go` | SELDEV-725 |
+| 39 | `fra_rr_crossings` | Geo | FRA | FRA Crossing Inventory CSV/ZIP | Quarterly | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/fra_rr_crossings.go` | SELDEV-725 |
+| 40 | `afdc_ev_charging` | Geo | AFDC | DOE AFDC CSV API | Quarterly | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/afdc_ev_charging.go` | SELDEV-725 |
+| 41 | `ntad_ports` | Geo | BTS NTAD | ArcGIS FeatureServer | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/ntad_ports.go` | — |
+| 42 | `bts_amtrak_stations` | Geo | BTS NTAD | ArcGIS FeatureServer | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/bts_amtrak_stations.go` | — |
+| 43 | `bts_freight_rail` | Geo | BTS NTAD | ArcGIS FeatureServer | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/bts_freight_rail.go` | — |
+| 44 | `fhwa_hpms` | Geo | FHWA | ArcGIS FeatureServer | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/fhwa_hpms.go` | — |
+| 45 | `cbp` | Fedsync | Census | Census CBP ZIP | Annual | `fed_data.cbp_data` | Implemented | `internal/fedsync/dataset/cbp.go` | — |
 | 37 | `susb` | Fedsync | Census | Census SUSB TXT | Annual | `fed_data.susb_data` | Implemented | `internal/fedsync/dataset/susb.go` | — |
 | 38 | `qcew` | Fedsync | BLS | BLS QCEW ZIP | Quarterly | `fed_data.qcew_data` | Implemented | `internal/fedsync/dataset/qcew.go` | — |
 | 39 | `oews` | Fedsync | BLS | BLS OEWS ZIP | Annual | `fed_data.oews_data` | Implemented | `internal/fedsync/dataset/oews.go` | — |
@@ -80,7 +89,7 @@
 | 67 | `eo_bmf` | Fedsync | IRS | IRS SOI Exempt Org BMF CSV | Monthly | `fed_data.eo_bmf` | Implemented | `internal/fedsync/dataset/eo_bmf.go` | SELDEV-737 |
 | 68 | `fdic_bankfind` | Fedsync | FDIC | FDIC BankFind REST API | Weekly | `fed_data.fdic_institutions` | Implemented | `internal/fedsync/dataset/fdic_bankfind.go` | SELDEV-736 |
 
-**Counts:** 9 enrichment + 22 geo (on main) + 4 geo (merged, other branch) + 33 fedsync = **68 implemented/merged**.
+**Counts:** 9 enrichment + 27 geo (on main) + 4 geo (merged, other branch) + 33 fedsync = **73 implemented/merged** (4 HIFLD ArcGIS scrapers deprecated in favor of CSV replacements).
 Planned scrapers are listed in [Planned Scrapers & Roadmap](#planned-scrapers--roadmap).
 
 ---

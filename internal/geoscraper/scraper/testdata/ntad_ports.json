@@ -1,0 +1,13 @@
+{
+  "features": [
+    {
+      "attributes": {"OBJECTID": 1, "port_name": "Port of Houston", "total": 285000000, "latitude": 29.7604, "longitude": -95.3698, "domestic": 100000000, "foreign_": 185000000},
+      "geometry": {"x": -95.3698, "y": 29.7604}
+    },
+    {
+      "attributes": {"OBJECTID": 2, "port_name": "Port of Long Beach", "total": 82000000, "latitude": 33.7537, "longitude": -118.1952, "domestic": 30000000, "foreign_": 52000000},
+      "geometry": {"x": -118.1952, "y": 33.7537}
+    }
+  ],
+  "exceededTransferLimit": false
+}
