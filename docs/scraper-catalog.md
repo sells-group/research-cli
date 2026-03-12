@@ -93,8 +93,14 @@
 | 66 | `form_5500` | Fedsync | DOL | DOL EFAST2 FOIA bulk CSV/ZIP | Annual | `fed_data.form_5500` + 3 | Implemented | `internal/fedsync/dataset/form_5500.go` | — |
 | 67 | `eo_bmf` | Fedsync | IRS | IRS SOI Exempt Org BMF CSV | Monthly | `fed_data.eo_bmf` | Implemented | `internal/fedsync/dataset/eo_bmf.go` | SELDEV-737 |
 | 68 | `fdic_bankfind` | Fedsync | FDIC | FDIC BankFind REST API | Weekly | `fed_data.fdic_institutions` | Implemented | `internal/fedsync/dataset/fdic_bankfind.go` | SELDEV-736 |
+| 69 | `cdc_svi` | Geo | CDC | CDC/ATSDR SVI CSV | Annual | `geo.svi` | Implemented | `internal/geoscraper/scraper/cdc_svi.go` | SELDEV-727 |
+| 70 | `fdic_branches` | Geo | FDIC | FDIC SOD CSV | Annual | `geo.infrastructure` | Implemented | `internal/geoscraper/scraper/fdic_branches.go` | SELDEV-728 |
+| 71 | `bea_regional` | Fedsync | BEA | BEA regional CSV/ZIP | Annual | `fed_data.bea_regional` | Implemented | `internal/fedsync/dataset/bea_regional.go` | SELDEV-729 |
+| 72 | `irs_soi_migration` | Fedsync | IRS | IRS SOI migration CSV | Annual | `fed_data.irs_soi_migration` | Implemented | `internal/fedsync/dataset/irs_soi_migration.go` | SELDEV-730 |
+| 73 | `building_permits` | Fedsync | Census | Census BPS county CSV | Annual | `fed_data.building_permits` | Implemented | `internal/fedsync/dataset/building_permits.go` | SELDEV-732 |
+| 74 | `lehd_lodes` | Fedsync | Census | Census LEHD/LODES gzipped CSV | Annual | `fed_data.lehd_lodes` | Implemented | `internal/fedsync/dataset/lehd_lodes.go` | SELDEV-733 |
 
-**Counts:** 9 enrichment + 27 geo (on main) + 4 geo (merged, other branch) + 33 fedsync = **73 implemented/merged** (4 HIFLD ArcGIS scrapers deprecated in favor of CSV replacements).
+**Counts:** 9 enrichment + 29 geo (on main) + 4 geo (merged, other branch) + 37 fedsync = **79 implemented/merged** (4 HIFLD ArcGIS scrapers deprecated in favor of CSV replacements).
 Planned scrapers are listed in [Planned Scrapers & Roadmap](#planned-scrapers--roadmap).
 
 ---

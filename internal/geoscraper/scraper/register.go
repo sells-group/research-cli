@@ -112,6 +112,16 @@ func RegisterEIA(reg *geoscraper.Registry) {
 	reg.Register(&EIAPlants{})
 }
 
+// RegisterCDC registers all CDC scrapers.
+func RegisterCDC(reg *geoscraper.Registry) {
+	reg.Register(&CDCSvi{})
+}
+
+// RegisterFDICGeo registers FDIC geo scrapers.
+func RegisterFDICGeo(reg *geoscraper.Registry) {
+	reg.Register(&FDICBranches{})
+}
+
 // RegisterAll registers all geo scraper implementations.
 func RegisterAll(reg *geoscraper.Registry, cfg *config.Config) {
 	RegisterHIFLD(reg)
@@ -127,4 +137,6 @@ func RegisterAll(reg *geoscraper.Registry, cfg *config.Config) {
 	RegisterBulkCSV(reg, cfg)
 	RegisterNTAD(reg)
 	RegisterEIA(reg)
+	RegisterCDC(reg)
+	RegisterFDICGeo(reg)
 }
