@@ -1,0 +1,5 @@
+GeoFips,GeoName,LineCode,Description,Unit,2021,2022,2023
+"48000","Texas",1,"All industry total","Thousands of dollars",2000000,2100000,2200000
+"48453","Travis, TX",1,"All industry total","Thousands of dollars",100000,110000,120000
+"48113","Dallas, TX",1,"All industry total","Thousands of dollars",200000,210000,(NA)
+"US0","United States",1,"All industry total","Thousands of dollars",25000000,26000000,27000000

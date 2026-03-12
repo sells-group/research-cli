@@ -1,0 +1,5 @@
+y1_statefips,y1_countyfips,y2_statefips,y2_countyfips,y2_state,y2_countyname,Return_Num,Exmpt_Num,Adjusted_Gross_Income
+48,113,48,453,TX,Travis County,500,1200,45000
+06,037,48,453,TX,Travis County,200,450,22000
+48,000,48,453,TX,Travis County,1000,2500,90000
+96,000,48,453,TX,Travis County,50,100,5000
