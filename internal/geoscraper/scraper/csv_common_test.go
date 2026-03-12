@@ -49,3 +49,22 @@ func TestCsvProperties(t *testing.T) {
 	props3 := csvProperties(row3, header, exclude)
 	assert.Equal(t, "{}", string(props3))
 }
+
+func TestCsvProperties_AllExcluded(t *testing.T) {
+	header := []string{"Name", "Lat"}
+	row := []string{"Foo", "30.0"}
+	exclude := map[string]bool{"Name": true, "Lat": true}
+
+	props := csvProperties(row, header, exclude)
+	assert.Equal(t, "{}", string(props))
+}
+
+func TestCsvProperties_NilExclude(t *testing.T) {
+	header := []string{"Name", "Lat", "Extra"}
+	row := []string{"Foo", "30.0", "bar"}
+
+	props := csvProperties(row, header, nil)
+	assert.Contains(t, string(props), `"Name":"Foo"`)
+	assert.Contains(t, string(props), `"Lat":"30.0"`)
+	assert.Contains(t, string(props), `"Extra":"bar"`)
+}

@@ -129,7 +129,10 @@ func TestFCCTowers_DownloadError(t *testing.T) {
 
 	s := &FCCTowers{downloadURL: "http://127.0.0.1:1/bad"}
 	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
-	_, err = s.Sync(context.Background(), mock, f, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = s.Sync(ctx, mock, f, t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fcc_towers: download")
 }
@@ -209,6 +212,17 @@ func TestFCCTowers_NoShpInZip(t *testing.T) {
 	_, err = s.Sync(context.Background(), mock, f, t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no .shp file")
+}
+
+func TestFCCTowers_NewTowerRow_NonPointGeom(t *testing.T) {
+	// Create a LineString WKB — newTowerRow should reject non-Point geometries.
+	line := geom.NewLineStringFlat(geom.XY, []float64{-97.74, 30.27, -97.75, 30.28}).SetSRID(4326)
+	wkb, err := ewkb.Marshal(line, ewkb.NDR)
+	require.NoError(t, err)
+
+	shpRow := []any{"12345", "AT&T", "LOC001", "150.5", wkb}
+	_, ok := newTowerRow(shpRow)
+	assert.False(t, ok)
 }
 
 // ---------- Helpers ----------

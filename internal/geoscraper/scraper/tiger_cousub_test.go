@@ -158,6 +158,32 @@ func TestTIGERCousub_ContextCancelled(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestTIGERCousub_ParseError(t *testing.T) {
+	// Serve a valid ZIP containing a corrupt .shp file.
+	zipPath := createCorruptShapefileZIP(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		data, err := os.ReadFile(zipPath)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	// Parse error is non-fatal for per-state scrapers — state is skipped, 0 rows.
+	s := &TIGERCousub{downloadBaseURL: srv.URL, year: 2024, stateFIPS: []string{"48"}}
+	result, err := s.Sync(context.Background(), mock, nil, t.TempDir())
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.RowsSynced)
+}
+
 func expectCousubUpsert(mock pgxmock.PgxPoolIface, rows int64) {
 	mock.ExpectBegin()
 	mock.ExpectExec("CREATE TEMP TABLE").WillReturnResult(pgxmock.NewResult("CREATE", 0))

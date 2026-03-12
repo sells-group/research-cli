@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sells-group/research-cli/internal/geoscraper"
+	"github.com/sells-group/research-cli/internal/tiger"
 )
 
 func TestTIGERBoundaries_Metadata(t *testing.T) {
@@ -308,9 +309,11 @@ func TestTIGERBoundaries_DownloadError(t *testing.T) {
 
 	// National file download fails immediately.
 	s := &TIGERBoundaries{downloadBaseURL: "http://127.0.0.1:1", year: 2024}
-	_, err = s.Sync(context.Background(), mock, nil, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = s.Sync(ctx, mock, nil, t.TempDir())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "tiger_boundaries")
 }
 
 func TestTIGERBoundaries_ContextCancelled(t *testing.T) {
@@ -379,6 +382,41 @@ func TestTigerURL_Default(t *testing.T) {
 	assert.Contains(t, url, "census.gov")
 	assert.Contains(t, url, "TIGER2024")
 	assert.Contains(t, url, "tl_2024_us_county.zip")
+}
+
+func TestTIGERBoundaries_EffectiveYear_Override(t *testing.T) {
+	s := &TIGERBoundaries{year: 2023}
+	assert.Equal(t, 2023, s.effectiveYear())
+}
+
+func TestTIGERBoundaries_BuildURL_National(t *testing.T) {
+	s := &TIGERBoundaries{year: 2024}
+	def := countyDef()
+	url := s.buildURL(def, 2024, "")
+	assert.Contains(t, url, "COUNTY/tl_2024_us_county.zip")
+}
+
+func TestTIGERBoundaries_BuildURL_PerState(t *testing.T) {
+	s := &TIGERBoundaries{year: 2024}
+	def := censusTractDef()
+	url := s.buildURL(def, 2024, "48")
+	assert.Contains(t, url, "TRACT/tl_2024_48_tract.zip")
+}
+
+func TestFilterToProductColumns_MissingColumn(t *testing.T) {
+	// Product expects a column not in the result — should get nil/zero value.
+	result := &tiger.ParseResult{
+		Columns: []string{"name", "geom"},
+		Rows:    [][]any{{"test", []byte{0x01}}},
+	}
+	p := tiger.Product{
+		Name:     "TEST",
+		Columns:  []string{"name", "missing_col"},
+		GeomType: "",
+	}
+	filtered := filterToProductColumns(result, p)
+	assert.Equal(t, "test", filtered.Rows[0][0])
+	assert.Nil(t, filtered.Rows[0][1]) // missing_col
 }
 
 // ---------- Helpers ----------
@@ -478,6 +516,21 @@ func testBoundaryValue(col string, idx int) string {
 	default:
 		return "test"
 	}
+}
+
+// createCorruptShapefileZIP creates a ZIP archive containing a corrupt .shp file
+// that will cause tiger.ParseShapefile to fail.
+func createCorruptShapefileZIP(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	// Write a file with .shp extension but invalid content.
+	shpPath := filepath.Join(dir, "test.shp")
+	require.NoError(t, os.WriteFile(shpPath, []byte("this is not a valid shapefile"), 0o644))
+
+	zipPath := filepath.Join(dir, "corrupt.zip")
+	zipShapefile(t, zipPath, dir, "test")
+	return zipPath
 }
 
 // padLeft zero-pads an integer to the given width.

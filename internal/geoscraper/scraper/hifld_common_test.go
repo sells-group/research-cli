@@ -3,6 +3,7 @@ package scraper
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -79,4 +80,41 @@ func TestHifldURL_Default(t *testing.T) {
 func TestHifldProperties_Empty(t *testing.T) {
 	data := hifldProperties(map[string]any{}, nil)
 	assert.Equal(t, "{}", string(data))
+}
+
+func TestHifldProperties_NilMap(t *testing.T) {
+	data := hifldProperties(nil, nil)
+	assert.Equal(t, "{}", string(data))
+}
+
+func TestHifldProperties_AllExcluded(t *testing.T) {
+	attrs := map[string]any{
+		"NAME":     "Test",
+		"OBJECTID": 1.0,
+	}
+	exclude := map[string]bool{"NAME": true, "OBJECTID": true}
+	data := hifldProperties(attrs, exclude)
+	assert.Equal(t, "{}", string(data))
+}
+
+func TestHifldProperties_MixedTypes(t *testing.T) {
+	// Verifies that non-nil values of various types are included.
+	attrs := map[string]any{
+		"FLOAT_VAL": 42.5,
+		"INT_VAL":   json.Number("99"),
+		"BOOL_VAL":  true,
+		"NIL_VAL":   nil,
+	}
+	data := hifldProperties(attrs, nil)
+	assert.Contains(t, string(data), `"FLOAT_VAL":42.5`)
+	assert.Contains(t, string(data), `"BOOL_VAL":true`)
+	assert.NotContains(t, string(data), "NIL_VAL")
+}
+
+func TestHifldAnnualShouldRun(t *testing.T) {
+	now := fixedNow()
+	assert.True(t, hifldAnnualShouldRun(now, nil))
+
+	recent := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	assert.False(t, hifldAnnualShouldRun(now, &recent))
 }

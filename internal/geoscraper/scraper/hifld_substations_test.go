@@ -116,7 +116,10 @@ func TestSubstations_QueryError(t *testing.T) {
 
 	s := &HIFLDSubstations{baseURL: "http://127.0.0.1:1/query"}
 	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
-	_, err = s.Sync(context.Background(), mock, f, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = s.Sync(ctx, mock, f, t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "query arcgis")
 }

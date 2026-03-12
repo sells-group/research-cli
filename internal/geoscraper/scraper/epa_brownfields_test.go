@@ -112,6 +112,24 @@ func TestBrownfields_UpsertError(t *testing.T) {
 	assert.Contains(t, err.Error(), "upsert")
 }
 
+func TestEPABrownfields_Sync_EmptyResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"features":[],"exceededTransferLimit":false}`))
+	}))
+	defer srv.Close()
+
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	s := &EPABrownfields{baseURL: srv.URL + "/query"}
+	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
+	result, err := s.Sync(context.Background(), mock, f, t.TempDir())
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.RowsSynced)
+}
+
 func TestBrownfields_QueryError(t *testing.T) {
 	// Point at a nonexistent server to trigger a download error.
 	mock, err := pgxmock.NewPool()
@@ -120,7 +138,10 @@ func TestBrownfields_QueryError(t *testing.T) {
 
 	s := &EPABrownfields{baseURL: "http://127.0.0.1:1/query"}
 	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
-	_, err = s.Sync(context.Background(), mock, f, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = s.Sync(ctx, mock, f, t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "query arcgis")
 }

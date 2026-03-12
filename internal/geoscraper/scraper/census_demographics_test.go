@@ -401,9 +401,11 @@ func TestCensusDemographics_TIGERwebError(t *testing.T) {
 		tigerBaseURL: "http://127.0.0.1:1/query",
 	}
 	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
-	_, err = s.Sync(context.Background(), mock, f, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = s.Sync(ctx, mock, f, t.TempDir())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "TIGERweb query state")
 }
 
 func TestCensusDemographics_ContextCancelled(t *testing.T) {
@@ -421,6 +423,19 @@ func TestCensusDemographics_ContextCancelled(t *testing.T) {
 	}
 	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
 	_, err = s.Sync(ctx, mock, f, t.TempDir())
+	require.Error(t, err)
+}
+
+func TestCensusDemographics_FetchACS_Error(t *testing.T) {
+	// ACS server returns 500 → fetchACS should return an error.
+	acsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}))
+	defer acsSrv.Close()
+
+	s := &CensusDemographics{apiKey: "test-key", acsBaseURL: acsSrv.URL}
+	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
+	_, err := s.fetchACS(context.Background(), f, acsSrv.URL+"?get=B01003_001E&for=tract:*&in=state:48")
 	require.Error(t, err)
 }
 

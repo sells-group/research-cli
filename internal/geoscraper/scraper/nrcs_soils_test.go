@@ -146,7 +146,10 @@ func TestNRCSSoils_DownloadError(t *testing.T) {
 
 	s := &NRCSSoils{downloadURL: "http://127.0.0.1:1/soils.zip"}
 	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
-	_, err = s.Sync(context.Background(), mock, f, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = s.Sync(ctx, mock, f, t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nrcs_soils: download")
 }
@@ -262,6 +265,53 @@ func TestNRCSSoils_NoShpInZip(t *testing.T) {
 	_, err = s.Sync(context.Background(), mock, f, t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "find .shp")
+}
+
+func TestNRCSSoils_MkdirError(t *testing.T) {
+	// Create a file where the extract directory should be, so MkdirAll fails.
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "nrcs_soils")
+	require.NoError(t, os.WriteFile(blocker, []byte("block"), 0o644))
+
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	// Serve a valid zip so download succeeds.
+	shpDir := t.TempDir()
+	createNRCSShapefile(t, shpDir, "gsmsoilmu_a_us", []nrcsTestRecord{
+		{objectID: "1", mukey: "660845", muname: "Oshtemo", drclassdcd: "Well drained", hydricRating: "No"},
+	})
+	zipPath := filepath.Join(shpDir, "gsmsoilmu_a_us.zip")
+	zipShapefile(t, zipPath, shpDir, "gsmsoilmu_a_us")
+	srv := serveFile(t, zipPath)
+
+	s := &NRCSSoils{downloadURL: srv.URL + "/soils.zip"}
+	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
+	_, err = s.Sync(context.Background(), mock, f, dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "extract")
+}
+
+func TestNewSoilRow_NonStringObjectID(t *testing.T) {
+	wkb := []byte{0x01, 0x06, 0x00, 0x00, 0x20, 0xE6, 0x10, 0x00, 0x00}
+	// objectid is an int, not string — should still produce a valid row.
+	shpRow := []any{42, "660845", "Oshtemo sandy loam", "Well drained", "No", wkb}
+	row, ok := newSoilRow(shpRow)
+	require.True(t, ok)
+	// Properties should have empty objectid since it's not a string.
+	assert.NotNil(t, row[7])
+}
+
+func TestNewSoilRow_NonStringFields(t *testing.T) {
+	wkb := []byte{0x01, 0x06, 0x00, 0x00, 0x20, 0xE6, 0x10, 0x00, 0x00}
+	// muname, drclassdcd, hydricRating as non-string → should default to "".
+	shpRow := []any{"1", "660845", 42, nil, 99, wkb}
+	row, ok := newSoilRow(shpRow)
+	require.True(t, ok)
+	assert.Equal(t, "", row[1]) // muname
+	assert.Equal(t, "", row[2]) // drainage_class
+	assert.Equal(t, "", row[3]) // hydric_rating
 }
 
 // ---------- Helpers ----------
