@@ -1,0 +1,6 @@
+Survey,FIPS,FIPS,Region,Division,County,,1-unit,,,2-units,,,3-4 units,,,5+ units,,
+Date,State,County,Code,Code,Name,Bldgs,Units,Value,Bldgs,Units,Value,Bldgs,Units,Value,Bldgs,Units,Value
+
+2024,48,453,3,7,Travis County,1200,1200,300000,25,50,20000,10,30,10000,5,220,20000
+2024,48,113,3,7,Dallas County,1500,1500,400000,50,100,40000,15,50,20000,10,350,40000
+2024,6,37,4,9,Los Angeles County,3000,3000,900000,100,200,100000,30,100,50000,50,1700,150000

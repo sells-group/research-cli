@@ -53,6 +53,9 @@ func NewRegistry(cfg *config.Config) *Registry {
 	r.Register(&FDICBankFind{})
 	r.Register(&NCEN{cfg: cfg})
 	r.Register(&NCUACallReports{})
+	r.Register(&BEARegional{cfg: cfg})
+	r.Register(&IRSSOIMigration{})
+	r.Register(&BuildingPermits{cfg: cfg})
 
 	// Phase 3: On-Demand
 	r.Register(&ADVPart3{cfg: cfg})
@@ -63,6 +66,7 @@ func NewRegistry(cfg *config.Config) *Registry {
 	r.Register(&ABS{cfg: cfg})
 	r.Register(&CPSLAUS{cfg: cfg})
 	r.Register(&M3{cfg: cfg})
+	r.Register(&LEHDLODES{})
 
 	return r
 }
