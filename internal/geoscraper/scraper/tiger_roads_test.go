@@ -95,7 +95,10 @@ func TestTIGERRoads_DownloadError(t *testing.T) {
 	defer mock.Close()
 
 	s := &TIGERRoads{downloadURL: "http://127.0.0.1:1/bad"}
-	_, err = s.Sync(context.Background(), mock, nil, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = s.Sync(ctx, mock, nil, t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "tiger_roads: download")
 }
@@ -150,6 +153,19 @@ func TestTIGERRoads_UpsertError(t *testing.T) {
 	_, err = s.Sync(context.Background(), mock, nil, t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "upsert")
+}
+
+func TestTIGERRoads_ContextCancelled(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	s := &TIGERRoads{downloadURL: "http://127.0.0.1:1/bad"}
+	_, err = s.Sync(ctx, mock, nil, t.TempDir())
+	require.Error(t, err)
 }
 
 // ---------- Helpers ----------

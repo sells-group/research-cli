@@ -112,6 +112,53 @@ func TestWastewater_UpsertError(t *testing.T) {
 	assert.Contains(t, err.Error(), "upsert")
 }
 
+func TestEPAWastewater_Sync_EmptyResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"features":[],"exceededTransferLimit":false}`))
+	}))
+	defer srv.Close()
+
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	s := &EPAWastewater{baseURL: srv.URL + "/query"}
+	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
+	result, err := s.Sync(context.Background(), mock, f, t.TempDir())
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.RowsSynced)
+}
+
+func TestWastewater_MissingSourceID(t *testing.T) {
+	data := []byte(`{
+		"features": [
+			{"attributes": {"OBJECTID": 1, "CWP_NAME": "Good", "SOURCE_ID": "TX0001"}, "geometry": {"x": -95.0, "y": 30.0}},
+			{"attributes": {"OBJECTID": 2, "CWP_NAME": "NoID", "SOURCE_ID": ""}, "geometry": {"x": -96.0, "y": 31.0}}
+		],
+		"exceededTransferLimit": false
+	}`)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	expectBulkUpsert(mock, 1)
+
+	s := &EPAWastewater{baseURL: srv.URL + "/query"}
+	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
+	result, err := s.Sync(context.Background(), mock, f, t.TempDir())
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), result.RowsSynced)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestWastewater_QueryError(t *testing.T) {
 	// Point at a nonexistent server to trigger a download error.
 	mock, err := pgxmock.NewPool()
@@ -120,7 +167,10 @@ func TestWastewater_QueryError(t *testing.T) {
 
 	s := &EPAWastewater{baseURL: "http://127.0.0.1:1/query"}
 	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
-	_, err = s.Sync(context.Background(), mock, f, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = s.Sync(ctx, mock, f, t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "query arcgis")
 }

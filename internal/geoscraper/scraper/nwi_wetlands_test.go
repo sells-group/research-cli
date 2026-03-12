@@ -278,6 +278,24 @@ func TestNWIWetlands_ContextCancelled(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestNWIWetlands_CorruptZip(t *testing.T) {
+	// Serve a corrupt ZIP that will fail extraction → states are skipped.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("not a zip file at all"))
+	}))
+	defer srv.Close()
+
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	s := &NWIWetlands{downloadBaseURL: srv.URL}
+	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
+	result, err := s.Sync(context.Background(), mock, f, t.TempDir())
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.RowsSynced) // all states skipped
+}
+
 func TestNWIWetlands_NoShpInZip(t *testing.T) {
 	// Serve a ZIP with no .shp file → all states should skip (non-fatal).
 	dir := t.TempDir()

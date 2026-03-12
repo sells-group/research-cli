@@ -142,6 +142,98 @@ func TestTIGERWater_Sync(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestNewAreaWaterRow_EmptyHydroid(t *testing.T) {
+	raw := []any{
+		"01234567",         // ansicode
+		"",                 // hydroid (empty — triggers fallback)
+		"Unnamed Pond",     // fullname
+		"H2030",            // mtfcc
+		"5000000",          // aland
+		"100000",           // awater
+		"30.40",            // intptlat
+		"-97.90",           // intptlon
+		[]byte{0x01, 0x02}, // wkb
+	}
+
+	row := newAreaWaterRow(raw)
+	assert.Equal(t, "Unnamed Pond", row[0])
+	// Fallback source_id uses ansicode instead of hydroid.
+	assert.Equal(t, "tiger/aw/01234567", row[7])
+}
+
+func TestAllCountyFIPS(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	rows := pgxmock.NewRows([]string{"fips"}).
+		AddRow("01001").
+		AddRow("01003").
+		AddRow("48453")
+
+	mock.ExpectQuery("SELECT").WillReturnRows(rows)
+
+	codes, err := allCountyFIPS(context.Background(), mock)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"01001", "01003", "48453"}, codes)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAllCountyFIPS_QueryError(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectQuery("SELECT").WillReturnError(assert.AnError)
+
+	codes, err := allCountyFIPS(context.Background(), mock)
+	require.Error(t, err)
+	assert.Nil(t, codes)
+	assert.Contains(t, err.Error(), "query county FIPS")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAllCountyFIPS_ScanError(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	rows := pgxmock.NewRows([]string{"fips"}).
+		AddRow("01001").
+		RowError(1, assert.AnError).
+		AddRow("bad")
+
+	mock.ExpectQuery("SELECT").WillReturnRows(rows)
+
+	codes, err := allCountyFIPS(context.Background(), mock)
+	require.Error(t, err)
+	assert.Nil(t, codes)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestTIGERWater_Sync_AllCountiesFail(t *testing.T) {
+	// Server always returns 404, so all county downloads fail.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	// With multiple counties all failing, no upsert should occur.
+	s := &TIGERWater{
+		downloadBaseURL: srv.URL,
+		year:            2024,
+		countyFIPS:      []string{"99001", "99002", "99003"},
+	}
+	result, err := s.Sync(context.Background(), mock, nil, t.TempDir())
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.RowsSynced)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestTIGERWater_DownloadError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -190,6 +282,120 @@ func TestTIGERWater_UpsertError(t *testing.T) {
 	_, err = s.Sync(context.Background(), mock, nil, t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "upsert")
+}
+
+func TestTIGERWater_Sync_AllCountyFIPS(t *testing.T) {
+	// When countyFIPS is empty, Sync queries the DB via allCountyFIPS.
+	areaZipPath := createTestBoundaryShapefile(t, shp.POLYGON, areaWaterProduct.Columns, 1)
+	linearZipPath := createTestWaterShapefile(t, shp.POLYLINE, linearWaterProduct.Columns, 1)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var data []byte
+		var err error
+		base := filepath.Base(r.URL.Path)
+		if len(base) > 14 && base[len(base)-14:] == "_areawater.zip" {
+			data, err = os.ReadFile(areaZipPath)
+		} else {
+			data, err = os.ReadFile(linearZipPath)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	// Mock the allCountyFIPS query.
+	mock.ExpectQuery("SELECT state_fips").
+		WillReturnRows(pgxmock.NewRows([]string{"fips"}).AddRow("48453"))
+
+	// 1 county × (1 area + 1 linear) = 2 rows.
+	expectWaterUpsert(mock, 2)
+
+	s := &TIGERWater{downloadBaseURL: srv.URL, year: 2024}
+	result, err := s.Sync(context.Background(), mock, nil, t.TempDir())
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), result.RowsSynced)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestTIGERWater_Sync_AllCountyFIPS_Error(t *testing.T) {
+	// When countyFIPS is empty and DB query fails, Sync returns an error.
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectQuery("SELECT state_fips").
+		WillReturnError(assert.AnError)
+
+	s := &TIGERWater{downloadBaseURL: "http://test.local"}
+	_, err = s.Sync(context.Background(), mock, nil, t.TempDir())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "county FIPS")
+}
+
+func TestTIGERWater_Sync_YearDefault(t *testing.T) {
+	// When year is 0, Sync should use tigerYear default.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	// year=0 should default to tigerYear. All downloads fail → 0 rows.
+	s := &TIGERWater{
+		downloadBaseURL: srv.URL,
+		countyFIPS:      []string{"48453"},
+	}
+	result, err := s.Sync(context.Background(), mock, nil, t.TempDir())
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.RowsSynced)
+}
+
+func TestTIGERWater_Sync_LinearWaterContextCancelled(t *testing.T) {
+	// Cancel context after area water loop completes but before linear water.
+	areaZipPath := createTestBoundaryShapefile(t, shp.POLYGON, areaWaterProduct.Columns, 1)
+
+	callCount := 0
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		if callCount > 1 {
+			// Cancel after the first (area) download.
+			cancel()
+			http.Error(w, "cancelled", 500)
+			return
+		}
+		data, err := os.ReadFile(areaZipPath)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	s := &TIGERWater{
+		downloadBaseURL: srv.URL,
+		year:            2024,
+		countyFIPS:      []string{"48453"},
+	}
+	_, err = s.Sync(ctx, mock, nil, t.TempDir())
+	require.Error(t, err)
 }
 
 func TestTIGERWater_ContextCancelled(t *testing.T) {

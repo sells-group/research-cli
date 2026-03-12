@@ -3,13 +3,16 @@ package scraper
 import (
 	"archive/zip"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/pashagolub/pgxmock/v4"
+	"github.com/rotisserie/eris"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -145,7 +148,10 @@ func TestFCCBroadband_DownloadError(t *testing.T) {
 
 	s := &FCCBroadband{downloadURL: "http://127.0.0.1:1/bad", apiKey: "test-key"}
 	f := fetcher.NewHTTPFetcher(fetcher.HTTPOptions{MaxRetries: 0})
-	_, err = s.Sync(context.Background(), mock, f, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = s.Sync(ctx, mock, f, t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fcc_broadband: download")
 }
@@ -324,6 +330,60 @@ func TestFCCBroadband_MultipleCSVFiles(t *testing.T) {
 	result, err := s.Sync(context.Background(), mock, f, t.TempDir())
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), result.RowsSynced)
+}
+
+func TestFCCBroadband_ProcessCSV_EmptyCSV(t *testing.T) {
+	// Write a CSV with only a header line to a temp file.
+	dir := t.TempDir()
+	csvPath := dir + "/empty.csv"
+	require.NoError(t, os.WriteFile(csvPath, []byte(
+		"block_geoid,technology,max_download_speed,max_upload_speed,provider_count,latitude,longitude\n",
+	), 0o644))
+
+	var batch [][]any
+	flushCalled := false
+	flush := func() error {
+		flushCalled = true
+		return nil
+	}
+
+	s := &FCCBroadband{}
+	err := s.processCSV(csvPath, &batch, flush)
+	require.NoError(t, err)
+	assert.Empty(t, batch)
+	assert.False(t, flushCalled, "flush should not be called for an empty CSV")
+}
+
+func TestFCCBroadband_ProcessCSV_FlushError(t *testing.T) {
+	// Create a CSV with enough rows to trigger a mid-batch flush, then have flush fail.
+	dir := t.TempDir()
+	csvPath := dir + "/big.csv"
+	var sb strings.Builder
+	sb.WriteString("block_geoid,technology,max_download_speed,max_upload_speed,provider_count,latitude,longitude\n")
+	for i := 0; i < fccBatchSize+1; i++ {
+		fmt.Fprintf(&sb, "48%012d,50,1000,500,3,30.27,-97.74\n", i)
+	}
+	require.NoError(t, os.WriteFile(csvPath, []byte(sb.String()), 0o644))
+
+	var batch [][]any
+	flush := func() error {
+		return eris.New("flush failed")
+	}
+
+	s := &FCCBroadband{}
+	err := s.processCSV(csvPath, &batch, flush)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flush failed")
+}
+
+func TestFCCBroadband_ProcessCSV_OpenError(t *testing.T) {
+	var batch [][]any
+	flush := func() error { return nil }
+
+	s := &FCCBroadband{}
+	err := s.processCSV("/nonexistent/path.csv", &batch, flush)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "open CSV")
 }
 
 func TestCSVInt_EmptyReturnsZero(t *testing.T) {
