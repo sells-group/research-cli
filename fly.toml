@@ -3,6 +3,10 @@ primary_region = "dfw"
 
 [build]
 
+[env]
+  RESEARCH_TEMPORAL_HOST_PORT = "sells-temporal.internal:7233"
+  RESEARCH_TEMPORAL_NAMESPACE = "research-cli"
+
 [processes]
   geo-worker = "temporal-worker geo"
   fedsync-worker = "temporal-worker fedsync"
