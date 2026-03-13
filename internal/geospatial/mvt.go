@@ -28,6 +28,7 @@ var validMVTTables = map[string]bool{
 	"geo.infrastructure": true,
 	"geo.epa_sites":      true,
 	"geo.flood_zones":    true,
+	"geo.earthquakes":    true,
 }
 
 // DefaultLayers returns the standard layer configurations for MVT tile generation.
@@ -83,6 +84,14 @@ func DefaultLayers() map[string]LayerConfig {
 			GeomColumn: "geom",
 			Columns:    "id, zone_code, flood_type",
 			MinZoom:    8,
+			MaxZoom:    16,
+		},
+		"earthquakes": {
+			Table:      "geo.earthquakes",
+			GeomColumn: "geom",
+			Columns:    "id, event_id, magnitude, mag_type, place, event_time, depth_km, alert, significance",
+			IsPoint:    true,
+			MinZoom:    3,
 			MaxZoom:    16,
 		},
 	}

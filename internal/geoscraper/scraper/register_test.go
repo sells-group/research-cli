@@ -36,7 +36,7 @@ func TestRegisterAll(t *testing.T) {
 	RegisterAll(reg, nil)
 
 	names := reg.AllNames()
-	require.Len(t, names, 57) // 13 HIFLD + 2 FEMA + 3 EPA + 1 Census + 2 FCC + 1 NWI + 1 NRCS + 4 USGS + 5 TIGER + 1 OSM + 5 BulkCSV + 4 NTAD + 1 EIA + 1 CDC + 1 FDIC + 2 HUD + 1 EPA SLD + 5 Imports + 2 BulkGDB + 2 BLM
+	require.Len(t, names, 58) // 13 HIFLD + 2 FEMA + 3 EPA + 1 Census + 2 FCC + 1 NWI + 1 NRCS + 5 USGS + 5 TIGER + 1 OSM + 5 BulkCSV + 4 NTAD + 1 EIA + 1 CDC + 1 FDIC + 2 HUD + 1 EPA SLD + 5 Imports + 2 BulkGDB + 2 BLM
 
 	// All should be National or OnDemand category.
 	for _, s := range reg.All() {
@@ -55,7 +55,7 @@ func TestRegisterAll_WithConfig(t *testing.T) {
 	RegisterAll(reg, cfg)
 
 	names := reg.AllNames()
-	require.Len(t, names, 57)
+	require.Len(t, names, 58)
 }
 
 func TestRegisterAll_NoDuplicates(t *testing.T) {
@@ -98,6 +98,7 @@ var (
 	_ geoscraper.GeoScraper = (*USGSOilGasWells)(nil)
 	_ geoscraper.GeoScraper = (*USGSWaterways)(nil)
 	_ geoscraper.GeoScraper = (*USGSCoalMines)(nil)
+	_ geoscraper.GeoScraper = (*USGSEarthquakes)(nil)
 	_ geoscraper.GeoScraper = (*EPAWastewater)(nil)
 	_ geoscraper.GeoScraper = (*EPABrownfields)(nil)
 	_ geoscraper.GeoScraper = (*FHWABridges)(nil)

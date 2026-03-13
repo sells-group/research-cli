@@ -79,6 +79,7 @@ func RegisterUSGS(reg *geoscraper.Registry) {
 	reg.Register(&USGSOilGasWells{})
 	reg.Register(&USGSWaterways{})
 	reg.Register(&USGSCoalMines{})
+	reg.Register(&USGSEarthquakes{})
 }
 
 // RegisterBulkGDB registers GDB-based bulk scrapers that replace ArcGIS equivalents.
