@@ -1,0 +1,13 @@
+{
+  "features": [
+    {
+      "attributes": {"OBJECTID": 1, "TERMINAL_NAME": "Cape May Ferry Terminal", "TERM_CITY": "North Cape May", "TERM_STATE": "NJ", "LATITUDE": 38.9462, "LONGITUDE": -74.9601, "LOCAL_BUS": "Y"},
+      "geometry": {"x": -74.9601, "y": 38.9462}
+    },
+    {
+      "attributes": {"OBJECTID": 2, "TERMINAL_NAME": "Bainbridge Island Ferry Terminal", "TERM_CITY": "Bainbridge Island", "TERM_STATE": "WA", "LATITUDE": 47.6234, "LONGITUDE": -122.5103},
+      "geometry": {"x": -122.5103, "y": 47.6234}
+    }
+  ],
+  "exceededTransferLimit": false
+}
