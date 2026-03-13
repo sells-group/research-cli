@@ -1,0 +1,13 @@
+{
+  "features": [
+    {
+      "attributes": {"OBJECTID": 101, "stop_name": "Port Authority Bus Terminal", "agency_name": "Greyhound", "state_usps": "NY", "county_name": "New York", "geoid_county": "36061", "ua_name": "New York"},
+      "geometry": {"x": -73.9903, "y": 40.7567}
+    },
+    {
+      "attributes": {"OBJECTID": 102, "stop_name": "Union Station Bus Stop", "agency_name": "FlixBus", "state_usps": "DC", "county_name": "District of Columbia", "geoid_county": "11001", "ua_name": "Washington"},
+      "geometry": {"x": -77.0069, "y": 38.8971}
+    }
+  ],
+  "exceededTransferLimit": false
+}

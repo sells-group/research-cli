@@ -112,6 +112,9 @@ func RegisterNTAD(reg *geoscraper.Registry) {
 	reg.Register(&BTSAmtrakStations{})
 	reg.Register(&BTSFreightRail{})
 	reg.Register(&FHWAHPMs{})
+	reg.Register(&NTADFerryTerminals{})
+	reg.Register(&NTADIntercityBus{})
+	reg.Register(&NTADTransitStations{})
 }
 
 // RegisterEIA registers all EIA scrapers.
