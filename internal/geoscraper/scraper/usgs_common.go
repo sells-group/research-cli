@@ -18,6 +18,9 @@ const nhdBaseURL = "https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapSe
 // coalMinesBaseURL is the EIA/MSHA coal mines FeatureServer endpoint.
 const coalMinesBaseURL = "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/Surface_and_Underground_Coal_Mines_in_the_US/FeatureServer/0/query"
 
+// earthquakeBaseURL is the USGS FDSN Event Web Service endpoint.
+const earthquakeBaseURL = "https://earthquake.usgs.gov/fdsnws/event/1/query"
+
 // usgsURL returns the base URL, falling back to the default endpoint
 // if override is empty. The override is used for testing.
 func usgsURL(override, defaultURL string) string {

@@ -79,6 +79,13 @@ func RegisterUSGS(reg *geoscraper.Registry) {
 	reg.Register(&USGSOilGasWells{})
 	reg.Register(&USGSWaterways{})
 	reg.Register(&USGSCoalMines{})
+	reg.Register(&USGSEarthquakes{})
+}
+
+// RegisterBulkGDB registers GDB-based bulk scrapers that replace ArcGIS equivalents.
+func RegisterBulkGDB(reg *geoscraper.Registry) {
+	reg.Register(&NHDWaterwaysBulk{})
+	reg.Register(&PADUSProtectedAreasBulk{})
 }
 
 // RegisterOSM registers all OpenStreetMap scrapers.
@@ -122,6 +129,32 @@ func RegisterFDICGeo(reg *geoscraper.Registry) {
 	reg.Register(&FDICBranches{})
 }
 
+// RegisterHUD registers all HUD housing scrapers.
+func RegisterHUD(reg *geoscraper.Registry) {
+	reg.Register(&HUDLihtc{})
+	reg.Register(&HUDFMR{})
+}
+
+// RegisterEPASLD registers the EPA Smart Location Database scraper.
+func RegisterEPASLD(reg *geoscraper.Registry) {
+	reg.Register(&EPASmartLocation{})
+}
+
+// RegisterImports registers all cross-database import scrapers.
+func RegisterImports(reg *geoscraper.Registry) {
+	reg.Register(&ImportPPP{})
+	reg.Register(&ImportCBP{})
+	reg.Register(&ImportQCEW{})
+	reg.Register(&ImportEPA{})
+	reg.Register(&GeocodePPP{})
+}
+
+// RegisterBLM registers all BLM scrapers.
+func RegisterBLM(reg *geoscraper.Registry) {
+	reg.Register(&BLMFederalLands{})
+	reg.Register(&BLMMineralLeases{})
+}
+
 // RegisterAll registers all geo scraper implementations.
 func RegisterAll(reg *geoscraper.Registry, cfg *config.Config) {
 	RegisterHIFLD(reg)
@@ -139,4 +172,9 @@ func RegisterAll(reg *geoscraper.Registry, cfg *config.Config) {
 	RegisterEIA(reg)
 	RegisterCDC(reg)
 	RegisterFDICGeo(reg)
+	RegisterHUD(reg)
+	RegisterEPASLD(reg)
+	RegisterImports(reg)
+	RegisterBulkGDB(reg)
+	RegisterBLM(reg)
 }

@@ -12,7 +12,7 @@ import (
 
 func TestDefaultLayers_ExpectedEntries(t *testing.T) {
 	layers := DefaultLayers()
-	expected := []string{"counties", "places", "cbsa", "poi", "infrastructure", "epa_sites", "flood_zones"}
+	expected := []string{"counties", "places", "cbsa", "poi", "infrastructure", "epa_sites", "flood_zones", "earthquakes"}
 	for _, name := range expected {
 		_, ok := layers[name]
 		assert.True(t, ok, "expected layer %q", name)
