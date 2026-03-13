@@ -36,11 +36,13 @@ func TestRegisterAll(t *testing.T) {
 	RegisterAll(reg, nil)
 
 	names := reg.AllNames()
-	require.Len(t, names, 45) // 13 HIFLD + 2 FEMA + 3 EPA + 1 Census + 2 FCC + 1 NWI + 1 NRCS + 4 USGS + 5 TIGER + 1 OSM + 5 BulkCSV + 4 NTAD + 1 EIA + 1 CDC + 1 FDIC
+	require.Len(t, names, 57) // 13 HIFLD + 2 FEMA + 3 EPA + 1 Census + 2 FCC + 1 NWI + 1 NRCS + 4 USGS + 5 TIGER + 1 OSM + 5 BulkCSV + 4 NTAD + 1 EIA + 1 CDC + 1 FDIC + 2 HUD + 1 EPA SLD + 5 Imports + 2 BulkGDB + 2 BLM
 
-	// All should be National category.
+	// All should be National or OnDemand category.
 	for _, s := range reg.All() {
-		assert.Equal(t, geoscraper.National, s.Category())
+		cat := s.Category()
+		assert.True(t, cat == geoscraper.National || cat == geoscraper.OnDemand,
+			"scraper %s has unexpected category %s", s.Name(), cat)
 	}
 }
 
@@ -53,7 +55,7 @@ func TestRegisterAll_WithConfig(t *testing.T) {
 	RegisterAll(reg, cfg)
 
 	names := reg.AllNames()
-	require.Len(t, names, 45)
+	require.Len(t, names, 57)
 }
 
 func TestRegisterAll_NoDuplicates(t *testing.T) {
@@ -114,4 +116,16 @@ var (
 	_ geoscraper.GeoScraper = (*EIAPlants)(nil)
 	_ geoscraper.GeoScraper = (*CDCSvi)(nil)
 	_ geoscraper.GeoScraper = (*FDICBranches)(nil)
+	_ geoscraper.GeoScraper = (*NHDWaterwaysBulk)(nil)
+	_ geoscraper.GeoScraper = (*PADUSProtectedAreasBulk)(nil)
+	_ geoscraper.GeoScraper = (*HUDLihtc)(nil)
+	_ geoscraper.GeoScraper = (*HUDFMR)(nil)
+	_ geoscraper.GeoScraper = (*EPASmartLocation)(nil)
+	_ geoscraper.GeoScraper = (*ImportPPP)(nil)
+	_ geoscraper.GeoScraper = (*ImportCBP)(nil)
+	_ geoscraper.GeoScraper = (*ImportQCEW)(nil)
+	_ geoscraper.GeoScraper = (*ImportEPA)(nil)
+	_ geoscraper.GeoScraper = (*GeocodePPP)(nil)
+	_ geoscraper.GeoScraper = (*BLMFederalLands)(nil)
+	_ geoscraper.GeoScraper = (*BLMMineralLeases)(nil)
 )
