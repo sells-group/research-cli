@@ -488,7 +488,7 @@ func (s *SQLiteStore) GetHighConfidenceAnswers(ctx context.Context, companyURL s
 		 WHERE json_extract(company, '$.url') = ? AND status = 'complete' AND result IS NOT NULL`
 	args := []any{companyURL}
 	if maxAge > 0 {
-		args = append(args, time.Now().UTC().Add(-maxAge).Format(time.RFC3339))
+		args = append(args, time.Now().UTC().Add(-maxAge))
 		query += ` AND created_at >= ?`
 	}
 	query += ` ORDER BY created_at DESC LIMIT 1`

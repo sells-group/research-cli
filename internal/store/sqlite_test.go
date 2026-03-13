@@ -485,9 +485,9 @@ func TestSQLite_ListStaleCompanies_FindsStale(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Cutoff in the future → everything is "stale".
+	// Cutoff far in the future → everything is "stale".
 	results, err := st.ListStaleCompanies(ctx, StaleCompanyFilter{
-		LastEnrichedBefore: time.Now().Add(time.Hour),
+		LastEnrichedBefore: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
 		Limit:              10,
 	})
 	require.NoError(t, err)
@@ -511,12 +511,9 @@ func TestSQLite_ListStaleCompanies_ExcludesRecent(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Cutoff is 1 second in the past — the run we just created is newer, so it's NOT stale.
-	// The run's created_at is roughly "now", and the cutoff is 1 second before "now",
-	// so created_at < cutoff is false.
-	time.Sleep(10 * time.Millisecond) // ensure created_at is before cutoff
+	// Cutoff far in the past — the run we just created is newer, so it's NOT stale.
 	results, err := st.ListStaleCompanies(ctx, StaleCompanyFilter{
-		LastEnrichedBefore: time.Now().Add(-24 * time.Hour),
+		LastEnrichedBefore: time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC),
 		Limit:              10,
 	})
 	require.NoError(t, err)
