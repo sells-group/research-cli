@@ -1,0 +1,83 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "generated": 1710000000000,
+    "count": 2,
+    "title": "USGS Earthquakes",
+    "status": 200
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 4.5,
+        "place": "10km SSW of Ridgecrest, CA",
+        "time": 1709900000000,
+        "updated": 1709950000000,
+        "tz": null,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/ci12345",
+        "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=ci12345&format=geojson",
+        "status": "reviewed",
+        "tsunami": 0,
+        "sig": 312,
+        "net": "ci",
+        "code": "12345",
+        "ids": ",ci12345,",
+        "sources": ",ci,",
+        "types": ",origin,phase-data,shakemap,",
+        "magType": "ml",
+        "type": "earthquake",
+        "title": "M 4.5 - 10km SSW of Ridgecrest, CA",
+        "felt": 150,
+        "cdi": 5.2,
+        "mmi": 4.8,
+        "alert": "green",
+        "gap": 35.0,
+        "rms": 0.12,
+        "nst": 42,
+        "dmin": 0.05
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-117.943, 35.592, 8.5]
+      },
+      "id": "ci12345"
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 2.8,
+        "place": "5km NE of Pahala, Hawaii",
+        "time": 1709800000000,
+        "updated": 1709850000000,
+        "tz": null,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/hv67890",
+        "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=hv67890&format=geojson",
+        "status": "automatic",
+        "tsunami": 0,
+        "sig": 121,
+        "net": "hv",
+        "code": "67890",
+        "ids": ",hv67890,",
+        "sources": ",hv,",
+        "types": ",origin,phase-data,",
+        "magType": "md",
+        "type": "earthquake",
+        "title": "M 2.8 - 5km NE of Pahala, Hawaii",
+        "felt": null,
+        "cdi": null,
+        "mmi": null,
+        "alert": null,
+        "gap": 120.0,
+        "rms": 0.08,
+        "nst": 15,
+        "dmin": 0.02
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-155.21, 19.22, 32.1]
+      },
+      "id": "hv67890"
+    }
+  ]
+}
