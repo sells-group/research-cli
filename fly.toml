@@ -1,4 +1,4 @@
-app = "sells-research"
+app = "sells-worker"
 primary_region = "dfw"
 
 [build]
@@ -8,15 +8,9 @@ primary_region = "dfw"
   RESEARCH_TEMPORAL_NAMESPACE = "research-cli"
 
 [processes]
-  geo-worker = "temporal-worker geo"
-  fedsync-worker = "temporal-worker fedsync"
+  worker = "temporal-worker"
 
 [[vm]]
   size = "performance-4x"
   memory = "8gb"
-  processes = ["geo-worker"]
-
-[[vm]]
-  size = "performance-2x"
-  memory = "4gb"
-  processes = ["fedsync-worker"]
+  processes = ["worker"]
