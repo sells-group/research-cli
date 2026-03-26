@@ -1,68 +1,55 @@
 #!/usr/bin/env bash
-# Pre-commit hook: runs go fmt, go fix, go vet, golangci-lint, and gosec on staged Go files.
+# Pre-commit hook: runs treefmt, go vet, golangci-lint, and gosec on staged files.
 # Install: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 #   — or — ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
 
 set -euo pipefail
 
-# Only check staged .go files.
-STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
+# Only check staged added/copied/modified files.
+STAGED=$(git diff --cached --name-only --diff-filter=ACM || true)
 if [ -z "$STAGED" ]; then
   exit 0
 fi
 
-# Collect the packages that contain staged files.
-PACKAGES=$(echo "$STAGED" | xargs -I{} dirname {} | sort -u | sed 's|^|./|')
+FORMATTABLE=$(printf '%s\n' "$STAGED" | grep -E '(\.go|\.css|\.html|\.js|\.json|\.md|\.svelte|\.toml|\.ts|\.yaml|\.yml|\.sh)$|^scripts/pre-commit$' || true)
+GO_STAGED=$(printf '%s\n' "$STAGED" | grep '\.go$' || true)
 
-echo "pre-commit: checking $(echo "$STAGED" | wc -l | tr -d ' ') staged Go files..."
+echo "pre-commit: checking $(printf '%s\n' "$STAGED" | wc -l | tr -d ' ') staged files..."
 
-# 1. go fmt — check only, no auto-rewrite (fail if unformatted).
-UNFORMATTED=$(gofmt -l $STAGED 2>/dev/null || true)
-if [ -n "$UNFORMATTED" ]; then
-  echo "ERROR: the following files are not gofmt'd:"
-  echo "$UNFORMATTED" | sed 's/^/  /'
-  echo ""
-  echo "Run: gofmt -w \$(git diff --cached --name-only --diff-filter=ACM | grep '\\.go\$')"
-  exit 1
+# 1. treefmt — check only, no auto-rewrite (fail if unformatted).
+if [ -n "$FORMATTABLE" ]; then
+  echo "pre-commit: treefmt..."
+  if ! treefmt --no-cache --fail-on-change --on-unmatched=debug $FORMATTABLE 2>&1; then
+    echo "ERROR: treefmt found unformatted staged files"
+    echo ""
+    echo "Run: treefmt \$(git diff --cached --name-only --diff-filter=ACM)"
+    exit 1
+  fi
 fi
 
-# 2. go fix — check if staged files need go fix rewrites.
-GO_VER=$(sed -n 's/^go \([0-9]*\.[0-9]*\).*/go\1/p' go.mod)
-echo "pre-commit: go fix..."
-FIXDIFF=$(go tool fix -diff -go "$GO_VER" $STAGED 2>&1 || true)
-if [ -n "$FIXDIFF" ]; then
-  echo "ERROR: the following files need go fix:"
-  echo "$FIXDIFF"
-  echo ""
-  echo "Run: go fix ./..."
-  exit 1
+if [ -z "$GO_STAGED" ]; then
+  echo "pre-commit: formatting checks passed"
+  exit 0
 fi
 
-# 3. go vet — run on affected packages.
+# Collect the packages that contain staged Go files.
+PACKAGES=$(printf '%s\n' "$GO_STAGED" | xargs -I{} dirname {} | sort -u | sed 's|^|./|')
+
+# 2. go vet — run on affected packages.
 echo "pre-commit: go vet..."
 if ! go vet $PACKAGES 2>&1; then
   echo "ERROR: go vet failed"
   exit 1
 fi
 
-# 4. golangci-lint — run on affected packages (uses .golangci.yml config).
-if command -v golangci-lint &>/dev/null; then
-  LINTER=golangci-lint
-elif [ -x "$HOME/go/bin/golangci-lint" ]; then
-  LINTER="$HOME/go/bin/golangci-lint"
-else
-  echo "pre-commit: golangci-lint not found, skipping lint check"
-  echo "  Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
-  exit 0
-fi
-
+# 3. golangci-lint — run via the canonical repo wrapper.
 echo "pre-commit: golangci-lint..."
-if ! $LINTER run $PACKAGES 2>&1; then
+if ! ./scripts/lint.sh $PACKAGES 2>&1; then
   echo "ERROR: golangci-lint failed"
   exit 1
 fi
 
-# 5. gosec — security scanner on affected packages.
+# 4. gosec — security scanner on affected packages.
 if command -v gosec &>/dev/null; then
   GOSEC=gosec
 elif [ -x "$HOME/go/bin/gosec" ]; then

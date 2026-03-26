@@ -1,4 +1,4 @@
-.PHONY: build test test-coverage test-integration lint fix mocks clean
+.PHONY: build test test-coverage test-integration lint fmt fix mocks clean
 
 build:
 	go build -o research-cli ./cmd
@@ -14,7 +14,10 @@ test-integration:
 	go test -tags=integration ./... -race
 
 lint:
-	golangci-lint run
+	./scripts/lint.sh ./...
+
+fmt:
+	treefmt
 
 fix:
 	go fix ./...

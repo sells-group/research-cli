@@ -1,0 +1,35 @@
+[global]
+excludes = [
+  ".claude/**",
+  "frontend/.svelte-kit/**",
+  "frontend/build/**",
+  "frontend/node_modules/**",
+]
+
+[formatter.gofmt]
+command = "gofmt"
+includes = ["*.go"]
+options = ["-w"]
+
+[formatter.prettier]
+command = "prettier"
+includes = [
+  "*.css",
+  "*.html",
+  "*.js",
+  "*.json",
+  "*.md",
+  "*.svelte",
+  "*.ts",
+  "*.yaml",
+  "*.yml",
+]
+options = ["--write"]
+
+[formatter.shfmt]
+command = "shfmt"
+includes = [
+  "*.sh",
+  "scripts/pre-commit",
+]
+options = ["-w", "-i", "2", "-ci"]
