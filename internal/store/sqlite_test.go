@@ -260,6 +260,37 @@ func TestSQLite_UpdateRunStatus(t *testing.T) {
 	assert.Equal(t, model.RunStatusCrawling, fetched.Status)
 }
 
+func TestSQLite_SummarizeRuns(t *testing.T) {
+	st := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	complete1, err := st.CreateRun(ctx, model.Company{URL: "https://example.com", Name: "Example"})
+	require.NoError(t, err)
+	require.NoError(t, st.UpdateRunResult(ctx, complete1.ID, &model.RunResult{TotalCost: 1.50, TotalTokens: 5000, Score: 0.85}))
+
+	complete2, err := st.CreateRun(ctx, model.Company{URL: "https://example.com", Name: "Example"})
+	require.NoError(t, err)
+	require.NoError(t, st.UpdateRunResult(ctx, complete2.ID, &model.RunResult{TotalCost: 2.00, TotalTokens: 7000, Score: 0.90}))
+
+	failed, err := st.CreateRun(ctx, model.Company{URL: "https://example.com", Name: "Example"})
+	require.NoError(t, err)
+	require.NoError(t, st.FailRun(ctx, failed.ID, &model.RunError{Message: "boom"}))
+
+	_, err = st.CreateRun(ctx, model.Company{URL: "https://example.com", Name: "Example"})
+	require.NoError(t, err)
+
+	summary, err := st.SummarizeRuns(ctx, time.Now().Add(-24*time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+	assert.Equal(t, 4, summary.Total)
+	assert.Equal(t, 2, summary.Complete)
+	assert.Equal(t, 1, summary.Failed)
+	assert.Equal(t, 1, summary.Queued)
+	assert.InDelta(t, 3.5, summary.CostUSD, 0.001)
+	assert.InDelta(t, 0.875, summary.AvgScore, 0.001)
+	assert.Equal(t, 3000, summary.AvgTokens)
+}
+
 func TestSQLite_UpdateRunResult(t *testing.T) {
 	st := newTestSQLiteStore(t)
 	ctx := context.Background()

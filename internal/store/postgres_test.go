@@ -199,3 +199,25 @@ func TestPostgresStore_GetLatestProvenance_NotFound(t *testing.T) {
 	assert.Empty(t, got)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestPostgresStore_SummarizeRuns(t *testing.T) {
+	s, mock := newMockPostgresStore(t)
+
+	mock.ExpectQuery(`SELECT\s+COUNT\(\*\)`).
+		WithArgs(pgxmock.AnyArg()).
+		WillReturnRows(pgxmock.NewRows([]string{
+			"total", "complete", "failed", "queued", "cost_usd", "avg_score", "avg_tokens",
+		}).AddRow(4, 2, 1, 1, 3.5, 0.875, 3000.0))
+
+	summary, err := s.SummarizeRuns(context.Background(), time.Now().Add(-24*time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+	assert.Equal(t, 4, summary.Total)
+	assert.Equal(t, 2, summary.Complete)
+	assert.Equal(t, 1, summary.Failed)
+	assert.Equal(t, 1, summary.Queued)
+	assert.InDelta(t, 3.5, summary.CostUSD, 0.001)
+	assert.InDelta(t, 0.875, summary.AvgScore, 0.001)
+	assert.Equal(t, 3000, summary.AvgTokens)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}

@@ -20,7 +20,7 @@ import (
 func testRouter() http.Handler {
 	return api.Router(api.NewHandlers(
 		&config.Config{Server: config.ServerConfig{Port: 8080}},
-		nil, nil, nil,
+		nil, nil, nil, nil,
 	))
 }
 
@@ -242,7 +242,7 @@ func TestWebhookEnrich_AcceptsUnderCapacity(t *testing.T) {
 	// semaphore immediately, so every request should be accepted.
 	router := api.Router(api.NewHandlers(
 		&config.Config{Server: config.ServerConfig{Port: 8080}},
-		nil, nil, nil,
+		nil, nil, nil, nil,
 	))
 
 	ts := httptest.NewServer(router)

@@ -82,6 +82,8 @@ func TestSyncLog_Start_Success(t *testing.T) {
 	mock.ExpectQuery("INSERT INTO fed_data.sync_log").
 		WithArgs("cbp").
 		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(42)))
+	mock.ExpectExec("REFRESH MATERIALIZED VIEW fed_data.mv_dataset_status_latest").
+		WillReturnResult(pgxmock.NewResult("REFRESH", 1))
 
 	sl := NewSyncLog(mock)
 	id, err := sl.Start(context.Background(), "cbp")
@@ -116,6 +118,10 @@ func TestSyncLog_Complete_WithResult(t *testing.T) {
 	mock.ExpectExec("UPDATE fed_data.sync_log").
 		WithArgs(int64(100), pgxmock.AnyArg(), int64(1)).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	mock.ExpectExec("REFRESH MATERIALIZED VIEW fed_data.mv_dataset_status_latest").
+		WillReturnResult(pgxmock.NewResult("REFRESH", 1))
+	mock.ExpectExec("REFRESH MATERIALIZED VIEW fed_data.mv_sync_daily_trends").
+		WillReturnResult(pgxmock.NewResult("REFRESH", 1))
 
 	sl := NewSyncLog(mock)
 	result := &SyncResult{
@@ -135,6 +141,10 @@ func TestSyncLog_Complete_NilResult(t *testing.T) {
 	mock.ExpectExec("UPDATE fed_data.sync_log").
 		WithArgs(int64(0), pgxmock.AnyArg(), int64(5)).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	mock.ExpectExec("REFRESH MATERIALIZED VIEW fed_data.mv_dataset_status_latest").
+		WillReturnResult(pgxmock.NewResult("REFRESH", 1))
+	mock.ExpectExec("REFRESH MATERIALIZED VIEW fed_data.mv_sync_daily_trends").
+		WillReturnResult(pgxmock.NewResult("REFRESH", 1))
 
 	sl := NewSyncLog(mock)
 	err = sl.Complete(context.Background(), 5, nil)
@@ -150,6 +160,10 @@ func TestSyncLog_Complete_ResultNoMetadata(t *testing.T) {
 	mock.ExpectExec("UPDATE fed_data.sync_log").
 		WithArgs(int64(50), pgxmock.AnyArg(), int64(3)).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	mock.ExpectExec("REFRESH MATERIALIZED VIEW fed_data.mv_dataset_status_latest").
+		WillReturnResult(pgxmock.NewResult("REFRESH", 1))
+	mock.ExpectExec("REFRESH MATERIALIZED VIEW fed_data.mv_sync_daily_trends").
+		WillReturnResult(pgxmock.NewResult("REFRESH", 1))
 
 	sl := NewSyncLog(mock)
 	result := &SyncResult{RowsSynced: 50}
@@ -184,6 +198,10 @@ func TestSyncLog_Fail_Success(t *testing.T) {
 	mock.ExpectExec("UPDATE fed_data.sync_log").
 		WithArgs("download failed", int64(7)).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	mock.ExpectExec("REFRESH MATERIALIZED VIEW fed_data.mv_dataset_status_latest").
+		WillReturnResult(pgxmock.NewResult("REFRESH", 1))
+	mock.ExpectExec("REFRESH MATERIALIZED VIEW fed_data.mv_sync_daily_trends").
+		WillReturnResult(pgxmock.NewResult("REFRESH", 1))
 
 	sl := NewSyncLog(mock)
 	err = sl.Fail(context.Background(), 7, "download failed")
@@ -291,6 +309,26 @@ func TestSyncLog_ListAll_ScanError(t *testing.T) {
 	sl := NewSyncLog(mock)
 	_, err = sl.ListAll(context.Background())
 	require.Error(t, err)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSyncLog_SummarizeSince(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	mock.ExpectQuery("SELECT\\s+COUNT\\(\\*\\)").
+		WithArgs(pgxmock.AnyArg()).
+		WillReturnRows(pgxmock.NewRows([]string{"total", "complete", "failed", "running"}).AddRow(5, 3, 1, 1))
+
+	sl := NewSyncLog(mock)
+	summary, err := sl.SummarizeSince(context.Background(), time.Now().Add(-24*time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+	assert.Equal(t, 5, summary.Total)
+	assert.Equal(t, 3, summary.Complete)
+	assert.Equal(t, 1, summary.Failed)
+	assert.Equal(t, 1, summary.Running)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 

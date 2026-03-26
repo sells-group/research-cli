@@ -2,9 +2,15 @@ package schedules
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"reflect"
+	"runtime"
 
 	"github.com/rotisserie/eris"
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
 	"go.uber.org/zap"
@@ -23,6 +29,8 @@ type ReconcileResult struct {
 	Deleted   []string
 	Unchanged []string
 }
+
+const scheduleFingerprintMemoKey = "schedule_fingerprint"
 
 // Reconcile ensures Temporal schedules match the desired state.
 // Creates missing schedules, updates changed ones (cron/args), and optionally
@@ -54,20 +62,33 @@ func Reconcile(ctx context.Context, c client.Client, desired []Schedule, opts Re
 	// Create or update desired schedules.
 	for _, s := range desired {
 		if existing[s.ID] {
-			// Update: delete and recreate (Temporal SDK doesn't support Update easily).
-			if opts.DryRun {
-				log.Info("would update schedule", zap.String("id", s.ID))
-				result.Updated = append(result.Updated, s.ID)
+			handle := c.ScheduleClient().GetHandle(ctx, s.ID)
+			desc, err := handle.Describe(ctx)
+			if err != nil {
+				return nil, eris.Wrapf(err, "schedules: describe %s", s.ID)
+			}
+
+			if scheduleMatches(desc, s) {
+				result.Unchanged = append(result.Unchanged, s.ID)
+				delete(existing, s.ID)
 				continue
 			}
 
-			handle := c.ScheduleClient().GetHandle(ctx, s.ID)
-			if err := handle.Delete(ctx); err != nil {
-				return nil, eris.Wrapf(err, "schedules: delete %s for update", s.ID)
+			if opts.DryRun {
+				log.Info("would update schedule", zap.String("id", s.ID))
+				result.Updated = append(result.Updated, s.ID)
+				delete(existing, s.ID)
+				continue
 			}
 
-			if err := createSchedule(ctx, c, s); err != nil {
-				return nil, eris.Wrapf(err, "schedules: recreate %s", s.ID)
+			if err := handle.Update(ctx, client.ScheduleUpdateOptions{
+				DoUpdate: func(input client.ScheduleUpdateInput) (*client.ScheduleUpdate, error) {
+					return &client.ScheduleUpdate{
+						Schedule: desiredSchedule(s, currentScheduleState(input.Description, s)),
+					}, nil
+				},
+			}); err != nil {
+				return nil, eris.Wrapf(err, "schedules: update %s", s.ID)
 			}
 			log.Info("updated schedule", zap.String("id", s.ID))
 			result.Updated = append(result.Updated, s.ID)
@@ -115,25 +136,135 @@ func Reconcile(ctx context.Context, c client.Client, desired []Schedule, opts Re
 }
 
 func createSchedule(ctx context.Context, c client.Client, s Schedule) error {
-	overlap := s.Overlap
+	_, err := c.ScheduleClient().Create(ctx, scheduleOptions(s))
+	return err
+}
+
+func scheduleOptions(s Schedule) client.ScheduleOptions {
+	return client.ScheduleOptions{
+		ID:      s.ID,
+		Spec:    desiredSpec(s),
+		Action:  desiredWorkflowAction(s),
+		Overlap: resolvedOverlap(s.Overlap),
+		Paused:  s.Paused,
+	}
+}
+
+func desiredSchedule(s Schedule, state client.ScheduleState) *client.Schedule {
+	return &client.Schedule{
+		Action: desiredWorkflowAction(s),
+		Spec:   desiredScheduleSpec(s),
+		Policy: &client.SchedulePolicies{
+			Overlap: resolvedOverlap(s.Overlap),
+		},
+		State: &state,
+	}
+}
+
+func desiredWorkflowAction(s Schedule) *client.ScheduleWorkflowAction {
+	fingerprint := scheduleFingerprint(s)
+	return &client.ScheduleWorkflowAction{
+		ID:       desiredActionID(s),
+		Workflow: s.Workflow,
+		Args:     s.Args,
+		Memo: map[string]interface{}{
+			scheduleFingerprintMemoKey: fingerprint,
+		},
+		TaskQueue: s.TaskQueue,
+	}
+}
+
+func desiredSpec(s Schedule) client.ScheduleSpec {
+	return client.ScheduleSpec{
+		CronExpressions: []string{s.Cron},
+		TimeZoneName:    "UTC",
+	}
+}
+
+func desiredScheduleSpec(s Schedule) *client.ScheduleSpec {
+	spec := desiredSpec(s)
+	return &spec
+}
+
+func resolvedOverlap(overlap enumspb.ScheduleOverlapPolicy) enumspb.ScheduleOverlapPolicy {
 	if overlap == 0 {
-		overlap = 1 // SCHEDULE_OVERLAP_POLICY_SKIP
+		return enumspb.SCHEDULE_OVERLAP_POLICY_SKIP
+	}
+	return overlap
+}
+
+func currentScheduleState(desc client.ScheduleDescription, fallback Schedule) client.ScheduleState {
+	state := client.ScheduleState{Paused: fallback.Paused}
+	if desc.Schedule.State != nil {
+		state.Paused = desc.Schedule.State.Paused
+		state.Note = desc.Schedule.State.Note
+		state.LimitedActions = desc.Schedule.State.LimitedActions
+		state.RemainingActions = desc.Schedule.State.RemainingActions
+	}
+	return state
+}
+
+func scheduleMatches(desc *client.ScheduleDescription, s Schedule) bool {
+	if desc == nil {
+		return false
 	}
 
-	_, err := c.ScheduleClient().Create(ctx, client.ScheduleOptions{
-		ID: s.ID,
-		Spec: client.ScheduleSpec{
-			CronExpressions: []string{s.Cron},
-			TimeZoneName:    "UTC",
-		},
-		Action: &client.ScheduleWorkflowAction{
-			ID:        fmt.Sprintf("sched-%s", s.ID),
-			Workflow:  s.Workflow,
-			Args:      s.Args,
-			TaskQueue: s.TaskQueue,
-		},
-		Overlap: overlap,
-		Paused:  s.Paused,
+	action, ok := desc.Schedule.Action.(*client.ScheduleWorkflowAction)
+	if !ok || action == nil {
+		return false
+	}
+
+	expected := scheduleFingerprint(s)
+	if fingerprint, ok := action.Memo[scheduleFingerprintMemoKey].(string); ok {
+		return fingerprint == expected
+	}
+
+	return action.ID == desiredActionID(s)
+}
+
+func desiredActionID(s Schedule) string {
+	fingerprint := scheduleFingerprint(s)
+	return fmt.Sprintf("sched-%s-%s", s.ID, fingerprint[:12])
+}
+
+func scheduleFingerprint(s Schedule) string {
+	type fingerprintPayload struct {
+		Cron      string                        `json:"cron"`
+		TaskQueue string                        `json:"task_queue"`
+		Workflow  string                        `json:"workflow"`
+		Args      []interface{}                 `json:"args"`
+		Overlap   enumspb.ScheduleOverlapPolicy `json:"overlap"`
+	}
+
+	payload, err := json.Marshal(fingerprintPayload{
+		Cron:      s.Cron,
+		TaskQueue: s.TaskQueue,
+		Workflow:  workflowIdentity(s.Workflow),
+		Args:      s.Args,
+		Overlap:   resolvedOverlap(s.Overlap),
 	})
-	return err
+	if err != nil {
+		payload = []byte(fmt.Sprintf("%s|%s|%s|%#v|%d", s.Cron, s.TaskQueue, workflowIdentity(s.Workflow), s.Args, resolvedOverlap(s.Overlap)))
+	}
+
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
+}
+
+func workflowIdentity(workflow interface{}) string {
+	if workflow == nil {
+		return ""
+	}
+	if workflowName, ok := workflow.(string); ok {
+		return workflowName
+	}
+
+	value := reflect.ValueOf(workflow)
+	if value.Kind() == reflect.Func {
+		if fn := runtime.FuncForPC(value.Pointer()); fn != nil {
+			return fn.Name()
+		}
+	}
+
+	return fmt.Sprintf("%T", workflow)
 }

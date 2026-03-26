@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os/signal"
 	"syscall"
 
@@ -103,25 +102,25 @@ var geoStatusCmd = &cobra.Command{
 		}
 
 		// Print summary.
-		fmt.Println("=== Geocoding Status ===")
-		fmt.Printf("Total addresses:    %d\n", totalAddresses)
-		fmt.Printf("Geocoded:           %d\n", geocoded)
-		fmt.Printf("Ungeocoded:         %d\n", ungeocoded)
-		fmt.Printf("MSA associations:   %d\n", msaAssociations)
-		fmt.Println()
+		printOutputln(cmd, "=== Geocoding Status ===")
+		printOutputf(cmd, "Total addresses:    %d\n", totalAddresses)
+		printOutputf(cmd, "Geocoded:           %d\n", geocoded)
+		printOutputf(cmd, "Ungeocoded:         %d\n", ungeocoded)
+		printOutputf(cmd, "MSA associations:   %d\n", msaAssociations)
+		printOutputln(cmd)
 
 		if len(sources) > 0 {
-			fmt.Println("Geocode sources:")
+			printOutputln(cmd, "Geocode sources:")
 			for _, s := range sources {
-				fmt.Printf("  %-15s %d\n", s.Source, s.Count)
+				printOutputf(cmd, "  %-15s %d\n", s.Source, s.Count)
 			}
-			fmt.Println()
+			printOutputln(cmd)
 		}
 
 		if len(classifications) > 0 {
-			fmt.Println("Classification breakdown:")
+			printOutputln(cmd, "Classification breakdown:")
 			for _, c := range classifications {
-				fmt.Printf("  %-15s %d\n", c.Classification, c.Count)
+				printOutputf(cmd, "  %-15s %d\n", c.Classification, c.Count)
 			}
 		}
 

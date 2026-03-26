@@ -282,7 +282,7 @@ func init() {
 }
 
 // runBatchViaTemporal starts a BatchEnrichWorkflow on Temporal.
-func runBatchViaTemporal(ctx context.Context, _ *cobra.Command) error {
+func runBatchViaTemporal(ctx context.Context, cmd *cobra.Command) error {
 	c, err := temporalpkg.NewClient(cfg.Temporal)
 	if err != nil {
 		return err
@@ -317,7 +317,7 @@ func runBatchViaTemporal(ctx context.Context, _ *cobra.Command) error {
 		companies[i] = leadToCompany(lead)
 	}
 
-	workflowID := fmt.Sprintf("batch-enrich-%d", time.Now().UnixNano())
+	workflowID := temporalpkg.NewWorkflowID("batch-enrich")
 	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        workflowID,
 		TaskQueue: temporalpkg.EnrichmentTaskQueue,
@@ -339,7 +339,7 @@ func runBatchViaTemporal(ctx context.Context, _ *cobra.Command) error {
 		return eris.Wrap(err, "batch enrich workflow failed")
 	}
 
-	fmt.Printf("Batch complete: %d succeeded, %d failed\n", result.Succeeded, result.Failed)
+	printOutputf(cmd, "Batch complete: %d succeeded, %d failed\n", result.Succeeded, result.Failed)
 	return nil
 }
 

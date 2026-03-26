@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/spf13/cobra"
 	"go.temporal.io/sdk/client"
@@ -15,6 +14,7 @@ import (
 var temporalSchedulesCmd = &cobra.Command{
 	Use:   "temporal-schedules",
 	Short: "Manage Temporal schedules for all workflow domains",
+	Long:  "Manage the canonical desired-state Temporal schedule registry for all workflow domains.",
 }
 
 var schedulesReconcileCmd = &cobra.Command{
@@ -45,11 +45,11 @@ var schedulesReconcileCmd = &cobra.Command{
 			prefix = "(dry-run) "
 		}
 
-		fmt.Printf("%sSchedule reconciliation complete:\n", prefix)
-		fmt.Printf("  Created:   %d %v\n", len(result.Created), result.Created)
-		fmt.Printf("  Updated:   %d %v\n", len(result.Updated), result.Updated)
-		fmt.Printf("  Deleted:   %d %v\n", len(result.Deleted), result.Deleted)
-		fmt.Printf("  Unchanged: %d %v\n", len(result.Unchanged), result.Unchanged)
+		printOutputf(cmd, "%sSchedule reconciliation complete:\n", prefix)
+		printOutputf(cmd, "  Created:   %d %v\n", len(result.Created), result.Created)
+		printOutputf(cmd, "  Updated:   %d %v\n", len(result.Updated), result.Updated)
+		printOutputf(cmd, "  Deleted:   %d %v\n", len(result.Deleted), result.Deleted)
+		printOutputf(cmd, "  Unchanged: %d %v\n", len(result.Unchanged), result.Unchanged)
 
 		return nil
 	},
@@ -58,7 +58,7 @@ var schedulesReconcileCmd = &cobra.Command{
 var schedulesListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List current Temporal schedules with status",
-	RunE: func(_ *cobra.Command, _ []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		c, err := temporalpkg.NewClient(cfg.Temporal)
 		if err != nil {
 			return err
@@ -76,14 +76,14 @@ var schedulesListCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			fmt.Printf("%-30s\n", entry.ID)
+			printOutputf(cmd, "%-30s\n", entry.ID)
 			count++
 		}
 
 		if count == 0 {
-			fmt.Println("No schedules found.")
+			printOutputln(cmd, "No schedules found.")
 		} else {
-			fmt.Printf("\n%d schedule(s) total\n", count)
+			printOutputf(cmd, "\n%d schedule(s) total\n", count)
 		}
 
 		return nil
@@ -94,7 +94,7 @@ var schedulesPauseCmd = &cobra.Command{
 	Use:   "pause <schedule-id>",
 	Short: "Pause a schedule",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(_ *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := temporalpkg.NewClient(cfg.Temporal)
 		if err != nil {
 			return err
@@ -107,7 +107,7 @@ var schedulesPauseCmd = &cobra.Command{
 		}
 
 		zap.L().Info("schedule paused", zap.String("id", args[0]))
-		fmt.Printf("Paused schedule: %s\n", args[0])
+		printOutputf(cmd, "Paused schedule: %s\n", args[0])
 		return nil
 	},
 }
@@ -116,7 +116,7 @@ var schedulesUnpauseCmd = &cobra.Command{
 	Use:   "unpause <schedule-id>",
 	Short: "Unpause a schedule",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(_ *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := temporalpkg.NewClient(cfg.Temporal)
 		if err != nil {
 			return err
@@ -129,7 +129,7 @@ var schedulesUnpauseCmd = &cobra.Command{
 		}
 
 		zap.L().Info("schedule unpaused", zap.String("id", args[0]))
-		fmt.Printf("Unpaused schedule: %s\n", args[0])
+		printOutputf(cmd, "Unpaused schedule: %s\n", args[0])
 		return nil
 	},
 }
@@ -138,7 +138,7 @@ var schedulesTriggerCmd = &cobra.Command{
 	Use:   "trigger <schedule-id>",
 	Short: "Manually trigger a schedule now",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(_ *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := temporalpkg.NewClient(cfg.Temporal)
 		if err != nil {
 			return err
@@ -151,13 +151,13 @@ var schedulesTriggerCmd = &cobra.Command{
 		}
 
 		zap.L().Info("schedule triggered", zap.String("id", args[0]))
-		fmt.Printf("Triggered schedule: %s\n", args[0])
+		printOutputf(cmd, "Triggered schedule: %s\n", args[0])
 		return nil
 	},
 }
 
 func init() {
-	schedulesReconcileCmd.Flags().Bool("prune", false, "delete schedules not in desired list")
+	schedulesReconcileCmd.Flags().Bool("prune", true, "delete schedules not in desired list")
 	schedulesReconcileCmd.Flags().Bool("dry-run", false, "preview changes without applying")
 
 	temporalSchedulesCmd.AddCommand(schedulesReconcileCmd)

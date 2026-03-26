@@ -32,7 +32,7 @@ func TestBuildMux_ServerLifecycle(t *testing.T) {
 	// Test the full server start + request + graceful shutdown cycle.
 	router := api.Router(api.NewHandlers(
 		&config.Config{Server: config.ServerConfig{Port: 8080}},
-		nil, nil, nil,
+		nil, nil, nil, nil,
 	))
 
 	port := getFreePort(t)

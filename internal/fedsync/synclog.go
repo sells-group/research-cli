@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/rotisserie/eris"
+
+	"github.com/sells-group/research-cli/internal/apicache"
 	"github.com/sells-group/research-cli/internal/db"
 )
 
@@ -28,14 +30,43 @@ type SyncResult struct {
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
+// SyncSummary aggregates sync log entries over a time window.
+type SyncSummary struct {
+	Total    int `json:"total"`
+	Complete int `json:"complete"`
+	Failed   int `json:"failed"`
+	Running  int `json:"running"`
+}
+
 // SyncLog provides read/write access to the fed_data.sync_log table.
 type SyncLog struct {
-	pool db.Pool
+	pool  db.Pool
+	cache apicache.Cache
 }
 
 // NewSyncLog creates a new SyncLog backed by the given connection pool.
 func NewSyncLog(pool db.Pool) *SyncLog {
 	return &SyncLog{pool: pool}
+}
+
+// SetCache configures shared cache invalidation for sync-log writes.
+func (s *SyncLog) SetCache(cache apicache.Cache) {
+	s.cache = cache
+}
+
+func (s *SyncLog) invalidateStatuses() {
+	if s.cache == nil {
+		return
+	}
+	_ = s.cache.DeleteDomains(apicache.DomainFedsync)
+}
+
+func (s *SyncLog) refreshLatestStatusView(ctx context.Context) {
+	_, _ = s.pool.Exec(ctx, `REFRESH MATERIALIZED VIEW fed_data.mv_dataset_status_latest`)
+}
+
+func (s *SyncLog) refreshDailyTrendsView(ctx context.Context) {
+	_, _ = s.pool.Exec(ctx, `REFRESH MATERIALIZED VIEW fed_data.mv_sync_daily_trends`)
 }
 
 // LastSuccess returns the started_at time of the most recent successful sync for a dataset.
@@ -92,6 +123,8 @@ func (s *SyncLog) Start(ctx context.Context, dataset string) (int64, error) {
 	if err != nil {
 		return 0, eris.Wrapf(err, "synclog: start sync for %s", dataset)
 	}
+	s.refreshLatestStatusView(ctx)
+	s.invalidateStatuses()
 	return id, nil
 }
 
@@ -120,6 +153,9 @@ func (s *SyncLog) Complete(ctx context.Context, syncID int64, result *SyncResult
 	if err != nil {
 		return eris.Wrapf(err, "synclog: complete sync %d", syncID)
 	}
+	s.refreshLatestStatusView(ctx)
+	s.refreshDailyTrendsView(ctx)
+	s.invalidateStatuses()
 	return nil
 }
 
@@ -134,6 +170,9 @@ func (s *SyncLog) Fail(ctx context.Context, syncID int64, errMsg string) error {
 	if err != nil {
 		return eris.Wrapf(err, "synclog: fail sync %d", syncID)
 	}
+	s.refreshLatestStatusView(ctx)
+	s.refreshDailyTrendsView(ctx)
+	s.invalidateStatuses()
 	return nil
 }
 
@@ -167,4 +206,23 @@ func (s *SyncLog) ListAll(ctx context.Context) ([]SyncEntry, error) {
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
+}
+
+// SummarizeSince returns aggregate sync counts within the given time window.
+func (s *SyncLog) SummarizeSince(ctx context.Context, since time.Time) (*SyncSummary, error) {
+	summary := &SyncSummary{}
+	err := s.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(*),
+			COUNT(*) FILTER (WHERE status = 'complete'),
+			COUNT(*) FILTER (WHERE status = 'failed'),
+			COUNT(*) FILTER (WHERE status = 'running')
+		FROM fed_data.sync_log
+		WHERE started_at >= $1`,
+		since,
+	).Scan(&summary.Total, &summary.Complete, &summary.Failed, &summary.Running)
+	if err != nil {
+		return nil, eris.Wrap(err, "synclog: summarize since")
+	}
+	return summary, nil
 }

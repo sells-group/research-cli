@@ -15,7 +15,7 @@ import (
 
 func newTestRouter() http.Handler {
 	cfg := &config.Config{Server: config.ServerConfig{Port: 8080}}
-	return Router(NewHandlers(cfg, nil, nil, nil))
+	return Router(NewHandlers(cfg, nil, nil, nil, nil))
 }
 
 func TestRouter_HealthVersioned(t *testing.T) {
@@ -104,7 +104,7 @@ func TestRouter_MethodNotAllowed_ReturnsJSON(t *testing.T) {
 func TestRouter_CompressLargeResponse(t *testing.T) {
 	// Create a handler that returns a large response to trigger compression.
 	cfg := &config.Config{Server: config.ServerConfig{Port: 8080}}
-	h := NewHandlers(cfg, nil, nil, nil)
+	h := NewHandlers(cfg, nil, nil, nil, nil)
 	router := Router(h)
 
 	// Health response is small, but we can verify the Vary header is set
@@ -148,7 +148,7 @@ func TestRouter_WebhookAuth_Integration(t *testing.T) {
 			WebhookSecret: "my-secret",
 		},
 	}
-	router := Router(NewHandlers(cfg, nil, nil, nil))
+	router := Router(NewHandlers(cfg, nil, nil, nil, nil))
 
 	// Without auth → 401.
 	w := httptest.NewRecorder()
@@ -166,4 +166,16 @@ func TestRouter_WebhookAuth_Integration(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer my-secret")
 	router.ServeHTTP(w, r)
 	assert.Equal(t, http.StatusAccepted, w.Code)
+}
+
+func TestRouter_PrometheusMetrics(t *testing.T) {
+	router := newTestRouter()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/prometheus", nil)
+	router.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "text/plain")
+	assert.Contains(t, w.Body.String(), "research_api_requests_total")
 }

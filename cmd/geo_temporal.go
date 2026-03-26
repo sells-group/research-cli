@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"time"
 
 	"github.com/rotisserie/eris"
 	"github.com/spf13/cobra"
@@ -42,7 +40,7 @@ func runGeoScrapeViaTemporal(ctx context.Context, cmd *cobra.Command) error {
 		params.States = splitAndTrim(statesStr)
 	}
 
-	workflowID := fmt.Sprintf("geo-scrape-%d", time.Now().UnixNano())
+	workflowID := temporalpkg.NewWorkflowID("geo-scrape")
 	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        workflowID,
 		TaskQueue: temporalpkg.GeoTaskQueue,
@@ -61,12 +59,12 @@ func runGeoScrapeViaTemporal(ctx context.Context, cmd *cobra.Command) error {
 		return eris.Wrap(err, "geo scrape workflow failed")
 	}
 
-	fmt.Printf("Geo scrape complete: %d synced, %d failed\n", result.Synced, result.Failed)
+	printOutputf(cmd, "Geo scrape complete: %d synced, %d failed\n", result.Synced, result.Failed)
 	for _, o := range result.Outcomes {
 		if o.Status == "complete" {
-			fmt.Printf("  %s: %d rows\n", o.Scraper, o.RowsSynced)
+			printOutputf(cmd, "  %s: %d rows\n", o.Scraper, o.RowsSynced)
 		} else {
-			fmt.Printf("  %s: FAILED (%s)\n", o.Scraper, o.Error)
+			printOutputf(cmd, "  %s: FAILED (%s)\n", o.Scraper, o.Error)
 		}
 	}
 	return nil
@@ -91,7 +89,7 @@ func runGeoBackfillViaTemporal(ctx context.Context, cmd *cobra.Command, source s
 		SkipMSA:   skipMSA,
 	}
 
-	workflowID := fmt.Sprintf("geo-backfill-%s-%d", source, time.Now().UnixNano())
+	workflowID := temporalpkg.NewWorkflowID("geo-backfill", source)
 	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        workflowID,
 		TaskQueue: temporalpkg.GeoTaskQueue,
@@ -111,7 +109,7 @@ func runGeoBackfillViaTemporal(ctx context.Context, cmd *cobra.Command, source s
 		return eris.Wrapf(err, "geo backfill %s workflow failed", source)
 	}
 
-	fmt.Printf("%s backfill complete: %d created, %d geocoded, %d linked, %d branches, %d MSA associations, %d failed\n",
+	printOutputf(cmd, "%s backfill complete: %d created, %d geocoded, %d linked, %d branches, %d MSA associations, %d failed\n",
 		source, result.Created, result.Geocoded, result.Linked, result.Branches, result.MSAs, result.Failed)
 	return nil
 }
@@ -155,7 +153,7 @@ func runTigerLoadViaTemporal(ctx context.Context, cmd *cobra.Command) error {
 		params.Concurrency = cfg.Tiger.Concurrency
 	}
 
-	workflowID := fmt.Sprintf("tiger-load-%d", time.Now().UnixNano())
+	workflowID := temporalpkg.NewWorkflowID("tiger-load")
 	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        workflowID,
 		TaskQueue: temporalpkg.GeoTaskQueue,
@@ -174,13 +172,13 @@ func runTigerLoadViaTemporal(ctx context.Context, cmd *cobra.Command) error {
 		return eris.Wrap(err, "tiger load workflow failed")
 	}
 
-	fmt.Printf("TIGER load complete: %d national, %d states loaded, %d failed\n",
+	printOutputf(cmd, "TIGER load complete: %d national, %d states loaded, %d failed\n",
 		result.National, result.Loaded, result.Failed)
 	for _, o := range result.Outcomes {
 		if o.Status == "complete" {
-			fmt.Printf("  %s: %d rows\n", o.State, o.RowsLoaded)
+			printOutputf(cmd, "  %s: %d rows\n", o.State, o.RowsLoaded)
 		} else {
-			fmt.Printf("  %s: FAILED (%s)\n", o.State, o.Error)
+			printOutputf(cmd, "  %s: FAILED (%s)\n", o.State, o.Error)
 		}
 	}
 	return nil

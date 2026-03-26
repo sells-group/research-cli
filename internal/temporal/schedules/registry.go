@@ -8,16 +8,12 @@ import (
 	temporalgeoscraper "github.com/sells-group/research-cli/internal/temporal/geoscraper"
 )
 
-// AllSchedules returns every schedule the system needs.
-// Individual datasets get their own schedules with appropriate cron expressions
-// matching their upstream cadence. ShouldRun() + AvailabilityChecker inside the
-// workflow still gate actual execution — the cron just controls check frequency.
-func AllSchedules() []Schedule {
+// FedsyncSchedules returns the canonical Temporal schedules for fedsync.
+func FedsyncSchedules() []Schedule {
 	return []Schedule{
-		// --- Fedsync ---
 		{
 			ID:          "fedsync-daily",
-			Description: "Fedsync daily datasets (FPDS, FormD, IACompilation, XBRLFacts)",
+			Description: "Fedsync daily sweep for all due datasets",
 			Cron:        "0 2 * * *",
 			TaskQueue:   temporalpkg.FedsyncTaskQueue,
 			Workflow:    temporalfedsync.RunWorkflow,
@@ -25,51 +21,15 @@ func AllSchedules() []Schedule {
 			Overlap:     enumspb.SCHEDULE_OVERLAP_POLICY_SKIP,
 			Tags:        map[string]string{"domain": "fedsync", "cadence": "daily"},
 		},
-		{
-			ID:          "fedsync-weekly",
-			Description: "Fedsync weekly datasets (EDGARSubmissions, ADVPart1, FDICBankFind)",
-			Cron:        "0 3 * * 1",
-			TaskQueue:   temporalpkg.FedsyncTaskQueue,
-			Workflow:    temporalfedsync.RunWorkflow,
-			Args:        []interface{}{temporalfedsync.RunParams{}},
-			Overlap:     enumspb.SCHEDULE_OVERLAP_POLICY_SKIP,
-			Tags:        map[string]string{"domain": "fedsync", "cadence": "weekly"},
-		},
-		{
-			ID:          "fedsync-monthly",
-			Description: "Fedsync monthly datasets (EOBMF, BrokerCheck, EPAECHO, FRED, etc.)",
-			Cron:        "0 4 1 * *",
-			TaskQueue:   temporalpkg.FedsyncTaskQueue,
-			Workflow:    temporalfedsync.RunWorkflow,
-			Args:        []interface{}{temporalfedsync.RunParams{}},
-			Overlap:     enumspb.SCHEDULE_OVERLAP_POLICY_SKIP,
-			Tags:        map[string]string{"domain": "fedsync", "cadence": "monthly"},
-		},
-		{
-			ID:          "fedsync-quarterly",
-			Description: "Fedsync quarterly datasets (QCEW, SBA, Holdings13F, ECI)",
-			Cron:        "0 5 1 1,4,7,10 *",
-			TaskQueue:   temporalpkg.FedsyncTaskQueue,
-			Workflow:    temporalfedsync.RunWorkflow,
-			Args:        []interface{}{temporalfedsync.RunParams{}},
-			Overlap:     enumspb.SCHEDULE_OVERLAP_POLICY_SKIP,
-			Tags:        map[string]string{"domain": "fedsync", "cadence": "quarterly"},
-		},
-		{
-			ID:          "fedsync-annual",
-			Description: "Fedsync annual datasets (CBP, SUSB, OEWS, Form5500, EconCensus, etc.)",
-			Cron:        "0 6 1 3 *",
-			TaskQueue:   temporalpkg.FedsyncTaskQueue,
-			Workflow:    temporalfedsync.RunWorkflow,
-			Args:        []interface{}{temporalfedsync.RunParams{}},
-			Overlap:     enumspb.SCHEDULE_OVERLAP_POLICY_SKIP,
-			Tags:        map[string]string{"domain": "fedsync", "cadence": "annual"},
-		},
+	}
+}
 
-		// --- Geoscraper ---
+// GeoSchedules returns the Temporal schedules for the geoscraper domain.
+func GeoSchedules() []Schedule {
+	return []Schedule{
 		{
 			ID:          "geo-national",
-			Description: "National geo scrapers (HIFLD, FEMA, EPA, Census) — availability gated",
+			Description: "National geo scrapers",
 			Cron:        "0 7 * * *",
 			TaskQueue:   temporalpkg.GeoTaskQueue,
 			Workflow:    temporalgeoscraper.ScrapeWorkflow,
@@ -92,6 +52,14 @@ func AllSchedules() []Schedule {
 			Tags:    map[string]string{"domain": "geoscraper", "cadence": "weekly"},
 		},
 	}
+}
+
+// AllSchedules returns every schedule the system needs.
+func AllSchedules() []Schedule {
+	schedules := make([]Schedule, 0, len(FedsyncSchedules())+len(GeoSchedules()))
+	schedules = append(schedules, FedsyncSchedules()...)
+	schedules = append(schedules, GeoSchedules()...)
+	return schedules
 }
 
 func strPtr(s string) *string { return &s }

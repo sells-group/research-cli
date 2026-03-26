@@ -15,6 +15,14 @@ import (
 // It wraps the pipeline as a coarse-grained activity to avoid rewriting
 // all 9 phases as separate activities (future optimization).
 func EnrichCompanyWorkflow(ctx workflow.Context, params EnrichCompanyParams) (*EnrichCompanyResult, error) {
+	workflow.GetLogger(ctx).Info("starting enrichment workflow",
+		"company", params.Company.URL,
+		"request_id", params.Metadata.RequestID,
+		"trigger_source", params.Metadata.TriggerSource,
+		"original_run_id", params.Metadata.OriginalRunID,
+		"dedupe_key", params.Metadata.DedupeKey,
+	)
+
 	progress := &Progress{
 		Company:      params.Company.URL,
 		CurrentPhase: "starting",

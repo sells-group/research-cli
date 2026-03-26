@@ -16,21 +16,35 @@ import (
 )
 
 func initStore(ctx context.Context) (store.Store, error) {
+	var (
+		st  store.Store
+		err error
+	)
 	switch cfg.Store.Driver {
 	case "sqlite":
 		dsn := cfg.Store.DatabaseURL
 		if dsn == "" {
 			dsn = "research.db"
 		}
-		return store.NewSQLite(dsn)
+		st, err = store.NewSQLite(dsn)
 	case "postgres":
-		return store.NewPostgres(ctx, cfg.Store.DatabaseURL, &store.PoolConfig{
+		st, err = store.NewPostgres(ctx, cfg.Store.DatabaseURL, &store.PoolConfig{
 			MaxConns: cfg.Store.MaxConns,
 			MinConns: cfg.Store.MinConns,
 		})
 	default:
 		return nil, eris.Errorf("unsupported store driver: %s", cfg.Store.Driver)
 	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	cache, cacheErr := openRedisAPICache(ctx)
+	if cacheErr != nil {
+		return nil, cacheErr
+	}
+	return store.WithAPICache(st, cache), nil
 }
 
 func initSalesforce() (sfpkg.Client, error) {

@@ -35,7 +35,7 @@ func TestStartServer_GracefulShutdown(t *testing.T) {
 
 	router := api.Router(api.NewHandlers(
 		&config.Config{Server: config.ServerConfig{Port: 8080}},
-		nil, nil, nil,
+		nil, nil, nil, nil,
 	))
 
 	// Find a free port.

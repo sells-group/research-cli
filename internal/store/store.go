@@ -33,6 +33,17 @@ type StaleCompany struct {
 	LastScore float64       `json:"last_score"`
 }
 
+// RunSummary aggregates enrichment runs over a time window.
+type RunSummary struct {
+	Total     int     `json:"total"`
+	Complete  int     `json:"complete"`
+	Failed    int     `json:"failed"`
+	Queued    int     `json:"queued"`
+	CostUSD   float64 `json:"cost_usd"`
+	AvgScore  float64 `json:"avg_score"`
+	AvgTokens int     `json:"avg_tokens"`
+}
+
 // Store defines the persistence interface for the enrichment pipeline.
 type Store interface {
 	// Runs
@@ -42,6 +53,9 @@ type Store interface {
 	FailRun(ctx context.Context, runID string, runErr *model.RunError) error
 	GetRun(ctx context.Context, runID string) (*model.Run, error)
 	ListRuns(ctx context.Context, filter RunFilter) ([]model.Run, error)
+	CountRuns(ctx context.Context, filter RunFilter) (int, error)
+	CountRunsByStatus(ctx context.Context) (map[string]int, error)
+	SummarizeRuns(ctx context.Context, since time.Time) (*RunSummary, error)
 
 	// Phases
 	CreatePhase(ctx context.Context, runID string, name string) (*model.RunPhase, error)

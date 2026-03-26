@@ -1,11 +1,25 @@
 // Package enrichment provides Temporal workflows and activities for the enrichment pipeline.
 package enrichment
 
-import "github.com/sells-group/research-cli/internal/model"
+import (
+	"time"
+
+	"github.com/sells-group/research-cli/internal/model"
+)
+
+// StartMetadata carries API start metadata into workflow execution for observability.
+type StartMetadata struct {
+	RequestID     string    `json:"request_id,omitempty"`
+	TriggerSource string    `json:"trigger_source,omitempty"`
+	OriginalRunID string    `json:"original_run_id,omitempty"`
+	DedupeKey     string    `json:"dedupe_key,omitempty"`
+	RequestedAt   time.Time `json:"requested_at,omitempty"`
+}
 
 // EnrichCompanyParams is the input for EnrichCompanyWorkflow.
 type EnrichCompanyParams struct {
-	Company model.Company `json:"company"`
+	Company  model.Company `json:"company"`
+	Metadata StartMetadata `json:"metadata,omitempty"`
 }
 
 // EnrichCompanyResult is the output of EnrichCompanyWorkflow.

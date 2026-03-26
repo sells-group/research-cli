@@ -22,6 +22,44 @@ type mockStore struct {
 	dlqErr   error
 }
 
+func (m *mockStore) SummarizeRuns(_ context.Context, since time.Time) (*store.RunSummary, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	summary := &store.RunSummary{}
+	totalTokens := 0
+	scoreCount := 0
+	for _, run := range m.runs {
+		if !since.IsZero() && run.CreatedAt.Before(since) {
+			continue
+		}
+		summary.Total++
+		switch run.Status {
+		case model.RunStatusComplete:
+			summary.Complete++
+		case model.RunStatusFailed:
+			summary.Failed++
+		case model.RunStatusQueued:
+			summary.Queued++
+		}
+		if run.Result != nil {
+			summary.CostUSD += run.Result.TotalCost
+			totalTokens += run.Result.TotalTokens
+			if run.Result.Score > 0 {
+				summary.AvgScore += run.Result.Score
+				scoreCount++
+			}
+		}
+	}
+	if summary.Total > 0 {
+		summary.AvgTokens = totalTokens / summary.Total
+	}
+	if scoreCount > 0 {
+		summary.AvgScore = summary.AvgScore / float64(scoreCount)
+	}
+	return summary, nil
+}
+
 func (m *mockStore) ListRuns(_ context.Context, filter store.RunFilter) ([]model.Run, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
@@ -37,6 +75,22 @@ func (m *mockStore) ListRuns(_ context.Context, filter store.RunFilter) ([]model
 		filtered = append(filtered, r)
 	}
 	return filtered, nil
+}
+
+func (m *mockStore) CountRuns(ctx context.Context, filter store.RunFilter) (int, error) {
+	runs, err := m.ListRuns(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return len(runs), nil
+}
+
+func (m *mockStore) CountRunsByStatus(context.Context) (map[string]int, error) {
+	counts := make(map[string]int)
+	for _, run := range m.runs {
+		counts[string(run.Status)]++
+	}
+	return counts, nil
 }
 
 func (m *mockStore) CountDLQ(_ context.Context) (int, error) {
@@ -104,8 +158,26 @@ type mockSyncLog struct {
 	err     error
 }
 
-func (m *mockSyncLog) ListAll(_ context.Context) ([]fedsync.SyncEntry, error) {
-	return m.entries, m.err
+func (m *mockSyncLog) SummarizeSince(_ context.Context, since time.Time) (*fedsync.SyncSummary, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	summary := &fedsync.SyncSummary{}
+	for _, entry := range m.entries {
+		if !since.IsZero() && entry.StartedAt.Before(since) {
+			continue
+		}
+		summary.Total++
+		switch entry.Status {
+		case "complete":
+			summary.Complete++
+		case "failed":
+			summary.Failed++
+		case "running":
+			summary.Running++
+		}
+	}
+	return summary, nil
 }
 
 func TestCollector_EmptyStore(t *testing.T) {

@@ -11,18 +11,19 @@ import (
 
 func TestNewHandlers(t *testing.T) {
 	cfg := &config.Config{Server: config.ServerConfig{Port: 8080}}
-	h := NewHandlers(cfg, nil, nil, nil)
+	h := NewHandlers(cfg, nil, nil, nil, nil)
 
 	require.NotNil(t, h)
 	assert.Equal(t, cfg, h.cfg)
 	assert.Nil(t, h.store)
 	assert.Nil(t, h.runner)
 	assert.Nil(t, h.collector)
+	assert.NotNil(t, h.cache)
 	assert.Equal(t, WebhookSemSize, cap(h.sem))
 }
 
 func TestDrain_ReturnsImmediately(t *testing.T) {
-	h := NewHandlers(&config.Config{}, nil, nil, nil)
+	h := NewHandlers(&config.Config{}, nil, nil, nil, nil)
 
 	// Drain should return immediately when no in-flight jobs.
 	done := make(chan struct{})

@@ -42,6 +42,11 @@ Stage 2: Multi-dataset matching across ADV, EDGAR, BrokerCheck, Form BD, OSHA,
 		})
 
 		syncLog := fedsync.NewSyncLog(pool)
+		closeSyncCache, err := attachSyncLogCache(ctx, syncLog)
+		if err != nil {
+			return err
+		}
+		defer closeSyncCache()
 		reg := dataset.NewRegistry(cfg)
 		engine := dataset.NewEngine(pool, f, syncLog, reg, cfg.Fedsync.TempDir)
 

@@ -348,9 +348,18 @@ type BatchConfig struct {
 
 // ServerConfig configures the webhook server.
 type ServerConfig struct {
-	Port          int      `yaml:"port" mapstructure:"port"`
-	WebhookSecret string   `yaml:"webhook_secret" mapstructure:"webhook_secret"`
-	CORSOrigins   []string `yaml:"cors_origins" mapstructure:"cors_origins"`
+	Port          int             `yaml:"port" mapstructure:"port"`
+	WebhookSecret string          `yaml:"webhook_secret" mapstructure:"webhook_secret"`
+	CORSOrigins   []string        `yaml:"cors_origins" mapstructure:"cors_origins"`
+	HTTPCache     HTTPCacheConfig `yaml:"http_cache" mapstructure:"http_cache"`
+}
+
+// HTTPCacheConfig configures shared API response caching.
+type HTTPCacheConfig struct {
+	Backend            string `yaml:"backend" mapstructure:"backend"`
+	RedisURL           string `yaml:"redis_url" mapstructure:"redis_url"`
+	KeyPrefix          string `yaml:"key_prefix" mapstructure:"key_prefix"`
+	ConnectTimeoutSecs int    `yaml:"connect_timeout_secs" mapstructure:"connect_timeout_secs"`
 }
 
 // LogConfig configures logging.
@@ -460,6 +469,10 @@ func Load() (*Config, error) {
 	v.SetDefault("log.format", "json")
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("server.cors_origins", []string{"https://*.sellsadvisors.com"})
+	v.SetDefault("server.http_cache.backend", "memory")
+	v.SetDefault("server.http_cache.redis_url", "")
+	v.SetDefault("server.http_cache.key_prefix", "research-cli:api-cache")
+	v.SetDefault("server.http_cache.connect_timeout_secs", 2)
 	v.SetDefault("batch.max_concurrent_companies", 15)
 	v.SetDefault("crawl.max_pages", 50)
 	v.SetDefault("crawl.max_depth", 2)

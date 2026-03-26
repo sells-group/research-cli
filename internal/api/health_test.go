@@ -16,7 +16,7 @@ import (
 )
 
 func TestHealth_NilStore(t *testing.T) {
-	h := NewHandlers(&config.Config{}, nil, nil, nil)
+	h := NewHandlers(&config.Config{}, nil, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -33,7 +33,7 @@ func TestHealth_PingSuccess(t *testing.T) {
 	st := mocks.NewMockStore(t)
 	st.EXPECT().Ping(mock.Anything).Return(nil)
 
-	h := NewHandlers(&config.Config{}, st, nil, nil)
+	h := NewHandlers(&config.Config{}, st, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -50,7 +50,7 @@ func TestHealth_PingError(t *testing.T) {
 	st := mocks.NewMockStore(t)
 	st.EXPECT().Ping(mock.Anything).Return(eris.New("connection refused"))
 
-	h := NewHandlers(&config.Config{}, st, nil, nil)
+	h := NewHandlers(&config.Config{}, st, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/health", nil)

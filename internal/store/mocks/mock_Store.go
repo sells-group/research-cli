@@ -1247,6 +1247,180 @@ func (_c *MockStore_ListRuns_Call) RunAndReturn(run func(context.Context, store.
 	return _c
 }
 
+// CountRuns provides a mock function with given fields: ctx, filter
+func (_m *MockStore) CountRuns(ctx context.Context, filter store.RunFilter) (int, error) {
+	ret := _m.Called(ctx, filter)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountRuns")
+	}
+
+	var r0 int
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, store.RunFilter) (int, error)); ok {
+		return rf(ctx, filter)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, store.RunFilter) int); ok {
+		r0 = rf(ctx, filter)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, store.RunFilter) error); ok {
+		r1 = rf(ctx, filter)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStore_CountRuns_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountRuns'
+type MockStore_CountRuns_Call struct {
+	*mock.Call
+}
+
+// CountRuns is a helper method to define mock.On call
+//   - ctx context.Context
+//   - filter store.RunFilter
+func (_e *MockStore_Expecter) CountRuns(ctx interface{}, filter interface{}) *MockStore_CountRuns_Call {
+	return &MockStore_CountRuns_Call{Call: _e.mock.On("CountRuns", ctx, filter)}
+}
+
+func (_c *MockStore_CountRuns_Call) Run(run func(ctx context.Context, filter store.RunFilter)) *MockStore_CountRuns_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(store.RunFilter))
+	})
+	return _c
+}
+
+func (_c *MockStore_CountRuns_Call) Return(_a0 int, _a1 error) *MockStore_CountRuns_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStore_CountRuns_Call) RunAndReturn(run func(context.Context, store.RunFilter) (int, error)) *MockStore_CountRuns_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CountRunsByStatus provides a mock function with given fields: ctx
+func (_m *MockStore) CountRunsByStatus(ctx context.Context) (map[string]int, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountRunsByStatus")
+	}
+
+	var r0 map[string]int
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (map[string]int, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) map[string]int); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]int)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStore_CountRunsByStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountRunsByStatus'
+type MockStore_CountRunsByStatus_Call struct {
+	*mock.Call
+}
+
+// CountRunsByStatus is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockStore_Expecter) CountRunsByStatus(ctx interface{}) *MockStore_CountRunsByStatus_Call {
+	return &MockStore_CountRunsByStatus_Call{Call: _e.mock.On("CountRunsByStatus", ctx)}
+}
+
+func (_c *MockStore_CountRunsByStatus_Call) Run(run func(ctx context.Context)) *MockStore_CountRunsByStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockStore_CountRunsByStatus_Call) Return(_a0 map[string]int, _a1 error) *MockStore_CountRunsByStatus_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStore_CountRunsByStatus_Call) RunAndReturn(run func(context.Context) (map[string]int, error)) *MockStore_CountRunsByStatus_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SummarizeRuns provides a mock function with given fields: ctx, since
+func (_m *MockStore) SummarizeRuns(ctx context.Context, since time.Time) (*store.RunSummary, error) {
+	ret := _m.Called(ctx, since)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SummarizeRuns")
+	}
+
+	var r0 *store.RunSummary
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, time.Time) (*store.RunSummary, error)); ok {
+		return rf(ctx, since)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, time.Time) *store.RunSummary); ok {
+		r0 = rf(ctx, since)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*store.RunSummary)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, time.Time) error); ok {
+		r1 = rf(ctx, since)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStore_SummarizeRuns_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SummarizeRuns'
+type MockStore_SummarizeRuns_Call struct {
+	*mock.Call
+}
+
+// SummarizeRuns is a helper method to define mock.On call
+//   - ctx context.Context
+//   - since time.Time
+func (_e *MockStore_Expecter) SummarizeRuns(ctx interface{}, since interface{}) *MockStore_SummarizeRuns_Call {
+	return &MockStore_SummarizeRuns_Call{Call: _e.mock.On("SummarizeRuns", ctx, since)}
+}
+
+func (_c *MockStore_SummarizeRuns_Call) Run(run func(ctx context.Context, since time.Time)) *MockStore_SummarizeRuns_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(time.Time))
+	})
+	return _c
+}
+
+func (_c *MockStore_SummarizeRuns_Call) Return(_a0 *store.RunSummary, _a1 error) *MockStore_SummarizeRuns_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStore_SummarizeRuns_Call) RunAndReturn(run func(context.Context, time.Time) (*store.RunSummary, error)) *MockStore_SummarizeRuns_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LoadCheckpoint provides a mock function with given fields: ctx, companyID
 func (_m *MockStore) LoadCheckpoint(ctx context.Context, companyID string) (*model.Checkpoint, error) {
 	ret := _m.Called(ctx, companyID)

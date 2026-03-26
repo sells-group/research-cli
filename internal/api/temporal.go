@@ -10,7 +10,6 @@ import (
 
 // WorkflowProgress handles GET /api/workflows/{workflowID}/progress.
 // Queries any Temporal workflow's progress using the specified query name.
-// Defaults to "progress" if no query param is provided.
 func (h *Handlers) WorkflowProgress(w http.ResponseWriter, r *http.Request) {
 	if h.temporalClient == nil {
 		WriteError(w, r, http.StatusServiceUnavailable, "no_temporal", "Temporal client not configured")
@@ -25,7 +24,8 @@ func (h *Handlers) WorkflowProgress(w http.ResponseWriter, r *http.Request) {
 
 	queryName := r.URL.Query().Get("query")
 	if queryName == "" {
-		queryName = "progress"
+		WriteError(w, r, http.StatusBadRequest, "missing_query", "query parameter is required")
+		return
 	}
 
 	resp, err := h.temporalClient.QueryWorkflow(r.Context(), workflowID, "", queryName)

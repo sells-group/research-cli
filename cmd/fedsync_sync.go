@@ -83,6 +83,11 @@ Use --full to perform a full reload instead of incremental sync.`,
 
 		// Build engine.
 		syncLog := fedsync.NewSyncLog(pool)
+		closeSyncCache, err := attachSyncLogCache(ctx, syncLog)
+		if err != nil {
+			return err
+		}
+		defer closeSyncCache()
 		reg := dataset.NewRegistry(cfg)
 		engine := dataset.NewEngine(pool, f, syncLog, reg, runDir)
 
@@ -143,7 +148,7 @@ func runFedsyncViaTemporal(ctx context.Context, cmd *cobra.Command, log *zap.Log
 		zap.Bool("force", params.Force),
 	)
 
-	workflowID := fmt.Sprintf("fedsync-run-%d", time.Now().UnixNano())
+	workflowID := temporalpkg.NewWorkflowID("fedsync-run")
 	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        workflowID,
 		TaskQueue: temporalpkg.FedsyncTaskQueue,
@@ -159,7 +164,7 @@ func runFedsyncViaTemporal(ctx context.Context, cmd *cobra.Command, log *zap.Log
 
 	wait, _ := cmd.Flags().GetBool("wait")
 	if !wait {
-		fmt.Printf("Workflow started: %s (run: %s)\n", run.GetID(), run.GetRunID())
+		printOutputf(cmd, "Workflow started: %s (run: %s)\n", run.GetID(), run.GetRunID())
 		return nil
 	}
 
@@ -168,7 +173,7 @@ func runFedsyncViaTemporal(ctx context.Context, cmd *cobra.Command, log *zap.Log
 		return eris.Wrap(err, "fedsync workflow failed")
 	}
 
-	fmt.Printf("Fedsync complete: %d synced, %d failed\n", result.Synced, result.Failed)
+	printOutputf(cmd, "Fedsync complete: %d synced, %d failed\n", result.Synced, result.Failed)
 	return nil
 }
 

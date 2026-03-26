@@ -316,6 +316,104 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunFilter) ([]model
 	return runs, eris.Wrap(rows.Err(), "postgres: list runs iterate")
 }
 
+// CountRuns implements Store.
+func (s *PostgresStore) CountRuns(ctx context.Context, filter RunFilter) (int, error) {
+	query := `SELECT COUNT(*) FROM runs WHERE true`
+	args := []any{}
+	argIdx := 1
+
+	if filter.Status != "" {
+		query += fmt.Sprintf(` AND status = $%d`, argIdx)
+		args = append(args, string(filter.Status))
+		argIdx++
+	}
+	if filter.CompanyURL != "" {
+		query += fmt.Sprintf(` AND company->>'url' = $%d`, argIdx)
+		args = append(args, filter.CompanyURL)
+		argIdx++
+	}
+	if filter.ErrorCategory != "" {
+		query += fmt.Sprintf(` AND error->>'category' = $%d`, argIdx)
+		args = append(args, string(filter.ErrorCategory))
+		argIdx++
+	}
+	if !filter.CreatedAfter.IsZero() {
+		query += fmt.Sprintf(` AND created_at >= $%d`, argIdx)
+		args = append(args, filter.CreatedAfter)
+	}
+
+	var count int
+	if err := s.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		return 0, eris.Wrap(err, "postgres: count runs")
+	}
+	return count, nil
+}
+
+// CountRunsByStatus implements Store.
+func (s *PostgresStore) CountRunsByStatus(ctx context.Context) (map[string]int, error) {
+	rows, err := s.pool.Query(ctx, `SELECT status, COUNT(*) FROM runs GROUP BY status`)
+	if err != nil {
+		return nil, eris.Wrap(err, "postgres: count runs by status")
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, eris.Wrap(err, "postgres: scan run status count")
+		}
+		counts[status] = count
+	}
+
+	return counts, eris.Wrap(rows.Err(), "postgres: iterate run status counts")
+}
+
+// SummarizeRuns implements Store.
+func (s *PostgresStore) SummarizeRuns(ctx context.Context, since time.Time) (*RunSummary, error) {
+	summary := &RunSummary{}
+
+	var avgTokens float64
+	err := s.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(*),
+			COUNT(*) FILTER (WHERE status = 'complete'),
+			COUNT(*) FILTER (WHERE status = 'failed'),
+			COUNT(*) FILTER (WHERE status = 'queued'),
+			COALESCE(SUM(CASE
+				WHEN result->>'total_cost' IS NOT NULL THEN (result->>'total_cost')::numeric
+				ELSE 0
+			END), 0),
+			COALESCE(AVG(CASE
+				WHEN result->>'score' IS NOT NULL AND (result->>'score')::numeric > 0
+					THEN (result->>'score')::numeric
+				ELSE NULL
+			END), 0),
+			COALESCE(AVG(CASE
+				WHEN result->>'total_tokens' IS NOT NULL THEN (result->>'total_tokens')::numeric
+				ELSE 0
+			END), 0)
+		FROM runs
+		WHERE created_at >= $1`,
+		since,
+	).Scan(
+		&summary.Total,
+		&summary.Complete,
+		&summary.Failed,
+		&summary.Queued,
+		&summary.CostUSD,
+		&summary.AvgScore,
+		&avgTokens,
+	)
+	if err != nil {
+		return nil, eris.Wrap(err, "postgres: summarize runs")
+	}
+
+	summary.AvgTokens = int(avgTokens)
+	return summary, nil
+}
+
 // CreatePhase implements Store.
 func (s *PostgresStore) CreatePhase(ctx context.Context, runID string, name string) (*model.RunPhase, error) {
 	id := uuid.New().String()

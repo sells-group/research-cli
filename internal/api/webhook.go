@@ -3,16 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
-	"go.temporal.io/sdk/client"
+	"github.com/go-chi/chi/v5/middleware"
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/model"
-	temporalpkg "github.com/sells-group/research-cli/internal/temporal"
-	temporalenrich "github.com/sells-group/research-cli/internal/temporal/enrichment"
 )
 
 // enrichRequest is the JSON body for POST /webhook/enrich.
@@ -42,7 +39,7 @@ func (h *Handlers) WebhookEnrich(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Temporal path: start a workflow instead of a goroutine.
-	if h.temporalClient != nil {
+	if h.starter != nil {
 		h.webhookEnrichViaWorkflow(w, r, comp)
 		return
 	}
@@ -90,40 +87,41 @@ func (h *Handlers) WebhookEnrich(w http.ResponseWriter, r *http.Request) {
 		)
 	}()
 
+	h.invalidateRunsCache()
 	WriteJSON(w, http.StatusAccepted, map[string]string{
 		"status":  "accepted",
 		"company": req.URL,
 	})
 }
 
-// webhookEnrichViaWorkflow starts an EnrichCompanyWorkflow on Temporal.
+// webhookEnrichViaWorkflow starts or reuses an EnrichCompanyWorkflow.
 func (h *Handlers) webhookEnrichViaWorkflow(w http.ResponseWriter, r *http.Request, comp model.Company) {
-	workflowID := fmt.Sprintf("enrich-webhook-%s-%d", comp.URL, time.Now().UnixNano())
-	run, err := h.temporalClient.ExecuteWorkflow(r.Context(), client.StartWorkflowOptions{
-		ID:        workflowID,
-		TaskQueue: temporalpkg.EnrichmentTaskQueue,
-	}, temporalenrich.EnrichCompanyWorkflow, temporalenrich.EnrichCompanyParams{
-		Company: comp,
-	})
+	requestID := middleware.GetReqID(r.Context())
+	result, err := h.starter.StartWebhook(r.Context(), comp, requestID)
 	if err != nil {
 		zap.L().Error("failed to start enrichment workflow",
 			zap.String("company", comp.URL),
+			zap.String("request_id", requestID),
 			zap.Error(err),
 		)
 		WriteError(w, r, http.StatusInternalServerError, "workflow_error", "failed to start enrichment workflow")
 		return
 	}
 
-	zap.L().Info("enrichment workflow started via webhook",
+	zap.L().Info("enrichment workflow accepted via webhook",
 		zap.String("company", comp.URL),
-		zap.String("workflow_id", run.GetID()),
-		zap.String("run_id", run.GetRunID()),
+		zap.String("request_id", requestID),
+		zap.String("workflow_id", result.WorkflowID),
+		zap.String("workflow_run_id", result.WorkflowRunID),
+		zap.Bool("reused", result.Reused),
 	)
 
-	WriteJSON(w, http.StatusAccepted, map[string]string{
-		"status":      "accepted",
-		"company":     comp.URL,
-		"workflow_id": run.GetID(),
-		"run_id":      run.GetRunID(),
+	h.invalidateRunsCache()
+	WriteJSON(w, http.StatusAccepted, map[string]any{
+		"status":          "accepted",
+		"company":         comp.URL,
+		"workflow_id":     result.WorkflowID,
+		"workflow_run_id": result.WorkflowRunID,
+		"reused":          result.Reused,
 	})
 }

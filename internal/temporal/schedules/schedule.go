@@ -5,7 +5,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 )
 
-// Schedule defines a Temporal schedule with optional availability checking.
+// Schedule defines a declarative Temporal schedule.
 type Schedule struct {
 	ID          string                        // "fedsync-cbp"
 	Description string                        // human-readable description

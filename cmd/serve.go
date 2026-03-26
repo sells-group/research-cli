@@ -13,7 +13,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/sells-group/research-cli/internal/api"
+	"github.com/sells-group/research-cli/internal/db"
+	"github.com/sells-group/research-cli/internal/enrichmentstart"
+	"github.com/sells-group/research-cli/internal/fedsync"
+	"github.com/sells-group/research-cli/internal/geospatial"
 	"github.com/sells-group/research-cli/internal/monitoring"
+	"github.com/sells-group/research-cli/internal/readmodel"
+	temporalpkg "github.com/sells-group/research-cli/internal/temporal"
 )
 
 var servePort int
@@ -35,8 +41,25 @@ var serveCmd = &cobra.Command{
 		}
 		defer env.Close()
 
-		// Initialize metrics collector (syncLog is nil unless fedsync pool is available).
-		collector := monitoring.NewCollector(env.Store, nil)
+		readPool, closeReadPool, err := sharedReadModelPool(ctx, env.Store)
+		if err != nil {
+			return err
+		}
+		defer closeReadPool()
+
+		cache, err := openServeAPICache(ctx)
+		if err != nil {
+			return err
+		}
+		defer cache.Close() //nolint:errcheck
+
+		var syncLog *fedsync.SyncLog
+		if readPool != nil {
+			syncLog = fedsync.NewSyncLog(readPool)
+			syncLog.SetCache(cache)
+		}
+
+		collector := monitoring.NewCollector(env.Store, syncLog)
 
 		// Start background alert checker if monitoring is enabled.
 		if cfg.Monitoring.Enabled {
@@ -48,7 +71,26 @@ var serveCmd = &cobra.Command{
 			)
 		}
 
-		h := api.NewHandlers(cfg, env.Store, env.Pipeline, collector)
+		h := api.NewHandlers(cfg, env.Store, env.Pipeline, collector, nil)
+		h.SetCache(cache)
+		if readPool != nil {
+			h.SetReadModel(readmodel.NewPostgresService(readPool, cfg))
+			if tileHandler := buildServeTileHandler(readPool); tileHandler != nil {
+				h.SetTileHandler(tileHandler)
+			}
+		}
+		if cfg.Temporal.HostPort != "" {
+			temporalClient, temporalErr := temporalpkg.NewClient(cfg.Temporal)
+			if temporalErr != nil {
+				zap.L().Warn("temporal client unavailable, falling back to in-process API starts",
+					zap.Error(temporalErr),
+				)
+			} else {
+				defer temporalClient.Close()
+				h.SetTemporalClient(temporalClient)
+				h.SetEnrichmentStarter(enrichmentstart.NewService(temporalClient))
+			}
+		}
 		router := api.Router(h)
 		port := resolvePort(servePort, cfg.Server.Port)
 		srvErr := startServer(ctx, router, port)
@@ -96,4 +138,22 @@ func resolvePort(flagPort, configPort int) int {
 		return flagPort
 	}
 	return configPort
+}
+
+func buildServeTileHandler(pool db.Pool) *geospatial.TileHandler {
+	if pool == nil || !cfg.Geo.Enabled {
+		return nil
+	}
+
+	cacheSize := cfg.Geo.TileCache.MaxEntries
+	if cacheSize <= 0 {
+		cacheSize = 10000
+	}
+	cacheTTL := time.Duration(cfg.Geo.TileCache.TTLMinutes) * time.Minute
+	if cacheTTL <= 0 {
+		cacheTTL = time.Hour
+	}
+
+	cache := geospatial.NewTileCache(cacheSize, cacheTTL)
+	return geospatial.NewTileHandler(pool, geospatial.DefaultLayers(), cache)
 }

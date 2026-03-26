@@ -20,7 +20,7 @@ import (
 func apiRouter(secret string) http.Handler {
 	return api.Router(api.NewHandlers(
 		&config.Config{Server: config.ServerConfig{Port: 8080, WebhookSecret: secret}},
-		nil, nil, nil,
+		nil, nil, nil, nil,
 	))
 }
 

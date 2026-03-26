@@ -149,6 +149,9 @@ func buildFedsyncWorker(ctx context.Context, c client.Client) (worker.Worker, er
 	if err := cfg.Validate("fedsync"); err != nil {
 		return nil, err
 	}
+	if err := ensureSchema(ctx); err != nil {
+		return nil, eris.Wrap(err, "ensure schema")
+	}
 
 	pool, err := fedsyncPool(ctx)
 	if err != nil {
@@ -167,6 +170,11 @@ func buildFedsyncWorker(ctx context.Context, c client.Client) (worker.Worker, er
 	})
 
 	syncLog := fedsync.NewSyncLog(pool)
+	closeSyncCache, err := attachSyncLogCache(ctx, syncLog)
+	if err != nil {
+		return nil, err
+	}
+	_ = closeSyncCache
 	reg := dataset.NewRegistry(cfg)
 	activities := temporalfedsync.NewActivities(pool, f, syncLog, reg, tempDir, cfg)
 
@@ -181,6 +189,9 @@ func buildFedsyncWorker(ctx context.Context, c client.Client) (worker.Worker, er
 func buildGeoWorker(ctx context.Context, c client.Client) (worker.Worker, error) {
 	if err := cfg.Validate("fedsync"); err != nil {
 		return nil, err
+	}
+	if err := ensureSchema(ctx); err != nil {
+		return nil, eris.Wrap(err, "ensure schema")
 	}
 
 	pool, err := fedsyncPool(ctx)
@@ -218,6 +229,11 @@ func buildGeoWorker(ctx context.Context, c client.Client) (worker.Worker, error)
 		Timeout:    30 * time.Minute,
 	})
 	syncLog := fedsync.NewSyncLog(pool)
+	closeSyncCache, err := attachSyncLogCache(ctx, syncLog)
+	if err != nil {
+		return nil, err
+	}
+	_ = closeSyncCache
 	scraperReg := geoscraper.NewRegistry()
 	scraper.RegisterAll(scraperReg, cfg)
 	queue := geospatial.NewGeocodeQueue(pool, nil, cfg.Geo.BatchSize)
@@ -255,6 +271,10 @@ func buildEnrichmentWorker(ctx context.Context, c client.Client) (worker.Worker,
 }
 
 func buildADVWorker(ctx context.Context, c client.Client) (worker.Worker, error) {
+	if err := ensureSchema(ctx); err != nil {
+		return nil, eris.Wrap(err, "ensure schema")
+	}
+
 	pool, err := fedsyncPool(ctx)
 	if err != nil {
 		return nil, err

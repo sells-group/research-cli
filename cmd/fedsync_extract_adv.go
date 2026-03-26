@@ -1,9 +1,7 @@
 package main
 
 import (
-	"fmt"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/rotisserie/eris"
@@ -91,63 +89,50 @@ func runExtractADV(cmd *cobra.Command, _ []string) error {
 
 	// Parse flags.
 	crd, _ := cmd.Flags().GetInt("crd")
-	limit, _ := cmd.Flags().GetInt("limit")
 	maxTier, _ := cmd.Flags().GetInt("tier")
 	maxCost, _ := cmd.Flags().GetFloat64("max-cost")
+	limit, _ := cmd.Flags().GetInt("limit")
 	filterState, _ := cmd.Flags().GetString("filter-state")
 	filterAUMMin, _ := cmd.Flags().GetInt64("filter-aum-min")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	force, _ := cmd.Flags().GetBool("force")
 	fundsOnly, _ := cmd.Flags().GetBool("funds-only")
 
-	if maxTier < 1 || maxTier > 2 {
-		return eris.Errorf("fedsync extract-adv: --tier must be 1 or 2 (got %d)", maxTier)
-	}
-
-	// Create extractor.
 	client := anthropic.NewClient(cfg.Anthropic.Key)
-	extractor := advextract.NewExtractor(pool, client, advextract.ExtractorOpts{
-		MaxTier:   maxTier,
-		MaxCost:   maxCost,
-		DryRun:    dryRun,
-		FundsOnly: fundsOnly,
-		Force:     force,
-	})
 
-	// Single advisor mode.
-	if crd > 0 {
-		log.Info("extracting single advisor",
-			zap.Int("crd", crd),
-			zap.Int("max_tier", maxTier),
-			zap.Bool("dry_run", dryRun))
-
-		if err := extractor.RunAdvisor(ctx, crd); err != nil {
-			return eris.Wrapf(err, "fedsync extract-adv: CRD %d", crd)
-		}
-
-		fmt.Printf("Extraction complete for CRD %d\n", crd)
-		return nil
-	}
-
-	// Batch mode: list advisors matching filters.
-	store := advextract.NewStore(pool)
-	crds, err := store.ListAdvisors(ctx, advextract.ListOpts{
-		Limit:            limit,
-		State:            strings.ToUpper(filterState),
-		MinAUM:           filterAUMMin,
-		IncludeExtracted: force,
+	service := advextract.NewService(pool, client)
+	result, err := service.Run(ctx, advextract.ServiceOptions{
+		CRD:          crd,
+		Limit:        limit,
+		MaxTier:      maxTier,
+		MaxCost:      maxCost,
+		FilterState:  filterState,
+		FilterAUMMin: filterAUMMin,
+		DryRun:       dryRun,
+		Force:        force,
+		FundsOnly:    fundsOnly,
 	})
 	if err != nil {
-		return eris.Wrap(err, "fedsync extract-adv: list advisors")
+		return eris.Wrap(err, "fedsync extract-adv")
 	}
 
-	if len(crds) == 0 {
-		fmt.Println("No advisors found matching filters")
+	if result.Mode == "single" {
+		log.Info("single advisor extraction complete",
+			zap.Int("crd", result.SingleCRD),
+			zap.Int("max_tier", maxTier),
+			zap.Bool("dry_run", dryRun),
+		)
+		printOutputf(cmd, "Extraction complete for CRD %d\n", result.SingleCRD)
 		return nil
 	}
 
-	log.Info("batch extraction starting",
-		zap.Int("advisors", len(crds)),
+	if result.AdvisorCount == 0 {
+		printOutputln(cmd, "No advisors found matching filters")
+		return nil
+	}
+
+	log.Info("batch extraction prepared",
+		zap.Int("advisors", result.AdvisorCount),
 		zap.Int("max_tier", maxTier),
 		zap.Bool("dry_run", dryRun),
 		zap.String("filter_state", filterState),
@@ -155,14 +140,10 @@ func runExtractADV(cmd *cobra.Command, _ []string) error {
 	)
 
 	if dryRun {
-		fmt.Println(advextract.EstimateBatchCost(len(crds), maxTier))
+		printOutputln(cmd, result.CostEstimate)
 		return nil
 	}
 
-	if err := extractor.RunBatch(ctx, crds); err != nil {
-		return eris.Wrap(err, "fedsync extract-adv: batch")
-	}
-
-	fmt.Printf("Batch extraction complete: %d advisors processed\n", len(crds))
+	printOutputf(cmd, "Batch extraction complete: %d advisors processed\n", result.AdvisorCount)
 	return nil
 }

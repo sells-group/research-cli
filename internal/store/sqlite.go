@@ -302,6 +302,93 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, filter RunFilter) ([]model.R
 	return runs, eris.Wrap(rows.Err(), "sqlite: list runs iterate")
 }
 
+// CountRuns implements Store.
+func (s *SQLiteStore) CountRuns(ctx context.Context, filter RunFilter) (int, error) {
+	query := `SELECT COUNT(*) FROM runs WHERE 1=1`
+	var args []any
+
+	if filter.Status != "" {
+		query += ` AND status = ?`
+		args = append(args, string(filter.Status))
+	}
+	if filter.CompanyURL != "" {
+		query += ` AND json_extract(company, '$.url') = ?`
+		args = append(args, filter.CompanyURL)
+	}
+	if filter.ErrorCategory != "" {
+		query += ` AND json_extract(error, '$.category') = ?`
+		args = append(args, string(filter.ErrorCategory))
+	}
+	if !filter.CreatedAfter.IsZero() {
+		query += ` AND created_at >= ?`
+		args = append(args, filter.CreatedAfter)
+	}
+
+	var count int
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, eris.Wrap(err, "sqlite: count runs")
+	}
+	return count, nil
+}
+
+// CountRunsByStatus implements Store.
+func (s *SQLiteStore) CountRunsByStatus(ctx context.Context) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM runs GROUP BY status`)
+	if err != nil {
+		return nil, eris.Wrap(err, "sqlite: count runs by status")
+	}
+	defer rows.Close() //nolint:errcheck
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, eris.Wrap(err, "sqlite: scan run status count")
+		}
+		counts[status] = count
+	}
+
+	return counts, eris.Wrap(rows.Err(), "sqlite: iterate run status counts")
+}
+
+// SummarizeRuns implements Store.
+func (s *SQLiteStore) SummarizeRuns(ctx context.Context, since time.Time) (*RunSummary, error) {
+	summary := &RunSummary{}
+
+	var avgTokens float64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			SUM(CASE WHEN status = 'complete' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END),
+			COALESCE(SUM(COALESCE(CAST(json_extract(result, '$.total_cost') AS REAL), 0)), 0),
+			COALESCE(AVG(CASE
+				WHEN CAST(json_extract(result, '$.score') AS REAL) > 0 THEN CAST(json_extract(result, '$.score') AS REAL)
+				ELSE NULL
+			END), 0),
+			COALESCE(AVG(COALESCE(CAST(json_extract(result, '$.total_tokens') AS REAL), 0)), 0)
+		FROM runs
+		WHERE created_at >= ?`,
+		since,
+	).Scan(
+		&summary.Total,
+		&summary.Complete,
+		&summary.Failed,
+		&summary.Queued,
+		&summary.CostUSD,
+		&summary.AvgScore,
+		&avgTokens,
+	)
+	if err != nil {
+		return nil, eris.Wrap(err, "sqlite: summarize runs")
+	}
+
+	summary.AvgTokens = int(avgTokens)
+	return summary, nil
+}
+
 // CreatePhase implements Store.
 func (s *SQLiteStore) CreatePhase(ctx context.Context, runID string, name string) (*model.RunPhase, error) {
 	id := uuid.New().String()
