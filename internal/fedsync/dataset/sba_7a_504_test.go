@@ -3,7 +3,6 @@ package dataset
 import (
 	"context"
 	"io"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -198,9 +197,7 @@ func TestSBA7a504_Sync_Success(t *testing.T) {
 	// Mock CSV download.
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		Run(func(_ context.Context, _ string, destPath string) {
-			if writeErr := os.WriteFile(destPath, []byte(csvContent), 0644); writeErr != nil {
-				panic("test: write CSV: " + writeErr.Error())
-			}
+			writeTestFixture(t, destPath, []byte(csvContent))
 		}).Return(int64(len(csvContent)), nil)
 
 	expectBulkUpsertZip(pool, "fed_data.sba_loans", sbaCols, 1)
@@ -408,16 +405,12 @@ func TestSBA7a504_Sync_MultipleResources(t *testing.T) {
 	// Mock CSV downloads — use Run to write different content per file.
 	f.EXPECT().DownloadToFile(mock.Anything, "https://example.com/7a.csv", mock.Anything).
 		Run(func(_ context.Context, _ string, destPath string) {
-			if writeErr := os.WriteFile(destPath, []byte(csv7a), 0644); writeErr != nil {
-				panic("test: write CSV: " + writeErr.Error())
-			}
+			writeTestFixture(t, destPath, []byte(csv7a))
 		}).Return(int64(len(csv7a)), nil)
 
 	f.EXPECT().DownloadToFile(mock.Anything, "https://example.com/504.csv", mock.Anything).
 		Run(func(_ context.Context, _ string, destPath string) {
-			if writeErr := os.WriteFile(destPath, []byte(csv504), 0644); writeErr != nil {
-				panic("test: write CSV: " + writeErr.Error())
-			}
+			writeTestFixture(t, destPath, []byte(csv504))
 		}).Return(int64(len(csv504)), nil)
 
 	expectBulkUpsertZip(pool, "fed_data.sba_loans", sbaCols, 1)

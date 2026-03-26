@@ -1,0 +1,446 @@
+export type LayerGroup =
+  | "Boundaries"
+  | "Infrastructure"
+  | "Environmental"
+  | "Public Services"
+  | "Energy & Mining"
+  | "Federal Data"
+  | "Demographics";
+
+export interface LayerDef {
+  key: string;
+  label: string;
+  group: LayerGroup;
+  type: "fill" | "line" | "circle";
+  color: string;
+  opacity?: number;
+  width?: number;
+  radius?: number;
+  minZoom: number;
+  maxZoom: number;
+}
+
+/** All layer groups in display order. */
+export const LAYER_GROUPS: LayerGroup[] = [
+  "Boundaries",
+  "Environmental",
+  "Infrastructure",
+  "Public Services",
+  "Energy & Mining",
+  "Federal Data",
+  "Demographics",
+];
+
+/** All map layers ordered bottom-to-top (polygons, then lines, then points). */
+export const LAYERS: LayerDef[] = [
+  // ── Boundaries (fill, low opacity) ──────────────────────────────────
+  {
+    key: "counties",
+    label: "Counties",
+    group: "Boundaries",
+    type: "fill",
+    color: "#4a90d9",
+    opacity: 0.08,
+    minZoom: 3,
+    maxZoom: 12,
+  },
+  {
+    key: "places",
+    label: "Places",
+    group: "Boundaries",
+    type: "fill",
+    color: "#6ba3e8",
+    opacity: 0.12,
+    minZoom: 6,
+    maxZoom: 14,
+  },
+  {
+    key: "cbsa",
+    label: "CBSA",
+    group: "Boundaries",
+    type: "fill",
+    color: "#8b5cf6",
+    opacity: 0.1,
+    minZoom: 3,
+    maxZoom: 10,
+  },
+  {
+    key: "census_tracts",
+    label: "Census Tracts",
+    group: "Boundaries",
+    type: "fill",
+    color: "#7c7c7c",
+    opacity: 0.08,
+    minZoom: 8,
+    maxZoom: 14,
+  },
+  {
+    key: "congressional_districts",
+    label: "Congressional Districts",
+    group: "Boundaries",
+    type: "fill",
+    color: "#d946ef",
+    opacity: 0.1,
+    minZoom: 3,
+    maxZoom: 10,
+  },
+  {
+    key: "zcta",
+    label: "ZIP Code Areas",
+    group: "Boundaries",
+    type: "fill",
+    color: "#a78bfa",
+    opacity: 0.08,
+    minZoom: 6,
+    maxZoom: 12,
+  },
+  {
+    key: "block_groups",
+    label: "Block Groups",
+    group: "Boundaries",
+    type: "fill",
+    color: "#9ca3af",
+    opacity: 0.06,
+    minZoom: 10,
+    maxZoom: 16,
+  },
+  {
+    key: "county_subdivisions",
+    label: "County Subdivisions",
+    group: "Boundaries",
+    type: "fill",
+    color: "#6b7280",
+    opacity: 0.08,
+    minZoom: 8,
+    maxZoom: 14,
+  },
+
+  // ── Demographics (fill overlays) ────────────────────────────────────
+  {
+    key: "demographics",
+    label: "Demographics",
+    group: "Demographics",
+    type: "fill",
+    color: "#059669",
+    opacity: 0.15,
+    minZoom: 8,
+    maxZoom: 14,
+  },
+  {
+    key: "svi",
+    label: "Social Vulnerability",
+    group: "Demographics",
+    type: "fill",
+    color: "#dc2626",
+    opacity: 0.15,
+    minZoom: 8,
+    maxZoom: 14,
+  },
+
+  // ── Environmental (fill + circle) ───────────────────────────────────
+  {
+    key: "flood_zones",
+    label: "Flood Zones",
+    group: "Environmental",
+    type: "fill",
+    color: "#3b82f6",
+    opacity: 0.2,
+    minZoom: 8,
+    maxZoom: 16,
+  },
+  {
+    key: "wetlands",
+    label: "Wetlands",
+    group: "Environmental",
+    type: "fill",
+    color: "#06b6d4",
+    opacity: 0.15,
+    minZoom: 8,
+    maxZoom: 14,
+  },
+  {
+    key: "protected_areas",
+    label: "Protected Areas",
+    group: "Environmental",
+    type: "fill",
+    color: "#16a34a",
+    opacity: 0.12,
+    minZoom: 4,
+    maxZoom: 12,
+  },
+  {
+    key: "water_bodies",
+    label: "Water Bodies",
+    group: "Environmental",
+    type: "fill",
+    color: "#0ea5e9",
+    opacity: 0.2,
+    minZoom: 6,
+    maxZoom: 14,
+  },
+  {
+    key: "epa_sites",
+    label: "EPA Sites",
+    group: "Environmental",
+    type: "circle",
+    color: "#f59e0b",
+    radius: 5,
+    minZoom: 8,
+    maxZoom: 16,
+  },
+  {
+    key: "brownfields",
+    label: "Brownfields",
+    group: "Environmental",
+    type: "circle",
+    color: "#b45309",
+    radius: 5,
+    minZoom: 8,
+    maxZoom: 16,
+  },
+
+  // ── Lines ───────────────────────────────────────────────────────────
+  {
+    key: "roads",
+    label: "Roads",
+    group: "Infrastructure",
+    type: "line",
+    color: "#94a3b8",
+    width: 1,
+    minZoom: 10,
+    maxZoom: 16,
+  },
+  {
+    key: "waterways",
+    label: "Waterways",
+    group: "Environmental",
+    type: "line",
+    color: "#38bdf8",
+    width: 1.5,
+    minZoom: 6,
+    maxZoom: 14,
+  },
+  {
+    key: "transmission_lines",
+    label: "Transmission Lines",
+    group: "Infrastructure",
+    type: "line",
+    color: "#facc15",
+    width: 1,
+    minZoom: 6,
+    maxZoom: 14,
+  },
+  {
+    key: "pipelines",
+    label: "Pipelines",
+    group: "Infrastructure",
+    type: "line",
+    color: "#a855f7",
+    width: 1.5,
+    minZoom: 6,
+    maxZoom: 14,
+  },
+  {
+    key: "railroads",
+    label: "Railroads",
+    group: "Infrastructure",
+    type: "line",
+    color: "#78716c",
+    width: 1.5,
+    minZoom: 4,
+    maxZoom: 12,
+  },
+
+  // ── Infrastructure Points (circle) ──────────────────────────────────
+  {
+    key: "power_plants",
+    label: "Power Plants",
+    group: "Infrastructure",
+    type: "circle",
+    color: "#ef4444",
+    radius: 5,
+    minZoom: 6,
+    maxZoom: 14,
+  },
+  {
+    key: "substations",
+    label: "Substations",
+    group: "Infrastructure",
+    type: "circle",
+    color: "#f97316",
+    radius: 4,
+    minZoom: 8,
+    maxZoom: 14,
+  },
+  {
+    key: "airports",
+    label: "Airports",
+    group: "Infrastructure",
+    type: "circle",
+    color: "#06b6d4",
+    radius: 6,
+    minZoom: 4,
+    maxZoom: 14,
+  },
+  {
+    key: "ports",
+    label: "Ports",
+    group: "Infrastructure",
+    type: "circle",
+    color: "#0284c7",
+    radius: 5,
+    minZoom: 6,
+    maxZoom: 14,
+  },
+  {
+    key: "amtrak_stations",
+    label: "Amtrak Stations",
+    group: "Infrastructure",
+    type: "circle",
+    color: "#7c3aed",
+    radius: 5,
+    minZoom: 6,
+    maxZoom: 14,
+  },
+  {
+    key: "ev_charging",
+    label: "EV Charging",
+    group: "Infrastructure",
+    type: "circle",
+    color: "#22c55e",
+    radius: 3,
+    minZoom: 10,
+    maxZoom: 16,
+  },
+  {
+    key: "telecom_towers",
+    label: "Telecom Towers",
+    group: "Infrastructure",
+    type: "circle",
+    color: "#6366f1",
+    radius: 3,
+    minZoom: 10,
+    maxZoom: 16,
+  },
+  {
+    key: "railroad_crossings",
+    label: "Railroad Crossings",
+    group: "Infrastructure",
+    type: "circle",
+    color: "#a8a29e",
+    radius: 3,
+    minZoom: 10,
+    maxZoom: 16,
+  },
+  {
+    key: "bridges",
+    label: "Bridges",
+    group: "Infrastructure",
+    type: "circle",
+    color: "#78716c",
+    radius: 3,
+    minZoom: 10,
+    maxZoom: 16,
+  },
+  {
+    key: "dams",
+    label: "Dams",
+    group: "Infrastructure",
+    type: "circle",
+    color: "#0369a1",
+    radius: 5,
+    minZoom: 6,
+    maxZoom: 14,
+  },
+
+  // ── Energy & Mining (circle) ────────────────────────────────────────
+  {
+    key: "oil_gas_wells",
+    label: "Oil & Gas Wells",
+    group: "Energy & Mining",
+    type: "circle",
+    color: "#854d0e",
+    radius: 4,
+    minZoom: 8,
+    maxZoom: 16,
+  },
+  {
+    key: "coal_mines",
+    label: "Coal Mines",
+    group: "Energy & Mining",
+    type: "circle",
+    color: "#292524",
+    radius: 4,
+    minZoom: 8,
+    maxZoom: 16,
+  },
+
+  // ── Public Services (circle) ────────────────────────────────────────
+  {
+    key: "hospitals",
+    label: "Hospitals",
+    group: "Public Services",
+    type: "circle",
+    color: "#dc2626",
+    radius: 5,
+    minZoom: 8,
+    maxZoom: 16,
+  },
+  {
+    key: "schools",
+    label: "Schools",
+    group: "Public Services",
+    type: "circle",
+    color: "#2563eb",
+    radius: 4,
+    minZoom: 10,
+    maxZoom: 16,
+  },
+  {
+    key: "fire_ems",
+    label: "Fire & EMS",
+    group: "Public Services",
+    type: "circle",
+    color: "#ea580c",
+    radius: 4,
+    minZoom: 10,
+    maxZoom: 16,
+  },
+  {
+    key: "historic_places",
+    label: "Historic Places",
+    group: "Public Services",
+    type: "circle",
+    color: "#a16207",
+    radius: 4,
+    minZoom: 10,
+    maxZoom: 16,
+  },
+  {
+    key: "cemeteries",
+    label: "Cemeteries",
+    group: "Public Services",
+    type: "circle",
+    color: "#4b5563",
+    radius: 3,
+    minZoom: 10,
+    maxZoom: 16,
+  },
+
+  // ── Federal Data (circle) ───────────────────────────────────────────
+  {
+    key: "companies",
+    label: "Companies",
+    group: "Federal Data",
+    type: "circle",
+    color: "#22c55e",
+    radius: 6,
+    minZoom: 6,
+    maxZoom: 16,
+  },
+];
+
+/** Return layers belonging to a specific group. */
+export function layersByGroup(group: LayerGroup): LayerDef[] {
+  return LAYERS.filter((l) => l.group === group);
+}

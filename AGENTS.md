@@ -1,0 +1,630 @@
+# AGENTS.md — research-cli
+
+Automated account enrichment pipeline + federal data sync in Go. Two subsystems:
+
+1. **Enrichment:** Crawls company websites, classifies pages, extracts structured data via tiered Codex models (Haiku → Sonnet → Opus), writes to Salesforce. Leads enter via CSV → Notion; registries (questions + fields) live in Notion.
+2. **Fedsync:** Incrementally syncs federal datasets (Census, BLS, SEC EDGAR, FINRA, DOL, SBA, OSHA, EPA, FRED, IRS, FDIC, NCUA, BEA) into `fed_data.*` Postgres tables. Runs daily via Fly.io cron, exits in <1s when no new data is expected.
+
+<!-- BEGIN GENERATED DATASET SUMMARY -->
+
+## Live Fedsync Dataset Summary
+
+- Total datasets: 42
+- By phase: `1`=12, `1b`=6, `2`=15, `3`=9
+- By cadence: `daily`=4, `weekly`=2, `monthly`=15, `quarterly`=7, `annual`=14
+
+| Phase | Datasets                                                                                                                                                                       |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `1`   | cbp, susb, qcew, oews, fpds, econ_census, ppp, sba_7a_504, form_5500, eo_bmf, census_geo, usaspending                                                                          |
+| `1b`  | adv_part1, ia_compilation, holdings_13f, form_d, edgar_submissions, entity_xref                                                                                                |
+| `2`   | adv_part2, brokercheck, sec_enforcement, form_bd, osha_ita, epa_echo, nes, asm, eci, fdic_bankfind, ncen, ncua_call_reports, bea_regional, irs_soi_migration, building_permits |
+| `3`   | adv_part3, adv_enrichment, adv_extract, xbrl_facts, fred, abs, cps_laus, m3, lehd_lodes                                                                                        |
+
+<!-- END GENERATED DATASET SUMMARY -->
+
+## Stack
+
+| Layer        | Tech                                          |
+| ------------ | --------------------------------------------- |
+| Language     | Go 1.25+                                      |
+| CLI          | cobra + viper + zap + eris                    |
+| Compute      | Fly.io (per-second billing, auto-stop)        |
+| DB (prod)    | Neon Postgres (pgx)                           |
+| DB (dev)     | SQLite (modernc.org/sqlite, no CGO)           |
+| Crawl        | colly (local-first) → Firecrawl v2 (fallback) |
+| HTML→MD      | html-to-markdown/v2                           |
+| LLM          | anthropic-sdk-go (Messages + Batch + caching) |
+| LinkedIn     | Perplexity API → Haiku JSON                   |
+| Destination  | Salesforce REST API (go-salesforce/v3)        |
+| Lead Tracker | Notion API (notionapi)                        |
+| Concurrency  | errgroup                                      |
+| FTP          | jlaffaye/ftp                                  |
+| XLSX         | tealeg/xlsx/v2                                |
+| Rate Limit   | golang.org/x/time/rate                        |
+| OCR          | pdftotext (local) → Mistral API (fallback)    |
+
+## Commands
+
+```bash
+go build -o research-cli ./cmd                          # build
+go test ./...                                            # test all
+go test ./internal/pipeline/ -run TestRouter -v          # test specific
+go run ./cmd import --csv leads.csv                      # import CSV → Notion
+go run ./cmd run --url acme.com --sf-id 001xx            # single company
+go run ./cmd batch --limit 100                           # batch from Notion queue
+go run ./cmd serve --port 8080                           # webhook server
+fly deploy                                               # deploy to Fly.io
+fly ssh console -C "research-cli batch --limit 100"      # run on Fly
+
+# Fedsync commands
+go run ./cmd fedsync migrate                              # apply schema migrations
+go run ./cmd fedsync status                               # show sync log
+go run ./cmd fedsync sync                                 # sync all due datasets
+go run ./cmd fedsync sync --phase 1                       # sync Phase 1 only
+go run ./cmd fedsync sync --datasets cbp,fpds --force     # force specific datasets
+go run ./cmd fedsync xref                                 # build entity cross-reference
+
+# Geo pipeline commands
+go run ./cmd geo backfill --limit 100                    # geocode ungeocoded addresses
+go run ./cmd geo backfill-adv --limit 1000               # stub + geocode ADV firms
+go run ./cmd geo backfill-5500 --limit 10000             # stub + geocode Form 5500 sponsors
+go run ./cmd geo backfill-990 --limit 10000              # stub + geocode IRS EO BMF orgs
+go run ./cmd geo backfill-fdic --limit 10000             # stub + geocode FDIC institutions
+go run ./cmd geo backfill-sba --limit 10000              # stub + geocode SBA loan borrowers
+
+# Salesforce report enrichment
+go run ./cmd sfreport --report-id 00O... --limit 5       # enrich from SF report
+```
+
+## Project Structure
+
+```
+cmd/                        # cobra commands: root, import, run, batch, serve, sfreport, fedsync, geo
+internal/
+  config/config.go          # viper struct + loader (includes FedsyncConfig)
+  pipeline/                 # enrichment pipeline (phases 1-9)
+    pipeline.go             # orchestrates phases 1-9 per company
+    crawl.go                # Phase 1A: local-first → Firecrawl fallback
+    localcrawl.go           # net/http probe + colly + html-to-markdown
+    blockdetect.go          # Cloudflare/captcha/JS-shell heuristics
+    scrape.go               # Phase 1B: GP + BBB + PPP + SoS via Firecrawl
+    linkedin.go             # Phase 1C: Perplexity → Haiku JSON
+    classify.go             # Phase 2: Haiku page classification
+    router.go               # Phase 3: question → page matching
+    extract.go              # Phases 4-6: tiered Codex extraction
+    aggregate.go            # Phase 7: merge + validate
+    report.go               # Phase 8: enrichment report
+    gate.go                 # Phase 9: quality gate scoring + SF write helpers
+    exporter.go             # ResultExporter interface
+    export_salesforce.go    # SF exporter (immediate + deferred modes)
+    export_notion.go        # Notion status exporter
+    export_webhook.go       # ToolJet webhook exporter (manual review)
+    export_csv.go           # CSV exporter (SF report + Grata formats)
+    export_json.go          # JSON exporter
+    export_provenance.go    # Provenance CSV exporter
+  registry/
+    question.go             # load Question Registry from Notion
+    field.go                # load Field Registry from Notion
+  store/
+    store.go                # Store interface (Neon or SQLite)
+    postgres.go             # pgx implementation
+    sqlite.go               # modernc sqlite implementation
+  model/                    # company, page, question, field types
+  db/                       # shared DB helpers
+    copy.go                 # pgx CopyFrom wrapper
+    upsert.go               # BulkUpsert via temp table + ON CONFLICT
+  fedsync/                  # federal data sync subsystem
+    migrate.go              # embed.FS migration runner → fed_data.schema_migrations
+    synclog.go              # sync log tracking (start, complete, fail)
+    dataset/                # dataset implementations
+      interface.go          # Dataset interface, Phase, Cadence, SyncResult
+      schedule.go           # ShouldRun helpers: Daily, Weekly, Monthly, Quarterly, Annual
+      registry.go           # Registry: maps names → Dataset impls
+      engine.go             # Engine: Run() orchestration loop
+      parse.go              # shared parse helpers (parseInt, trimQuotes)
+      cbp.go                # Census CBP (Phase 1, annual)
+      susb.go               # Census SUSB (Phase 1, annual)
+      qcew.go               # BLS QCEW (Phase 1, quarterly)
+      oews.go               # BLS OEWS (Phase 1, annual)
+      fpds.go               # SAM.gov FPDS (Phase 1, daily)
+      econ_census.go        # Census Economic Census (Phase 1, annual)
+      ppp.go                # SBA PPP loans (Phase 1, one-time)
+      sba_7a_504.go         # SBA 7(a)/504 loans (Phase 1, quarterly)
+      form_5500.go          # DOL Form 5500 ERISA plans (Phase 1, annual)
+      eo_bmf.go             # IRS Exempt Org BMF (Phase 1, monthly)
+      adv_part1.go          # SEC ADV Part 1A (Phase 1B, monthly)
+      ia_compilation.go     # IARD daily XML (Phase 1B, daily)
+      holdings_13f.go       # SEC 13F holdings (Phase 1B, quarterly)
+      form_d.go             # EDGAR Form D (Phase 1B, daily)
+      edgar_submissions.go  # EDGAR bulk JSON (Phase 1B, weekly)
+      entity_xref.go        # CRD↔CIK cross-ref (Phase 1B)
+      adv_part2.go          # ADV brochure PDFs → OCR (Phase 2, monthly)
+      brokercheck.go        # FINRA BrokerCheck (Phase 2, monthly)
+      form_bd.go            # Form BD broker-dealer (Phase 2, monthly)
+      osha_ita.go           # OSHA ITA (Phase 2, annual)
+      epa_echo.go           # EPA ECHO (Phase 2, monthly)
+      nes.go                # Census NES (Phase 2, annual)
+      asm.go                # Census ASM (Phase 2, annual)
+      eci.go                # BLS ECI (Phase 2, quarterly)
+      sec_enforcement.go    # SEC enforcement actions (Phase 2, monthly)
+      fdic_bankfind.go      # FDIC BankFind institutions (Phase 2, weekly)
+      adv_part3.go          # CRS PDFs → OCR (Phase 3, monthly)
+      adv_enrichment.go     # ADV brochure structured extraction (Phase 3, monthly)
+      adv_extract.go        # ADV advisor answers via LLM (Phase 3, monthly)
+      xbrl_facts.go         # EDGAR XBRL facts (Phase 3, daily)
+      fred.go               # FRED series (Phase 3, monthly)
+      abs.go                # Census ABS (Phase 3, annual)
+      cps_laus.go           # BLS CPS/LAUS (Phase 3, monthly)
+      m3.go                 # Census M3 (Phase 3, monthly)
+    transform/              # NAICS, FIPS, SIC normalization
+    resolve/                # entity resolution (CRD↔CIK fuzzy matching)
+    xbrl/                   # XBRL JSON-LD fact parser
+  fetcher/                  # download + parse (HTTP, FTP, CSV, XML, JSON, XLSX, ZIP)
+  ocr/                      # PDF text extraction (pdftotext → Mistral fallback)
+  company/                    # company records + entity linking
+    company.go                # CompanyRecord, Identifier, Address, Match types
+    store_postgres.go         # CompanyStore interface + pgx implementation
+    link.go                   # Linker: CRD/CIK/EIN/name→fed_data matching
+  geo/                        # geospatial association
+    associate.go              # Associator: address→MSA via PostGIS distance
+pkg/
+  anthropic/                # Messages + Batch + cache primer
+  firecrawl/                # crawl, scrape, batch scrape + poll
+  perplexity/               # chat completions (OpenAI-compatible)
+  salesforce/               # JWT auth, SOQL, CRUD, Collections
+  notion/                   # DB query, page create/update, CSV mapper
+```
+
+## Key Patterns
+
+### Error handling — eris
+
+- Always wrap: `eris.Wrap(err, "context message")`
+- Include identifiers: `eris.Wrap(err, "sf: update account %s", id)`
+- Unwrap for structured reporting in run log
+
+### Logging — zap
+
+- Use `zap.L()` global logger
+- Standard fields: `company`, `phase`, `tier`, `duration_ms`, `tokens`
+- JSON format in prod, console in dev
+
+### Config — viper
+
+- File: `config.yaml` at project root
+- Env override prefix: `RESEARCH_` (e.g., `RESEARCH_DATABASE_URL`)
+- Fly secrets → env vars → viper reads them
+
+### Store interface
+
+- `internal/store/store.go` defines the interface
+- `postgres.go` (Neon) and `sqlite.go` (local dev) both implement it
+- Selected by `store.driver` in config: `"postgres"` or `"sqlite"`
+
+### Registry loading
+
+- Question Registry + Field Registry are Notion DBs
+- Loaded once at startup via Notion API, cached in memory
+- No Notion dependency during extraction phases
+- Filter: `Status = Active`, paginate with `next_cursor`
+
+### Tiered extraction (Phases 4-6)
+
+- **Tier 1 (Haiku, ~70 Qs):** single-page fact extraction, strict JSON
+- **Tier 2 (Sonnet, ~25 Qs):** multi-page synthesis + T1 answers as context
+- **Tier 3 (Opus, ~5 Qs):** prepared context from Haiku summarization (~25K tok), NOT raw crawl (~150K tok)
+- Confidence < 0.4 escalates from T1 → T2
+
+### Prompt caching primer strategy
+
+- For T2/T3: send 1 sequential primer request (1-hour TTL) to warm cache
+- Submit remaining questions as Batch API calls → hit warm cache
+- Implemented in `pkg/anthropic/cache.go`
+- Saves ~42% on Codex costs
+
+### Local-first crawl (Phase 1A)
+
+- Probe with `net/http`: homepage + robots.txt + sitemap.xml
+- Detect blocks: Cloudflare (403/503 + cf-\* headers), captcha, JS-only shell
+- Clean HTML → colly (depth 2, cap 50 pages) + html-to-markdown → **0 Firecrawl credits**
+- Blocked → Firecrawl async crawl fallback
+- ~60% of sites serve clean HTML → ~55% credit reduction
+
+### Confidence escalation
+
+- T1 answers with confidence < `confidence_escalation_threshold` (default 0.4) re-queue into T2
+- T3 gating: `"always"` or `"ambiguity_only"` (config)
+
+### ResultExporter pattern (Phase 9)
+
+- `ResultExporter` interface: `ExportResult(ctx, result, gate)`, `Flush(ctx)`, `Name()`
+- Default exporters (SF, Notion, Webhook) registered in `initPipeline()`
+- Per-command exporters (CSV, Provenance, JSON) added by individual commands
+- Batch commands flip SF exporter to deferred mode via `SetDeferredMode(true)`
+- `FlushExporters(ctx)` called after batch to write deferred data
+- Phase 9 calls `ComputeGateResult()` (pure scoring) → passes result to all exporters
+
+### Fedsync — Dataset interface
+
+- Each registered federal dataset implements `Dataset` in `internal/fedsync/dataset/`
+- `ShouldRun(now, lastSync)` checks cadence (daily/weekly/monthly/quarterly/annual)
+- `Sync(ctx, pool, fetcher, tempDir)` returns `*SyncResult` with row count + metadata
+- Engine iterates registry, checks `ShouldRun()`, calls `Sync()`, records in `fed_data.sync_log`
+- Phases: 1 (Market Intelligence), 1B (SEC/EDGAR), 2 (Extended), 3 (On-Demand)
+
+### Fedsync — Streaming large datasets
+
+- `fetcher.DownloadToFile()` → ZIP to temp dir
+- `fetcher.ExtractZIP()` → CSV to temp dir
+- `fetcher.StreamCSV()` → `<-chan []string` (row channel)
+- Consumer batches rows (5,000–10,000) → `db.BulkUpsert()` or `db.CopyFrom()`
+- Keeps memory bounded regardless of dataset size
+
+### Fedsync — Rate limiting
+
+- Per-host limiters in `internal/fetcher/http.go` via `golang.org/x/time/rate`
+- SEC (efts/www/data.sec.gov): 10 req/s
+- SAM.gov: 5 req/s
+- Default: 20 req/s
+- EDGAR requires `User-Agent` header from `cfg.Fedsync.EDGARUserAgent`
+
+### Fedsync — Migrations
+
+- SQL files embedded via `embed.FS` in `internal/fedsync/migrate.go`
+- Tracked in `fed_data.schema_migrations`
+- Applied in lexicographic filename order, idempotent (skips already-applied)
+- All tables live in `fed_data` schema (separate from enrichment)
+
+### Fedsync — Entity aggregation pipeline
+
+For entity-level federal datasets with company/firm records and addresses, a standard `geo backfill-<source>` command bridges `fed_data.*` into the company/geo system:
+
+1. **Aggregate** by unique identifier (EIN/CRD/CIK) across filing years via `DISTINCT ON`
+2. **Create stub company** in `public.companies` (skip if already linked)
+3. **Upsert identifier** (EIN/CRD/CIK) into `public.company_identifiers`
+4. **Upsert address** into `public.company_addresses` with `source` tag
+5. **Geocode** via PostGIS TIGER (`pkg/geocode.Client`)
+6. **Associate MSAs** — nearest CBSAs by distance (`geo.Associator`)
+7. **Link** via `public.company_matches` (`matched_source`, `matched_key`, `match_type`, confidence)
+
+Implemented: `cmd/geo_backfill_adv.go` (CRD→adv_firms), `cmd/geo_backfill_5500.go` (EIN→form_5500), `cmd/geo_backfill_990.go` (EIN→eo_bmf), and `cmd/geo_backfill_fdic.go` (FDIC cert→fdic_institutions). Future entity datasets (NCUA, USAspending) should follow the same pattern.
+
+### Fedsync — Entity cross-reference web
+
+The entity cross-reference system (`internal/fedsync/resolve/multi_xref.go`) builds a relationship graph across all entity-bearing federal datasets. Every time entity data is synced, cross-references are automatically rebuilt so new records are immediately linked into the web.
+
+**Architecture:**
+
+- `fed_data.entity_xref` — legacy CRD↔CIK table (3-pass ADV↔EDGAR matching)
+- `fed_data.entity_xref_multi` — main cross-reference table linking all entity datasets
+- `resolve.MultiXrefBuilder` executes ordered passes, each generating `INSERT ... ON CONFLICT DO NOTHING`
+- Higher-confidence passes run first; `NOT EXISTS` clauses in lower passes skip already-matched entities
+- `engine.go` auto-triggers `entity_xref` rebuild whenever an entity-bearing dataset syncs
+
+**Pass groups (ordered by confidence):**
+
+| Group | Strategy           | Confidence | Example                                 |
+| ----- | ------------------ | ---------- | --------------------------------------- |
+| 1     | Direct CRD         | 1.00       | ADV↔BrokerCheck, N-CEN↔ADV            |
+| 2     | Direct CIK         | 1.00       | ADV↔EDGAR, Form D↔EDGAR, N-CEN↔EDGAR |
+| 3     | Direct DUNS/UEI    | 1.00       | USAspending↔FPDS                       |
+| 4     | Direct EIN         | 0.95       | Form 5500↔EDGAR, EO BMF↔EDGAR         |
+| 5     | Exact name + ZIP   | 0.90       | FPDS↔PPP, Form 5500↔OSHA, FDIC↔EPA   |
+| 6     | Exact name + state | 0.88       | ADV↔FPDS, EDGAR↔PPP, USAspending↔ADV |
+| 7     | Fuzzy name + state | 0.60-0.90  | ADV↔PPP (pg_trgm similarity > 0.6)     |
+
+**Entity-bearing datasets** (tracked in `engine.go:entityBearingDatasets`):
+ADV, BrokerCheck, Form BD, EDGAR, Form D, N-CEN, Form 5500, EO BMF, FDIC, USAspending, FPDS, PPP, OSHA, EPA
+
+**Checklist: Adding a new entity-bearing dataset**
+
+When implementing a new dataset that contains firm/company/entity records:
+
+1. **Implement the dataset** — `internal/fedsync/dataset/<name>.go` with `Dataset` interface
+2. **Create migration** — `internal/fedsync/migrations/<NNN>_<name>.sql` with appropriate indexes on identifier columns (CRD, CIK, EIN, DUNS, UEI) and name/state/zip
+3. **Register in registry** — add to `internal/fedsync/dataset/registry.go`
+4. **Add to entity-bearing set** — add `Name()` to `entityBearingDatasets` map in `engine.go` so the auto-trigger fires
+5. **Add xref passes** — add passes to `allPasses()` in `resolve/multi_xref.go`:
+   - **Direct ID passes** (confidence 1.0/0.95) for any shared identifiers (CRD, CIK, EIN, DUNS, UEI). Use `directCRDSQL`, `directEINSQL`, or write a custom helper.
+   - **Name+ZIP passes** (confidence 0.90) against all operational datasets that have ZIP. Use `exactNameGeoSQL(..., "zip", 0.90, normName)`.
+   - **Name+state passes** (confidence 0.88) against hub datasets lacking ZIP (ADV, EDGAR). Use `exactNameGeoSQL(..., "state", 0.88, normName)`.
+   - For non-standard state formats (e.g., N-CEN "US-XX"), write a custom SQL helper with `REPLACE()`.
+6. **Update pass count in tests** — update `TestAllPasses_Count`, `TestMultiXrefBuilder_Build_Success` in `multi_xref_test.go` and `TestEntityXref_Sync` in `sync_test.go`
+7. **Update docstring** — update `EntityXref` type comment in `entity_xref.go` to list the new dataset
+8. **Consider geo backfill** — if the dataset has addresses, add a `cmd/geo_backfill_<name>.go` command following the entity aggregation pipeline pattern above
+
+**Choosing pass type by identifier availability:**
+
+| Source has                  | Target has   | Pass type                       | Helper   |
+| --------------------------- | ------------ | ------------------------------- | -------- |
+| CRD                         | CRD          | `directCRDSQL()`                | Generic  |
+| CIK                         | CIK          | Custom (see `cikAdvEdgarSQL`)   | Per-pair |
+| EIN                         | EIN          | `directEINSQL()`                | Generic  |
+| DUNS                        | DUNS         | Custom (see `directDUNSSQL`)    | Per-pair |
+| UEI                         | UEI          | Custom (see `directUEISQL`)     | Per-pair |
+| Name + ZIP                  | Name + ZIP   | `exactNameGeoSQL(..., "zip")`   | Generic  |
+| Name + State                | Name + State | `exactNameGeoSQL(..., "state")` | Generic  |
+| Name + State (non-standard) | Name + State | Custom SQL with `REPLACE()`     | Per-pair |
+
+## API Client Pattern (`pkg/`)
+
+Each external API gets its own package in `pkg/`:
+
+- Define an **interface** for the client operations
+- Implement with a **struct** wrapping `net/http` (or SDK)
+- Firecrawl + Perplexity: raw `net/http` with typed req/resp structs (no SDK)
+- Anthropic: use `anthropic-sdk-go` official SDK
+- Salesforce: use `go-salesforce/v3`
+- Notion: use `notionapi`
+- Token refresh (SF): cache token, refresh on 401, protect with `sync.Mutex`
+- Async polling (Firecrawl, Anthropic Batch): exponential backoff with cap
+
+## Testing
+
+- `pkg/` clients: mock HTTP with `httptest.Server`
+- `internal/pipeline/`: mock `pkg/` clients behind interfaces, test with canned data
+- `internal/store/`: real SQLite in `t.TempDir()`
+- `internal/fedsync/dataset/`: mock `Fetcher`, canned CSV/JSON/XML from `testdata/` fixtures
+- `internal/fetcher/`: `httptest.NewServer` for HTTP, embedded fixtures for parsers
+- `internal/db/`: pgxmock for upsert/copy validation logic
+- `internal/ocr/`: mock `exec.Command` for pdftotext, `httptest` for Mistral
+- **No external API calls in CI** — all mocked
+- Integration tests: `go test -tags=integration` (manual, needs real API keys)
+
+## Conventions
+
+- **Naming:** snake_case for JSON/YAML keys, CamelCase for Go types
+- **Context:** pass `context.Context` as first param everywhere
+- **Struct tags:** `json:"field_name"` on all model structs, `yaml:"field_name"` on config
+- **Env prefix:** `RESEARCH_` (e.g., `RESEARCH_ANTHROPIC_KEY`)
+- **Parallel phases:** 1A/1B/1C fan out via `errgroup`
+- **Notion rate limit:** 3 req/s — pace imports with `time.Ticker` at 300ms
+
+## Style Guide
+
+### Pre-commit hook
+
+A pre-commit hook runs `treefmt`, `go vet`, `golangci-lint`, and `gosec` on staged files. Install it:
+
+```bash
+ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+```
+
+The hook formats and checks staged files, then scopes Go analysis to packages containing staged `.go` files so it's still fast for small changes.
+
+### Formatting
+
+- **Always run `treefmt`** before committing. The pre-commit hook enforces this.
+- **No tabs vs spaces debates** — the configured formatter decides.
+- **Import grouping:** stdlib first, then external, then internal. Use `goimports` or let the formatter handle it.
+- **No trailing whitespace** or unnecessary blank lines inside function bodies.
+
+### Naming
+
+| Context        | Convention        | Example                          |
+| -------------- | ----------------- | -------------------------------- |
+| Go types       | `CamelCase`       | `AdvisorRow`, `SyncResult`       |
+| Go functions   | `CamelCase`       | `FormatPart1Structured`          |
+| Go variables   | `camelCase`       | `brochureSections`, `fundName`   |
+| JSON/YAML keys | `snake_case`      | `"firm_name"`, `"aum_total"`     |
+| SQL columns    | `snake_case`      | `crd_number`, `filing_date`      |
+| Env vars       | `SCREAMING_SNAKE` | `RESEARCH_ANTHROPIC_KEY`         |
+| File names     | `snake_case.go`   | `adv_part1.go`, `entity_xref.go` |
+| Test files     | `*_test.go`       | `sync_test.go`                   |
+| Constants      | `CamelCase`       | `Phase1`, `ModelHaiku`           |
+
+- **Avoid stuttering:** Don't repeat the package name in type names. Use `dataset.Registry` not `dataset.DatasetRegistry`.
+- **Acronyms:** Keep standard acronyms uppercase: `CRD`, `AUM`, `URL`, `HTTP`, `JSON`, `SQL`, `API`.
+- **Interface names:** Single-method interfaces use `-er` suffix (`Fetcher`, `Closer`). Multi-method interfaces use descriptive nouns (`Store`, `Dataset`).
+- **Unused parameters:** Rename to `_` (e.g., `func(cmd *cobra.Command, _ []string)`). Never leave named-but-unused params.
+
+### Documentation
+
+- **Every exported type, function, method, and constant** must have a doc comment.
+- **Format:** `// TypeName does X.` — start with the identifier name, one line preferred.
+- **Interface methods** on concrete types: `// Name implements Dataset.` is sufficient.
+- **Package comments:** Every package needs `// Package <name> <description>.` in exactly one file.
+- **No fluff:** Keep doc comments factual and concise. Don't restate the function signature.
+- **Internal helpers** (unexported) don't require doc comments unless the logic is non-obvious.
+
+### Error handling
+
+- **Always wrap with context:** `eris.Wrap(err, "sf: update account %s", id)`
+- **Never silently swallow errors.** If you intentionally ignore an error, assign to `_` explicitly: `_ = f.Close()`
+- **Deferred close:** Use `defer f.Close() //nolint:errcheck` or `defer func() { _ = f.Close() }()`
+- **Check all return values.** The `errcheck` linter enforces this.
+- **Don't return nil when err is non-nil** — either return the error or log it with an explicit comment.
+
+### Functions & methods
+
+- **`context.Context` is always the first parameter.**
+- **Don't shadow builtins:** Avoid naming variables `max`, `new`, `copy`, `len`, `cap`, etc.
+- **Use `score++`** not `score += 1`.
+- **Prefer early returns** over deep nesting.
+- **Builder pattern:** Use `fmt.Fprintf(&sb, ...)` not `sb.WriteString(fmt.Sprintf(...))`.
+
+### Testing
+
+- **Mock at the boundary:** Use `httptest.Server` for HTTP clients, interfaces for internal deps.
+- **No external API calls in tests.** Everything is mocked.
+- **Unused HTTP handler params:** `func(w http.ResponseWriter, _ *http.Request)` — always underscore unused `r`.
+- **Empty channel drains:** Always add a `// drain` comment inside empty `for range ch {}` blocks.
+- **Test data:** Use `testdata/` fixtures or inline literals. No test file I/O outside `t.TempDir()`.
+
+### Linting
+
+The project uses `golangci-lint` v2.10.x with config in `.golangci.yml`. Active linters beyond the defaults:
+
+| Linter          | Purpose                             |
+| --------------- | ----------------------------------- |
+| `errcheck`      | Unchecked error returns             |
+| `govet`         | Suspicious constructs (`go vet`)    |
+| `ineffassign`   | Unused assignments                  |
+| `staticcheck`   | Advanced static analysis            |
+| `unused`        | Unused code                         |
+| `revive`        | Exported docs, naming, empty blocks |
+| `misspell`      | Typos in comments and strings       |
+| `copyloopvar`   | Loop variable capture bugs          |
+| `durationcheck` | Incorrect `time.Duration` math      |
+| `nilerr`        | Returning nil when err is non-nil   |
+| `unconvert`     | Unnecessary type conversions        |
+| `whitespace`    | Trailing whitespace, blank lines    |
+
+Run locally: `./scripts/lint.sh ./...`
+
+The wrapper script is the supported local entrypoint. It expands packages with `go list`, pins the expected `golangci-lint` version, and is the same path used by CI and the pre-commit hook.
+
+Formatting entrypoint: `treefmt`
+
+### CI & Branch Protection
+
+CI runs 5 parallel jobs on every push/PR to `main`: `test`, `vet`, `lint`, `gofix`, `security`. All 5 are required status checks — PRs cannot merge until all pass. Branch protection is configured with `strict: true` (branch must be up-to-date with `main`).
+
+## Environment Variables
+
+### Required (production)
+
+| Variable                      | Purpose                               |
+| ----------------------------- | ------------------------------------- |
+| `RESEARCH_DATABASE_URL`       | Neon Postgres connection string       |
+| `RESEARCH_NOTION_TOKEN`       | Notion integration token              |
+| `RESEARCH_NOTION_LEAD_DB`     | Lead Tracker database ID              |
+| `RESEARCH_NOTION_QUESTION_DB` | Question Registry database ID         |
+| `RESEARCH_NOTION_FIELD_DB`    | Field Registry database ID            |
+| `RESEARCH_FIRECRAWL_KEY`      | Firecrawl API key                     |
+| `RESEARCH_PERPLEXITY_KEY`     | Perplexity API key                    |
+| `RESEARCH_ANTHROPIC_KEY`      | Anthropic API key                     |
+| `RESEARCH_SF_CLIENT_ID`       | Salesforce Connected App client ID    |
+| `RESEARCH_SF_USERNAME`        | Salesforce username for JWT auth      |
+| `RESEARCH_SF_KEY_PATH`        | Path to SF JWT private key            |
+| `RESEARCH_TOOLJET_WEBHOOK`    | ToolJet webhook URL for manual review |
+
+### Optional
+
+| Variable                | Default    | Purpose                          |
+| ----------------------- | ---------- | -------------------------------- |
+| `RESEARCH_STORE_DRIVER` | `postgres` | `postgres` or `sqlite`           |
+| `RESEARCH_LOG_LEVEL`    | `info`     | `debug`, `info`, `warn`, `error` |
+| `RESEARCH_LOG_FORMAT`   | `json`     | `json` (prod) or `console` (dev) |
+
+### Fedsync
+
+| Variable                            | Default                                  | Purpose                          |
+| ----------------------------------- | ---------------------------------------- | -------------------------------- |
+| `RESEARCH_FEDSYNC_DATABASE_URL`     | (falls back to `DATABASE_URL`)           | Fedsync Postgres connection      |
+| `RESEARCH_FEDSYNC_SAM_API_KEY`      |                                          | SAM.gov FPDS API key             |
+| `RESEARCH_FEDSYNC_FRED_API_KEY`     |                                          | FRED API key                     |
+| `RESEARCH_FEDSYNC_BLS_API_KEY`      |                                          | BLS API key                      |
+| `RESEARCH_FEDSYNC_CENSUS_API_KEY`   |                                          | Census API key                   |
+| `RESEARCH_FEDSYNC_EDGAR_USER_AGENT` | `Sells Advisors blake@sellsadvisors.com` | SEC EDGAR required User-Agent    |
+| `RESEARCH_FEDSYNC_N8N_WEBHOOK_URL`  |                                          | n8n webhook for notifications    |
+| `RESEARCH_FEDSYNC_MISTRAL_API_KEY`  |                                          | Mistral OCR API key              |
+| `RESEARCH_FEDSYNC_TEMP_DIR`         | `/tmp/fedsync`                           | Temp directory for downloads     |
+| `RESEARCH_FEDSYNC_OCR_PROVIDER`     | `local`                                  | `local` (pdftotext) or `mistral` |
+
+## Notion References
+
+**Design Page:** [Research CLI v1 — Go + Fly.io + Neon + Salesforce](https://www.notion.so/Research-CLI-v1-Go-Fly-io-Neon-Salesforce-30452e98776980358cecf4c879ecebf3)
+
+- Architecture, schema decisions, data model
+- Check before major feature work or architectural changes
+- Update when adding subsystems, changing schema, or making design decisions
+
+| Database              | Env Var                       | When to Check                                                 | When to Update                                           |
+| --------------------- | ----------------------------- | ------------------------------------------------------------- | -------------------------------------------------------- |
+| **Lead Tracker**      | `RESEARCH_NOTION_LEAD_DB`     | Rarely — batch command reads it                               | Don't update directly; Phase 9 gate handles status       |
+| **Question Registry** | `RESEARCH_NOTION_QUESTION_DB` | Modifying extraction logic, adding fields, debugging accuracy | Adding extraction questions or changing tier assignments |
+| **Field Registry**    | `RESEARCH_NOTION_FIELD_DB`    | Modifying aggregation, validation, or SF write logic          | Adding SF fields or changing data types/validation       |
+
+Key properties:
+
+- **Question Registry:** Name, Tier (1/2/3), Category, Pages (multi-select), Status (Active/Inactive), Prompt Template
+- **Field Registry:** Field Name, SF API Name, Data Type, Validation Rule, Source Questions (relation), Status
+
+## Linear Project Management
+
+All issues use the Linear MCP tools (`list_issues`, `get_issue`, `create_issue`, `update_issue`, `create_comment`).
+
+### Key IDs
+
+| Entity   | Name                 | ID                                     |
+| -------- | -------------------- | -------------------------------------- |
+| Team     | Development (SELDEV) | `a5576244-0374-499a-aaa8-6198f3e0a70a` |
+| Assignee | Blake Ashley         | `72ea6cc0-8b38-44e7-ba3c-f76013ea9c63` |
+| Label    | research-cli         | `015370cf-bc89-474d-a5e9-e64c746f1869` |
+
+**Projects:**
+
+| Project                      | ID                                     |
+| ---------------------------- | -------------------------------------- |
+| Account Enrichment Pipeline  | `2872cb51-ced2-4c0f-9a17-ef39af593d03` |
+| Federal Data Sync            | `262e19da-9278-4051-b329-aba7b2ba38a6` |
+| Infrastructure & DevOps      | `dcfd3843-59b1-4d2b-b6d3-0e10e46a02ad` |
+| Data Quality & Documentation | `9d6b88b8-d749-47bf-af48-66457eed4f74` |
+
+**Statuses:**
+
+| Status      | Type      | ID                                     |
+| ----------- | --------- | -------------------------------------- |
+| Backlog     | backlog   | `ebce30c1-2eee-4bbe-acb0-bb8ee91c2352` |
+| Todo        | unstarted | `8c51d43c-d3b0-4445-8c6a-036fe6aba4d9` |
+| In Progress | started   | `2fb93edf-acc4-4cd5-a3b6-a6a5314d3c5c` |
+| Done        | completed | `5ef89b40-6b09-4d2c-bdfd-cfc619b7c48b` |
+
+**Priorities:** 1=Urgent, 2=High, 3=Medium, 4=Low
+
+### Common Operations
+
+**Find next work:**
+
+```
+list_issues: team_id="a5576244-0374-499a-aaa8-6198f3e0a70a", label="research-cli", state="Todo"
+```
+
+Pick highest priority (lowest number). Check issue description with `get_issue` before starting.
+
+**Start work:**
+
+```
+update_issue: id=<issue_id>, state="In Progress"
+```
+
+**Complete work:**
+
+```
+update_issue: id=<issue_id>, state="Done"
+create_comment: issue_id=<issue_id>, body="<what was implemented, files changed, any follow-up needed>"
+```
+
+**Create new issue:**
+
+```
+create_issue:
+  team_id="a5576244-0374-499a-aaa8-6198f3e0a70a"
+  title="..."
+  description="..."    # Markdown: context, acceptance criteria, technical notes
+  project_id="..."     # One of the 4 project IDs above
+  label_ids=["015370cf-bc89-474d-a5e9-e64c746f1869"]
+  assignee_id="72ea6cc0-8b38-44e7-ba3c-f76013ea9c63"
+  priority=3           # 1-4
+```
+
+**Create sub-issue:** Same as above, add `parent_id=<parent_issue_id>`
+
+**Add context:** `create_comment` on an issue with findings, decisions, or blockers
+
+## Workflow: Finding and Executing Work
+
+1. **Check Linear for next task:** `list_issues` filtered by `research-cli` label + `state="Todo"`, pick highest priority
+2. **Read the issue:** `get_issue` for full description, acceptance criteria, and parent/sub-issue context
+3. **Check Notion for context:**
+   - Extraction/field changes → check Question Registry and Field Registry
+   - Architectural changes → check the Design Page
+   - New subsystem → check Design Page for prior decisions
+4. **Do the work:** Follow existing AGENTS.md patterns (error handling, logging, testing, etc.)
+5. **Update Linear:**
+   - Move issue to Done: `update_issue` with `state="Done"`
+   - Add completion comment: what was implemented, files changed, any follow-up
+   - If work spawned new tasks, create sub-issues or new issues
+6. **Update Notion if needed:** If new questions/fields were added to code, note that the Question/Field Registry DBs need corresponding entries
+7. **Check for unblocked work:** Completing an issue may unblock dependent issues — run `list_issues` again to find newly available Todo items

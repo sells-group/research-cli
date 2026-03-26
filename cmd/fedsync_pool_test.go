@@ -92,4 +92,20 @@ func TestFedsyncCmd_Metadata(t *testing.T) {
 	assert.Equal(t, "fedsync", fedsyncCmd.Use)
 	assert.NotEmpty(t, fedsyncCmd.Short)
 	assert.NotEmpty(t, fedsyncCmd.Long)
+	assert.Contains(t, fedsyncCmd.Long, "42 federal datasets")
+}
+
+func TestFedsyncDatasetsCmd_Metadata(t *testing.T) {
+	assert.Equal(t, "datasets", fedsyncDatasetsCmd.Use)
+	assert.NotEmpty(t, fedsyncDatasetsCmd.Short)
+	flag := fedsyncDatasetsCmd.Flags().Lookup("format")
+	assert.NotNil(t, flag)
+	assert.Equal(t, "text", flag.DefValue)
+}
+
+func TestFedsyncGenerateCmd_Metadata(t *testing.T) {
+	assert.Equal(t, "generate", fedsyncGenerateCmd.Use)
+	assert.NotEmpty(t, fedsyncGenerateCmd.Short)
+	assert.Equal(t, "docs,frontend", fedsyncGenerateCmd.Flags().Lookup("targets").DefValue)
+	assert.Equal(t, "false", fedsyncGenerateCmd.Flags().Lookup("check").DefValue)
 }

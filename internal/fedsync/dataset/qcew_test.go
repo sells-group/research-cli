@@ -80,7 +80,7 @@ func TestQCEW_Sync_NoRelevantFiles(t *testing.T) {
 	f := fetchermocks.NewMockFetcher(t)
 
 	numYears := currentDataYear() - qcewStartYear + 1
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToFile(t, f, zipPath).Times(numYears)
 
 	// No BulkUpsert expected since no relevant files pass isRelevantFile.
 

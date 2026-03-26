@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,9 +36,6 @@ func TestIRSSOIMigration_ShouldRun(t *testing.T) {
 	assert.False(t, ds.ShouldRun(now, &recent))
 }
 
-// inflowCSV is the testdata content for inflow direction.
-var inflowCSV = mustReadTestdata("irs_soi_inflow.csv")
-
 // outflowCSV is inline test data for outflow direction.
 // Row 1: valid county-to-county flow.
 // Row 2: county_fips_origin "000" → skipped (summary).
@@ -51,17 +46,9 @@ const outflowCSV = `y1_statefips,y1_countyfips,y2_statefips,y2_countyfips,y2_sta
 48,453,97,000,--,Non-migrant,5000,12000,500000
 `
 
-func mustReadTestdata(name string) string {
-	data, err := os.ReadFile(filepath.Join("testdata", name))
-	if err != nil {
-		panic("mustReadTestdata: " + err.Error())
-	}
-	return string(data)
-}
-
 // mockIRSDownloads sets up DownloadToFile mock for both inflow and outflow CSVs.
 // It inspects the dest path to decide which CSV content to write.
-func mockIRSDownloads(f *fetchermocks.MockFetcher, inflowContent, outflowContent string) {
+func mockIRSDownloads(t *testing.T, f *fetchermocks.MockFetcher, inflowContent, outflowContent string) {
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		Run(func(_ context.Context, _ string, destPath string) {
 			var content string
@@ -70,9 +57,7 @@ func mockIRSDownloads(f *fetchermocks.MockFetcher, inflowContent, outflowContent
 			} else {
 				content = outflowContent
 			}
-			if err := os.WriteFile(destPath, []byte(content), 0o644); err != nil {
-				panic("mockIRSDownloads: " + err.Error())
-			}
+			writeTestFixture(t, destPath, []byte(content))
 		}).
 		Return(int64(1000), nil).
 		Times(2)
@@ -87,7 +72,7 @@ func TestIRSSOIMigration_Sync(t *testing.T) {
 	pool.MatchExpectationsInOrder(false)
 
 	f := fetchermocks.NewMockFetcher(t)
-	mockIRSDownloads(f, inflowCSV, outflowCSV)
+	mockIRSDownloads(t, f, readTestdataString(t, "irs_soi_inflow.csv"), outflowCSV)
 
 	// Inflow: 4 rows total, 2 skipped (county "000" and state "96") → 2 rows.
 	expectBulkUpsert(pool, "fed_data.irs_soi_migration", irsMigrationCols, 2)
@@ -123,7 +108,7 @@ func TestIRSSOIMigration_SkipSummaryRows(t *testing.T) {
 
 	f := fetchermocks.NewMockFetcher(t)
 	// Both inflow and outflow get the same all-skipped CSV.
-	mockIRSDownloads(f, allSkippedCSV, allSkippedCSV)
+	mockIRSDownloads(t, f, allSkippedCSV, allSkippedCSV)
 
 	ds := &IRSSOIMigration{baseURL: "http://test.local/irs_soi.csv"}
 	result, err := ds.Sync(context.Background(), pool, f, dir)
@@ -174,13 +159,11 @@ func TestIRSSOIMigration_ProdURL_FallbackSuccess(t *testing.T) {
 			// Succeed for second pair — write the appropriate CSV.
 			var content string
 			if strings.Contains(destPath, "inflow") {
-				content = inflowCSV
+				content = readTestdataString(t, "irs_soi_inflow.csv")
 			} else {
 				content = outflowCSV
 			}
-			if wErr := os.WriteFile(destPath, []byte(content), 0o644); wErr != nil {
-				return 0, wErr
-			}
+			writeTestFixture(t, destPath, []byte(content))
 			return int64(len(content)), nil
 		}).Times(4) // pair1 fails for inflow, pair2 succeeds for inflow, pair1 fails for outflow, pair2 succeeds for outflow
 
@@ -232,13 +215,11 @@ func TestIRSSOIMigration_ProdURL_FirstPairSuccess(t *testing.T) {
 			assert.Contains(t, url, pair1)
 			var content string
 			if strings.Contains(destPath, "inflow") {
-				content = inflowCSV
+				content = readTestdataString(t, "irs_soi_inflow.csv")
 			} else {
 				content = outflowCSV
 			}
-			if wErr := os.WriteFile(destPath, []byte(content), 0o644); wErr != nil {
-				return 0, wErr
-			}
+			writeTestFixture(t, destPath, []byte(content))
 			return int64(len(content)), nil
 		}).Times(2) // inflow + outflow
 
@@ -312,7 +293,8 @@ func TestIRSSOIMigration_ParseFileHeaderError(t *testing.T) {
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, _ string, destPath string) (int64, error) {
 			// Write an empty file.
-			return 0, os.WriteFile(destPath, []byte(""), 0o644)
+			writeTestFixture(t, destPath, []byte(""))
+			return 0, nil
 		}).Times(1)
 
 	ds := &IRSSOIMigration{baseURL: "http://test.local/irs_soi.csv"}
@@ -335,8 +317,9 @@ func TestIRSSOIMigration_UpsertError(t *testing.T) {
 	// Only the first direction (inflow) will be attempted before the error.
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, _ string, destPath string) (int64, error) {
-			content := inflowCSV
-			return int64(len(content)), os.WriteFile(destPath, []byte(content), 0o644)
+			content := readTestdataString(t, "irs_soi_inflow.csv")
+			writeTestFixture(t, destPath, []byte(content))
+			return int64(len(content)), nil
 		}).Times(1)
 
 	// Make BulkUpsert fail at the Begin step.
@@ -363,7 +346,8 @@ func TestIRSSOIMigration_ReadRowError(t *testing.T) {
 
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, _ string, destPath string) (int64, error) {
-			return int64(len(malformedCSV)), os.WriteFile(destPath, []byte(malformedCSV), 0o644)
+			writeTestFixture(t, destPath, []byte(malformedCSV))
+			return int64(len(malformedCSV)), nil
 		}).Times(1)
 
 	ds := &IRSSOIMigration{baseURL: "http://test.local/irs_soi.csv"}
@@ -390,7 +374,9 @@ func TestIRSSOIMigration_ProdURL_OutflowFails(t *testing.T) {
 			callCount++
 			// Inflow calls succeed (first call for inflow direction).
 			if strings.Contains(url, "countyinflow") && strings.Contains(destPath, "inflow") {
-				return int64(len(inflowCSV)), os.WriteFile(destPath, []byte(inflowCSV), 0o644)
+				content := readTestdataString(t, "irs_soi_inflow.csv")
+				writeTestFixture(t, destPath, []byte(content))
+				return int64(len(content)), nil
 			}
 			// All outflow calls fail.
 			return 0, errors.New("not found")

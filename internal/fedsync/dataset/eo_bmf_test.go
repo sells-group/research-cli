@@ -262,9 +262,7 @@ func TestEOBMF_Sync_ParseError(t *testing.T) {
 	f := fetchermocks.NewMockFetcher(t)
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		Run(func(_ context.Context, _ string, destPath string) {
-			if err := os.WriteFile(destPath, []byte(badCSV), 0644); err != nil {
-				panic("test: write CSV: " + err.Error())
-			}
+			writeTestFixture(t, destPath, []byte(badCSV))
 		}).
 		Return(int64(len(badCSV)), nil)
 
@@ -350,9 +348,7 @@ func TestEOBMF_Sync_Success(t *testing.T) {
 	// Mock download for all 4 regions — write CSV content to the target path.
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		Run(func(_ context.Context, _ string, destPath string) {
-			if err := os.WriteFile(destPath, []byte(csvContent), 0644); err != nil {
-				panic("test: write CSV: " + err.Error())
-			}
+			writeTestFixture(t, destPath, []byte(csvContent))
 		}).
 		Return(int64(len(csvContent)), nil).
 		Times(4)

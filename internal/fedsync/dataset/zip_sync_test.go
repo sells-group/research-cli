@@ -66,28 +66,20 @@ func createTestZipMulti(t *testing.T, dir, zipName string, files map[string]stri
 
 // mockDownloadToCSV sets up a DownloadToFile mock that writes CSV content
 // directly to whatever destination path the caller requests.
-func mockDownloadToCSV(f *fetchermocks.MockFetcher, csvContent string) *fetchermocks.MockFetcher_DownloadToFile_Call {
+func mockDownloadToCSV(t *testing.T, f *fetchermocks.MockFetcher, csvContent string) *fetchermocks.MockFetcher_DownloadToFile_Call {
 	return f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		Run(func(_ context.Context, _ string, destPath string) {
-			if err := os.WriteFile(destPath, []byte(csvContent), 0644); err != nil {
-				panic(fmt.Sprintf("mockDownloadToCSV: WriteFile %s: %v", destPath, err))
-			}
+			writeTestFixture(t, destPath, []byte(csvContent))
 		}).
 		Return(int64(len(csvContent)), nil)
 }
 
 // mockDownloadToFile sets up a DownloadToFile mock that copies a pre-built ZIP
 // to whatever destination path the caller requests. Matches any URL.
-func mockDownloadToFile(f *fetchermocks.MockFetcher, zipPath string) *fetchermocks.MockFetcher_DownloadToFile_Call {
+func mockDownloadToFile(t *testing.T, f *fetchermocks.MockFetcher, zipPath string) *fetchermocks.MockFetcher_DownloadToFile_Call {
 	return f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		Run(func(_ context.Context, _ string, destPath string) {
-			data, err := os.ReadFile(zipPath)
-			if err != nil {
-				panic(fmt.Sprintf("mockDownloadToFile: ReadFile %s: %v", zipPath, err))
-			}
-			if err := os.WriteFile(destPath, data, 0644); err != nil {
-				panic(fmt.Sprintf("mockDownloadToFile: WriteFile %s: %v", destPath, err))
-			}
+			copyTestFixture(t, zipPath, destPath)
 		}).
 		Return(int64(1000), nil)
 }
@@ -150,7 +142,7 @@ func TestCBP_Sync_Success(t *testing.T) {
 	// Each file produces 2 rows -> two BulkUpserts per year.
 	numYears := currentDataYear() - cbpStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears * 2) // county + state per year
+	mockDownloadToFile(t, f, zipPath).Times(numYears * 2) // county + state per year
 
 	for i := 0; i < numYears*2; i++ {
 		expectBulkUpsertZip(pool, "fed_data.cbp_data", cbpCols, 2)
@@ -197,7 +189,7 @@ func TestCBP_Sync_AllNAICSAccepted(t *testing.T) {
 
 	numYears := currentDataYear() - cbpStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears * 2) // county + state per year
+	mockDownloadToFile(t, f, zipPath).Times(numYears * 2) // county + state per year
 
 	// Both rows pass per file.
 	for i := 0; i < numYears*2; i++ {
@@ -258,7 +250,7 @@ func TestSUSB_Sync_Success(t *testing.T) {
 
 	numYears := currentDataYear() - susbStartYear + 1
 
-	mockDownloadToCSV(f, csvContent).Times(numYears)
+	mockDownloadToCSV(t, f, csvContent).Times(numYears)
 
 	for i := 0; i < numYears; i++ {
 		expectBulkUpsertZip(pool, "fed_data.susb_data", susbCols, 2)
@@ -302,7 +294,7 @@ func TestSUSB_Sync_AllNAICSAccepted(t *testing.T) {
 
 	numYears := currentDataYear() - susbStartYear + 1
 
-	mockDownloadToCSV(f, csvContent).Times(numYears)
+	mockDownloadToCSV(t, f, csvContent).Times(numYears)
 
 	for i := 0; i < numYears; i++ {
 		expectBulkUpsertZip(pool, "fed_data.susb_data", susbCols, 2)
@@ -325,7 +317,7 @@ func TestSUSB_Sync_EmptyCSV(t *testing.T) {
 	f := fetchermocks.NewMockFetcher(t)
 
 	numYears := currentDataYear() - susbStartYear + 1
-	mockDownloadToCSV(f, susbCSVHeader).Times(numYears)
+	mockDownloadToCSV(t, f, susbCSVHeader).Times(numYears)
 
 	ds := &SUSB{}
 	result, err := ds.Sync(context.Background(), pool, f, dir)
@@ -361,7 +353,7 @@ func TestOEWS_Sync_Success(t *testing.T) {
 
 	numYears := currentDataYear() - oewsStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToFile(t, f, zipPath).Times(numYears)
 
 	for i := 0; i < numYears; i++ {
 		expectBulkUpsertZip(pool, "fed_data.oews_data", oewsCols, 2)
@@ -407,7 +399,7 @@ func TestOEWS_Sync_AllNAICSAccepted(t *testing.T) {
 
 	numYears := currentDataYear() - oewsStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToFile(t, f, zipPath).Times(numYears)
 
 	for i := 0; i < numYears; i++ {
 		expectBulkUpsertZip(pool, "fed_data.oews_data", oewsCols, 2)
@@ -438,7 +430,7 @@ func TestOEWS_Sync_FallbackCSV(t *testing.T) {
 
 	numYears := currentDataYear() - oewsStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToFile(t, f, zipPath).Times(numYears)
 
 	for i := 0; i < numYears; i++ {
 		expectBulkUpsertZip(pool, "fed_data.oews_data", oewsCols, 1)
@@ -506,7 +498,7 @@ func TestQCEW_Sync_Success(t *testing.T) {
 
 	numYears := currentDataYear() - qcewStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToFile(t, f, zipPath).Times(numYears)
 
 	// Each year processes one relevant CSV with 2 rows -> one BulkUpsert.
 	for i := 0; i < numYears; i++ {
@@ -558,7 +550,7 @@ func TestQCEW_Sync_SkipsAnnualAggregate(t *testing.T) {
 
 	numYears := currentDataYear() - qcewStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToFile(t, f, zipPath).Times(numYears)
 
 	// Only 1 row passes per year (qtr=0 is skipped).
 	for i := 0; i < numYears; i++ {
@@ -598,7 +590,7 @@ func TestQCEW_Sync_ProcessesAllRelevantFiles(t *testing.T) {
 
 	numYears := currentDataYear() - qcewStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToFile(t, f, zipPath).Times(numYears)
 
 	// Both files are relevant, 1 row each -> 2 BulkUpsert calls per year.
 	for i := 0; i < numYears; i++ {
@@ -638,7 +630,7 @@ func TestQCEW_Sync_MultipleRelevantFiles(t *testing.T) {
 
 	numYears := currentDataYear() - qcewStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToFile(t, f, zipPath).Times(numYears)
 
 	// 2 CSV files per year, 1 row each -> 2 BulkUpsert calls per year.
 	for i := 0; i < numYears; i++ {
@@ -676,7 +668,7 @@ func TestQCEW_Sync_AllNAICSAccepted(t *testing.T) {
 
 	numYears := currentDataYear() - qcewStartYear + 1
 
-	mockDownloadToFile(f, zipPath).Times(numYears)
+	mockDownloadToFile(t, f, zipPath).Times(numYears)
 
 	for i := 0; i < numYears; i++ {
 		expectBulkUpsertZip(pool, "fed_data.qcew_data", qcewCols, 2)

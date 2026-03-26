@@ -3,7 +3,6 @@ package dataset
 import (
 	"context"
 	"io"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -149,9 +148,7 @@ func TestPPP_Sync_Success(t *testing.T) {
 	// Mock CSV download.
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		Run(func(_ context.Context, _ string, destPath string) {
-			if err := os.WriteFile(destPath, []byte(csvContent), 0644); err != nil {
-				panic("test: write CSV: " + err.Error())
-			}
+			writeTestFixture(t, destPath, []byte(csvContent))
 		}).Return(int64(len(csvContent)), nil)
 
 	expectBulkUpsertZip(pool, "fed_data.ppp_loans", pppCols, 1)

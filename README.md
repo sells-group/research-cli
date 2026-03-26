@@ -4,12 +4,12 @@ Automated account enrichment pipeline — import leads via CSV into a Notion lea
 
 ## Overview
 
-| | |
-|---|---|
-| **Input** | CSV file of companies (from Grata, manual research, etc.) → imported into a Notion Lead Tracker DB |
-| **Output** | Enriched fields written to Salesforce Account records + status/quality updated on the Notion lead page |
-| **Runtime** | Go binary (`research-cli`) on Fly.io (cron or webhook) · Neon Postgres (state) · SQLite (local dev) |
-| **Stack** | Go (cobra · zap · eris · viper) · Fly.io (compute) · Neon Postgres (run log + staging) · Jina AI (search + read) → Firecrawl (fallback) · Perplexity + Haiku (LinkedIn) · Claude Haiku / Sonnet / Opus (tiered extraction) · Salesforce REST API (destination) · Notion API (lead tracker + registries) · ToolJet (manual review UI) |
+|             |                                                                                                                                                                                                                                                                                                                                      |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Input**   | CSV file of companies (from Grata, manual research, etc.) → imported into a Notion Lead Tracker DB                                                                                                                                                                                                                                   |
+| **Output**  | Enriched fields written to Salesforce Account records + status/quality updated on the Notion lead page                                                                                                                                                                                                                               |
+| **Runtime** | Go binary (`research-cli`) on Fly.io (cron or webhook) · Neon Postgres (state) · SQLite (local dev)                                                                                                                                                                                                                                  |
+| **Stack**   | Go (cobra · zap · eris · viper) · Fly.io (compute) · Neon Postgres (run log + staging) · Jina AI (search + read) → Firecrawl (fallback) · Perplexity + Haiku (LinkedIn) · Claude Haiku / Sonnet / Opus (tiered extraction) · Salesforce REST API (destination) · Notion API (lead tracker + registries) · ToolJet (manual review UI) |
 
 ---
 
@@ -50,7 +50,7 @@ Automated account enrichment pipeline — import leads via CSV into a Notion lea
 - Crawl results cached 24 hours; reused on re-run
 - ~60% of company sites serve clean HTML → **~55% Firecrawl credit reduction**
 
-### Phase 1B — External Scrape: Search-then-Scrape *(parallel with 1A)*
+### Phase 1B — External Scrape: Search-then-Scrape _(parallel with 1A)_
 
 Uses **Jina AI Search** to discover profile URLs, then scrapes them via the scrape chain (Jina Reader → Firecrawl fallback):
 
@@ -60,14 +60,14 @@ Uses **Jina AI Search** to discover profile URLs, then scrapes them via the scra
 
 Each source runs in parallel. Pages are deduped by content hash, and address cross-referencing extracts structured location metadata.
 
-### Phase 1C — Perplexity: LinkedIn *(parallel with 1A/1B)*
+### Phase 1C — Perplexity: LinkedIn _(parallel with 1A/1B)_
 
 - Targeted Perplexity query (`sonar-pro` model) for company LinkedIn profile data
 - Raw response piped through **Haiku** to enforce strict JSON output schema (company name, description, industry, headcount, headquarters, founded, specialties, company type)
 - Output converted to synthetic `[linkedin]` page and merged into page set
 - LinkedIn results cached per domain
 
-### Phase 1D — PPP Loan Lookup *(parallel with 1A/1B/1C)*
+### Phase 1D — PPP Loan Lookup _(parallel with 1A/1B/1C)_
 
 - Queries PPP loan dataset for company name matches (fuzzy matching with similarity threshold 0.4)
 - Returns loan match metadata (loan amount, jobs retained, NAICS code) if found
@@ -101,6 +101,7 @@ T1, T2-native, and T2-escalated run with maximum overlap:
 3. Results are combined into a single Phase 5 result
 
 **Tier 1 — Haiku (~70 questions):**
+
 - Single-page fact extraction, no reasoning
 - Each batch gets **only** the pages classified as relevant
 - Strict JSON output: `{"value", "confidence", "reasoning", "source_url"}`
@@ -108,6 +109,7 @@ T1, T2-native, and T2-escalated run with maximum overlap:
 - **Checkpoint/resume:** T1 answers saved on success; reused if pipeline fails in later phases
 
 **Tier 2 — Sonnet (~25 questions):**
+
 - **T2-native:** Questions routed directly to T2 (no T1 dependency)
 - **T2-escalated:** Low-confidence T1 answers re-extracted with T1 context
 - Multi-page synthesis (top 2000 chars per page), light reasoning
@@ -133,7 +135,7 @@ Two-step process to minimize Opus input tokens:
 - **Validate & type-coerce:** Match answers to Field Registry, validate against regex patterns and length constraints
 - **Merge existing answers:** Reuses high-confidence answers from prior runs that were skipped during extraction
 
-### Phase 7B — Waterfall Cascade *(optional)*
+### Phase 7B — Waterfall Cascade _(optional)_
 
 Per-field resolution for low-confidence answers using premium data sources:
 
@@ -249,13 +251,12 @@ research-cli/
 │   ├── fedsync/             # federal data sync subsystem
 │   │   ├── migrate.go       # embed.FS migration runner → fed_data.schema_migrations
 │   │   ├── synclog.go       # sync log tracking (start, complete, fail)
-│   │   ├── migrations/      # 99 SQL migration files (001-093)
-│   │   ├── dataset/         # 33 dataset implementations
+│   │   ├── dataset/         # dataset implementations
 │   │   │   ├── interface.go # Dataset interface, Phase, Cadence, SyncResult
 │   │   │   ├── engine.go    # Engine: Run() orchestration loop
 │   │   │   ├── registry.go  # Registry: maps names → Dataset impls
 │   │   │   ├── schedule.go  # ShouldRun helpers: Daily, Weekly, Monthly, Quarterly, Annual
-│   │   │   └── *.go         # 33 dataset files (cbp, qcew, fpds, adv_part1, form_d, eo_bmf, etc.)
+│   │   │   └── *.go         # dataset files (cbp, qcew, fpds, adv_part1, form_d, eo_bmf, etc.)
 │   │   ├── transform/       # NAICS, FIPS, SIC normalization
 │   │   ├── resolve/         # entity resolution (CRD↔CIK fuzzy matching)
 │   │   └── xbrl/            # XBRL JSON-LD fact parser
@@ -280,23 +281,23 @@ research-cli/
 
 ## Library Stack
 
-| Library | Import | Purpose | Notes |
-|---|---|---|---|
-| **Cobra** | `github.com/spf13/cobra` | CLI framework — subcommands, flags, help | v1.8+. Pairs with Viper for config binding. |
-| **Viper** | `github.com/spf13/viper` | Config management — YAML files, env vars, flags | Reads `config.yaml` · `RESEARCH_*` env vars. Fly secrets map to env vars. |
-| **Zap** | `go.uber.org/zap` | Structured logging — JSON output for Fly log drain | Use `zap.L()` global logger. Fields: `company`, `phase`, `tier`, `duration_ms`, `tokens`. |
-| **Eris** | `github.com/rotisserie/eris` | Error wrapping with stack traces | `eris.Wrap(err, "firecrawl crawl failed")`. Unwrap for structured error reporting in run log. |
-| **pgx** | `github.com/jackc/pgx/v5` | Postgres driver for Neon | Connection pooling via `pgxpool`. Neon requires SSL (`sslmode=require`). |
-| **modernc sqlite** | `modernc.org/sqlite` | Pure Go SQLite — local dev, no CGO | Same schema as Neon. Swapped via `store.Store` interface. |
-| **errgroup** | `golang.org/x/sync/errgroup` | Structured concurrency for parallel phases | Fan out Phase 1A/1B/1C/1D in parallel. T1∥T2-native overlap. |
-| **go-salesforce** | `github.com/k-capehart/go-salesforce/v3` | Salesforce REST API wrapper | SOQL, CRUD, Collections. On awesome-go. Actively maintained. |
-| **notionapi** | `github.com/jomei/notionapi` | Notion API client | Database query, page create/update. Used for Lead Tracker + Registry reads. |
-| **colly** | `github.com/gocolly/colly/v2` | Web crawling — link discovery, depth control, robots.txt | Phase 1A local crawl. Respects robots.txt. Depth 2, cap 50 pages. Falls back to Firecrawl on block. |
-| **html-to-markdown** | `github.com/JohannesKaufmann/html-to-markdown/v2` | HTML → clean markdown conversion | Replaces Firecrawl's markdown output for locally crawled pages. Handles tables, lists, links. |
-| **anthropic-sdk-go** | `github.com/anthropics/anthropic-sdk-go` | Official Anthropic SDK — Messages + Batch API | Supports prompt caching, batch create/poll/results. Use for all Claude calls. |
-| **jlaffaye/ftp** | `github.com/jlaffaye/ftp` | FTP client for SEC EDGAR bulk downloads | Used by fedsync datasets. |
-| **tealeg/xlsx** | `github.com/tealeg/xlsx/v2` | XLSX parsing | Used by fedsync for Excel-format datasets. |
-| **x/time/rate** | `golang.org/x/time/rate` | Per-host rate limiting | SEC 10 req/s, SAM.gov 5 req/s, default 20 req/s. |
+| Library              | Import                                            | Purpose                                                  | Notes                                                                                               |
+| -------------------- | ------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **Cobra**            | `github.com/spf13/cobra`                          | CLI framework — subcommands, flags, help                 | v1.8+. Pairs with Viper for config binding.                                                         |
+| **Viper**            | `github.com/spf13/viper`                          | Config management — YAML files, env vars, flags          | Reads `config.yaml` · `RESEARCH_*` env vars. Fly secrets map to env vars.                           |
+| **Zap**              | `go.uber.org/zap`                                 | Structured logging — JSON output for Fly log drain       | Use `zap.L()` global logger. Fields: `company`, `phase`, `tier`, `duration_ms`, `tokens`.           |
+| **Eris**             | `github.com/rotisserie/eris`                      | Error wrapping with stack traces                         | `eris.Wrap(err, "firecrawl crawl failed")`. Unwrap for structured error reporting in run log.       |
+| **pgx**              | `github.com/jackc/pgx/v5`                         | Postgres driver for Neon                                 | Connection pooling via `pgxpool`. Neon requires SSL (`sslmode=require`).                            |
+| **modernc sqlite**   | `modernc.org/sqlite`                              | Pure Go SQLite — local dev, no CGO                       | Same schema as Neon. Swapped via `store.Store` interface.                                           |
+| **errgroup**         | `golang.org/x/sync/errgroup`                      | Structured concurrency for parallel phases               | Fan out Phase 1A/1B/1C/1D in parallel. T1∥T2-native overlap.                                        |
+| **go-salesforce**    | `github.com/k-capehart/go-salesforce/v3`          | Salesforce REST API wrapper                              | SOQL, CRUD, Collections. On awesome-go. Actively maintained.                                        |
+| **notionapi**        | `github.com/jomei/notionapi`                      | Notion API client                                        | Database query, page create/update. Used for Lead Tracker + Registry reads.                         |
+| **colly**            | `github.com/gocolly/colly/v2`                     | Web crawling — link discovery, depth control, robots.txt | Phase 1A local crawl. Respects robots.txt. Depth 2, cap 50 pages. Falls back to Firecrawl on block. |
+| **html-to-markdown** | `github.com/JohannesKaufmann/html-to-markdown/v2` | HTML → clean markdown conversion                         | Replaces Firecrawl's markdown output for locally crawled pages. Handles tables, lists, links.       |
+| **anthropic-sdk-go** | `github.com/anthropics/anthropic-sdk-go`          | Official Anthropic SDK — Messages + Batch API            | Supports prompt caching, batch create/poll/results. Use for all Claude calls.                       |
+| **jlaffaye/ftp**     | `github.com/jlaffaye/ftp`                         | FTP client for SEC EDGAR bulk downloads                  | Used by fedsync datasets.                                                                           |
+| **tealeg/xlsx**      | `github.com/tealeg/xlsx/v2`                       | XLSX parsing                                             | Used by fedsync for Excel-format datasets.                                                          |
+| **x/time/rate**      | `golang.org/x/time/rate`                          | Per-host rate limiting                                   | SEC 10 req/s, SAM.gov 5 req/s, default 20 req/s.                                                    |
 
 **No SDK for Firecrawl, Jina, or Perplexity in Go.** All are simple REST APIs — use `net/http` with typed request/response structs. Jina AI provides Reader (scrape) and Search (discovery) endpoints. Perplexity is OpenAI-compatible.
 
@@ -373,7 +374,10 @@ LIMIT 1
   "done": true,
   "records": [
     {
-      "attributes": { "type": "Account", "url": "/services/data/v62.0/sobjects/Account/001xx..." },
+      "attributes": {
+        "type": "Account",
+        "url": "/services/data/v62.0/sobjects/Account/001xx..."
+      },
       "Id": "001xx000003ABCDEF",
       "Name": "Acme Industrial",
       "Website": "https://acme.com"
@@ -406,7 +410,12 @@ Content-Type: application/json
 **Response:** `204 No Content` on success. Error → `400` with:
 
 ```json
-[{"message": "field Legal_Name__c does not exist", "errorCode": "INVALID_FIELD"}]
+[
+  {
+    "message": "field Legal_Name__c does not exist",
+    "errorCode": "INVALID_FIELD"
+  }
+]
 ```
 
 #### sObject Collections — Bulk Update (up to 200 records)
@@ -439,7 +448,13 @@ Content-Type: application/json
 ```json
 [
   { "id": "001xx000003ABCDEF", "success": true, "errors": [] },
-  { "id": "001xx000003GHIJKL", "success": false, "errors": [{"message": "...", "statusCode": "FIELD_CUSTOM_VALIDATION_EXCEPTION"}] }
+  {
+    "id": "001xx000003GHIJKL",
+    "success": false,
+    "errors": [
+      { "message": "...", "statusCode": "FIELD_CUSTOM_VALIDATION_EXCEPTION" }
+    ]
+  }
 ]
 ```
 
@@ -458,15 +473,15 @@ Authorization: Bearer {access_token}
 
 #### SF Rate Limits & Quotas
 
-| Limit | Value | Notes |
-|---|---|---|
-| Daily API requests | 100,000 base + 1,000 per user license (Enterprise) | At 10K companies/mo: ~10K SOQL queries + ~50 Collections calls/day = well within limits |
-| Concurrent API requests | 25 long-running | Pipeline is sequential per company — no risk |
-| sObject Collections | 200 records per request | Batch enrichment flushes every 200 records |
-| SOQL query length | 100,000 characters | Not a concern |
-| SOQL query rows returned | 50,000 per query | Paginate if needed |
-| API response size | 15 MB | Not a concern for Account queries |
-| Bulk API (v2) | 15,000 batches/day, 150M records/day | Not needed at current scale — Collections suffices |
+| Limit                    | Value                                              | Notes                                                                                   |
+| ------------------------ | -------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Daily API requests       | 100,000 base + 1,000 per user license (Enterprise) | At 10K companies/mo: ~10K SOQL queries + ~50 Collections calls/day = well within limits |
+| Concurrent API requests  | 25 long-running                                    | Pipeline is sequential per company — no risk                                            |
+| sObject Collections      | 200 records per request                            | Batch enrichment flushes every 200 records                                              |
+| SOQL query length        | 100,000 characters                                 | Not a concern                                                                           |
+| SOQL query rows returned | 50,000 per query                                   | Paginate if needed                                                                      |
+| API response size        | 15 MB                                              | Not a concern for Account queries                                                       |
+| Bulk API (v2)            | 15,000 batches/day, 150M records/day               | Not needed at current scale — Collections suffices                                      |
 
 **Error handling (Go):**
 
@@ -545,7 +560,13 @@ Content-Type: application/json
   "id": "msgbatch_abc123",
   "type": "message_batch",
   "processing_status": "in_progress",
-  "request_counts": { "processing": 70, "succeeded": 0, "errored": 0, "canceled": 0, "expired": 0 }
+  "request_counts": {
+    "processing": 70,
+    "succeeded": 0,
+    "errored": 0,
+    "canceled": 0,
+    "expired": 0
+  }
 }
 ```
 
@@ -580,23 +601,23 @@ Returns JSONL stream. Each line:
 
 **Pricing multipliers:**
 
-| Model | Cache Write (1.25x) | Cache Read (0.1x) | Min Cacheable Tokens |
-|---|---|---|---|
-| Opus 4.6 | $6.25 / MTok | $0.50 / MTok | 4,096 |
-| Sonnet 4.5 | $3.75 / MTok | $0.30 / MTok | 1,024 |
-| Haiku 4.5 | $1.25 / MTok | $0.10 / MTok | 4,096 |
+| Model      | Cache Write (1.25x) | Cache Read (0.1x) | Min Cacheable Tokens |
+| ---------- | ------------------- | ----------------- | -------------------- |
+| Opus 4.6   | $6.25 / MTok        | $0.50 / MTok      | 4,096                |
+| Sonnet 4.5 | $3.75 / MTok        | $0.30 / MTok      | 1,024                |
+| Haiku 4.5  | $1.25 / MTok        | $0.10 / MTok      | 4,096                |
 
 **Primer + Batch strategy:** For Tier 2 and 3, send 1 primer request sequentially with 1-hour TTL to seed the cache, then submit remaining questions as a batch. Batch items hit the warm cache = 95% off base input price. Implemented in `pkg/anthropic/cache.go`.
 
 #### Anthropic Rate Limits
 
-| Limit | Value (Tier 2+) | Notes |
-|---|---|---|
+| Limit                          | Value (Tier 2+)                                       | Notes                                                                          |
+| ------------------------------ | ----------------------------------------------------- | ------------------------------------------------------------------------------ |
 | Requests per minute (Messages) | 2,000 RPM (Haiku), 1,000 RPM (Sonnet), 500 RPM (Opus) | Classification + aggregation are single calls. Tier extraction uses Batch API. |
-| Input tokens per minute | 300K (Haiku), 160K (Sonnet), 100K (Opus) | Primer requests count against this. |
-| Batch requests per batch | 100,000 | Not a concern (max ~70 per company). |
-| Batch completion time | Up to 24 hours (guaranteed) | Typical: 10-60 min depending on load. |
-| Concurrent batches | 100 | Sufficient for per-company topology. |
+| Input tokens per minute        | 300K (Haiku), 160K (Sonnet), 100K (Opus)              | Primer requests count against this.                                            |
+| Batch requests per batch       | 100,000                                               | Not a concern (max ~70 per company).                                           |
+| Batch completion time          | Up to 24 hours (guaranteed)                           | Typical: 10-60 min depending on load.                                          |
+| Concurrent batches             | 100                                                   | Sufficient for per-company topology.                                           |
 
 ### Firecrawl v2 API
 
@@ -608,21 +629,21 @@ Returns JSONL stream. Each line:
 
 #### Firecrawl Pricing Plans
 
-| Plan | Credits | Price | Concurrent Requests | Overage | Support |
-|---|---|---|---|---|---|
-| Free | 500 (one-time) | $0 | 2 | — | Low rate limits |
-| Hobby | 3,000 / mo | $19/mo (annual) | 5 | $9 per 1K credits | Basic |
-| **Standard** | **100,000 / mo** | **$99/mo (annual)** | **50** | **$57 per 30K credits** | **Standard** |
-| Growth | 500,000 / mo | $399/mo (annual) | 100 | $217 per 150K credits | Priority |
-| Scale | 1,000,000 / mo | $749/mo (annual) | 100 | Contact sales | Priority |
-| Enterprise | Custom | Custom | Custom | Bulk discounts | Dedicated + SLA, SSO, zero-data retention |
+| Plan         | Credits          | Price               | Concurrent Requests | Overage                 | Support                                   |
+| ------------ | ---------------- | ------------------- | ------------------- | ----------------------- | ----------------------------------------- |
+| Free         | 500 (one-time)   | $0                  | 2                   | —                       | Low rate limits                           |
+| Hobby        | 3,000 / mo       | $19/mo (annual)     | 5                   | $9 per 1K credits       | Basic                                     |
+| **Standard** | **100,000 / mo** | **$99/mo (annual)** | **50**              | **$57 per 30K credits** | **Standard**                              |
+| Growth       | 500,000 / mo     | $399/mo (annual)    | 100                 | $217 per 150K credits   | Priority                                  |
+| Scale        | 1,000,000 / mo   | $749/mo (annual)    | 100                 | Contact sales           | Priority                                  |
+| Enterprise   | Custom           | Custom              | Custom              | Bulk discounts          | Dedicated + SLA, SSO, zero-data retention |
 
 **Plan recommendation by volume (with local-first crawl, ~24 credits/company avg):**
 
 - **<=4,100 companies/mo** (~98K credits) → **Standard ($99/mo)**. Local-first doubles the coverage vs Firecrawl-only.
 - **<=20,000 companies/mo** (~480K credits) → **Growth ($399/mo)**. Comfortably within 500K credits.
 - **>20K companies/mo** → **Scale ($749/mo)** or Enterprise.
-- *Fallback rate assumes ~60% of company sites serve clean HTML. Adjust if your target industry skews toward heavy JS / anti-bot sites.*
+- _Fallback rate assumes ~60% of company sites serve clean HTML. Adjust if your target industry skews toward heavy JS / anti-bot sites._
 
 #### Crawl (async) — Company Website
 
@@ -676,7 +697,11 @@ GET /v2/crawl/{crawl_id}
   "data": [
     {
       "markdown": "# About Acme Industrial...",
-      "metadata": { "title": "About Us", "sourceURL": "https://acme.com/about", "statusCode": 200 }
+      "metadata": {
+        "title": "About Us",
+        "sourceURL": "https://acme.com/about",
+        "statusCode": 200
+      }
     }
   ]
 }
@@ -705,7 +730,11 @@ Content-Type: application/json
   "success": true,
   "data": {
     "markdown": "# Acme Industrial Services...",
-    "metadata": { "title": "Acme Industrial", "sourceURL": "...", "statusCode": 200 }
+    "metadata": {
+      "title": "Acme Industrial",
+      "sourceURL": "...",
+      "statusCode": 200
+    }
   }
 }
 ```
@@ -733,12 +762,12 @@ Poll `GET /v2/batch/scrape/{id}` same pattern as crawl.
 
 #### Firecrawl Credit Usage
 
-| Operation | Credits | Per Company |
-|---|---|---|
-| Local crawl (net/http + colly) | 0 credits | 0 credits (~60% of sites) |
-| Firecrawl crawl fallback (per page) | 1 credit/page | ~50 credits (~40% of sites) |
-| Scrape (single page) | 1 credit | ~4 credits (GP + BBB + PPP + SoS — always Firecrawl) |
-| **Weighted avg per company** | | **~24 credits** (0.6 × 4 + 0.4 × 54) |
+| Operation                           | Credits       | Per Company                                          |
+| ----------------------------------- | ------------- | ---------------------------------------------------- |
+| Local crawl (net/http + colly)      | 0 credits     | 0 credits (~60% of sites)                            |
+| Firecrawl crawl fallback (per page) | 1 credit/page | ~50 credits (~40% of sites)                          |
+| Scrape (single page)                | 1 credit      | ~4 credits (GP + BBB + PPP + SoS — always Firecrawl) |
+| **Weighted avg per company**        |               | **~24 credits** (0.6 × 4 + 0.4 × 54)                 |
 
 At 10K companies/mo: **~240K credits/month** (with local-first crawl). Growth plan ($399/mo) covers 500K with headroom.
 
@@ -854,12 +883,12 @@ Content-Type: application/json
 
 #### Notion Rate Limits
 
-| Limit | Value | Notes |
-|---|---|---|
-| Requests per second | 3 req/s per integration | **This is the bottleneck for CSV import.** 100 pages = ~33s. 1,000 pages = ~5.5 min. Batch imports should pace with `time.Sleep`. |
-| Page size limit | 100 items per query response | Paginate with `next_cursor`. |
-| Payload size | 1 MB per request | Not a concern for property updates. |
-| Rate limit response | `429` with `Retry-After` header | Respect and retry with backoff. |
+| Limit               | Value                           | Notes                                                                                                                             |
+| ------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Requests per second | 3 req/s per integration         | **This is the bottleneck for CSV import.** 100 pages = ~33s. 1,000 pages = ~5.5 min. Batch imports should pace with `time.Sleep`. |
+| Page size limit     | 100 items per query response    | Paginate with `next_cursor`.                                                                                                      |
+| Payload size        | 1 MB per request                | Not a concern for property updates.                                                                                               |
+| Rate limit response | `429` with `Retry-After` header | Respect and retry with backoff.                                                                                                   |
 
 **3 req/s is real.** For CSV imports of 1,000+ rows, consider:
 
@@ -1040,6 +1069,7 @@ type Checkpoint struct {
 **Why Neon, not Notion, for the run log?** The Go binary writes status updates at every phase transition (~12 writes per company with all sub-phases). At 100 companies/batch, that's 1,200 writes in minutes. Notion's 3 req/s limit would bottleneck the pipeline. Neon handles this trivially.
 
 Tables:
+
 - `runs` — one row per enrichment run (id, company_url, company_name, status, result JSONB, timestamps)
 - `run_phases` — one row per phase per run (id, run_id, name, status, result JSONB, started_at, completed_at)
 - `crawl_cache` — cached crawl results per company URL (24h TTL)
@@ -1059,39 +1089,39 @@ All fedsync tables live in the `fed_data` schema, separate from enrichment table
 
 ### Question Registry Schema (Notion DB)
 
-| Property | Type | Purpose |
-|---|---|---|
-| Question Key | Title | Unique identifier (e.g., `company_legal_name`) |
-| Tier | Select (`1`, `2`, `3`) | Which Claude model: 1 = Haiku, 2 = Sonnet, 3 = Opus |
-| Category | Select | Logical grouping |
-| Source | Select (`firecrawl`, `perplexity`) | Routing: page router vs LinkedIn bypass |
-| Question Text | Text | Prompt sent to Claude |
-| System Prompt | Text | System message for Claude call |
-| Instructions | Text | Detailed extraction guidance, few-shot examples, edge cases |
-| Relevant Page Types | Multi-select | Page types from taxonomy |
-| Output Schema | Text | JSON schema string defining expected output shape |
-| Target SF Fields | Text | Comma-separated SF API names |
-| Failure Behavior | Select (`escalate`, `null`, `skip`) | What to do on low confidence |
-| Confidence Required | Number | Minimum confidence (0.0–1.0) |
-| Status | Status (`Draft`, `Active`, `Deprecated`) | Only `Active` pulled at runtime |
-| Last Tested | Date | Last quality validation |
-| Notes | Text | Edge cases, known issues |
+| Property            | Type                                     | Purpose                                                     |
+| ------------------- | ---------------------------------------- | ----------------------------------------------------------- |
+| Question Key        | Title                                    | Unique identifier (e.g., `company_legal_name`)              |
+| Tier                | Select (`1`, `2`, `3`)                   | Which Claude model: 1 = Haiku, 2 = Sonnet, 3 = Opus         |
+| Category            | Select                                   | Logical grouping                                            |
+| Source              | Select (`firecrawl`, `perplexity`)       | Routing: page router vs LinkedIn bypass                     |
+| Question Text       | Text                                     | Prompt sent to Claude                                       |
+| System Prompt       | Text                                     | System message for Claude call                              |
+| Instructions        | Text                                     | Detailed extraction guidance, few-shot examples, edge cases |
+| Relevant Page Types | Multi-select                             | Page types from taxonomy                                    |
+| Output Schema       | Text                                     | JSON schema string defining expected output shape           |
+| Target SF Fields    | Text                                     | Comma-separated SF API names                                |
+| Failure Behavior    | Select (`escalate`, `null`, `skip`)      | What to do on low confidence                                |
+| Confidence Required | Number                                   | Minimum confidence (0.0–1.0)                                |
+| Status              | Status (`Draft`, `Active`, `Deprecated`) | Only `Active` pulled at runtime                             |
+| Last Tested         | Date                                     | Last quality validation                                     |
+| Notes               | Text                                     | Edge cases, known issues                                    |
 
 ### Field Registry Schema (Notion DB)
 
-| Property | Type | Purpose |
-|---|---|---|
-| Field Key | Title | Unique identifier matching JSON key (e.g., `legal_name`) |
-| SF API Name | Text | Salesforce field API name (e.g., `Legal_Name__c`) |
-| Display Name | Text | Human-readable label |
-| Data Type | Select (`string`, `number`, `boolean`, `date`, `picklist`) | SF field data type — used by aggregation to validate and cast |
-| Max Length | Number | SF field character limit (default 255). Truncate if exceeded. |
-| Category | Select | identity, people, products, compliance, business_model, growth, risk, narrative, digital_presence, culture, deal_relevance |
-| Source Priority | Select (`firecrawl`, `perplexity`, `both`) | Which source wins if both return a value |
-| Required for Quality | Checkbox | If checked, must be populated to pass quality gate |
-| Question | Relation (to Question Registry) | Links to question(s) that populate this field |
-| Status | Status (`Draft`, `Active`, `Deprecated`) | Only `Active` fields included in aggregation and SF write-back |
-| Notes | Text | SF field quirks, picklist values, validation rules |
+| Property             | Type                                                       | Purpose                                                                                                                    |
+| -------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Field Key            | Title                                                      | Unique identifier matching JSON key (e.g., `legal_name`)                                                                   |
+| SF API Name          | Text                                                       | Salesforce field API name (e.g., `Legal_Name__c`)                                                                          |
+| Display Name         | Text                                                       | Human-readable label                                                                                                       |
+| Data Type            | Select (`string`, `number`, `boolean`, `date`, `picklist`) | SF field data type — used by aggregation to validate and cast                                                              |
+| Max Length           | Number                                                     | SF field character limit (default 255). Truncate if exceeded.                                                              |
+| Category             | Select                                                     | identity, people, products, compliance, business_model, growth, risk, narrative, digital_presence, culture, deal_relevance |
+| Source Priority      | Select (`firecrawl`, `perplexity`, `both`)                 | Which source wins if both return a value                                                                                   |
+| Required for Quality | Checkbox                                                   | If checked, must be populated to pass quality gate                                                                         |
+| Question             | Relation (to Question Registry)                            | Links to question(s) that populate this field                                                                              |
+| Status               | Status (`Draft`, `Active`, `Deprecated`)                   | Only `Active` fields included in aggregation and SF write-back                                                             |
+| Notes                | Text                                                       | SF field quirks, picklist values, validation rules                                                                         |
 
 ### Registry Loading (Go)
 
@@ -1140,34 +1170,34 @@ func LoadQuestionRegistry(ctx context.Context, client *notionapi.Client, dbID st
 
 ### Company Website Pages (from Phase 1A crawl)
 
-| Page Type | Description |
-|---|---|
-| `homepage` | Main landing page — company overview, value prop |
-| `about` | Company history, mission, values |
-| `services` | Service descriptions, capabilities |
-| `products` | Product pages, catalogs |
-| `pricing` | Pricing tiers, packages, rate cards |
-| `contact` | Contact info, office locations |
-| `team` | Executive bios, org chart, key personnel |
-| `careers` | Job listings, culture pages |
-| `blog` | Blog posts |
-| `news` | Press releases, news mentions |
-| `faq` | Frequently asked questions |
-| `testimonials` | Client stories, reviews |
-| `case_studies` | Detailed case studies |
-| `partners` | Partner ecosystem, integrations |
-| `legal` | Terms, privacy policy, compliance disclosures |
-| `investors` | IR pages, funding, financial disclosures |
-| `other` | Catch-all for unclassifiable pages |
+| Page Type      | Description                                      |
+| -------------- | ------------------------------------------------ |
+| `homepage`     | Main landing page — company overview, value prop |
+| `about`        | Company history, mission, values                 |
+| `services`     | Service descriptions, capabilities               |
+| `products`     | Product pages, catalogs                          |
+| `pricing`      | Pricing tiers, packages, rate cards              |
+| `contact`      | Contact info, office locations                   |
+| `team`         | Executive bios, org chart, key personnel         |
+| `careers`      | Job listings, culture pages                      |
+| `blog`         | Blog posts                                       |
+| `news`         | Press releases, news mentions                    |
+| `faq`          | Frequently asked questions                       |
+| `testimonials` | Client stories, reviews                          |
+| `case_studies` | Detailed case studies                            |
+| `partners`     | Partner ecosystem, integrations                  |
+| `legal`        | Terms, privacy policy, compliance disclosures    |
+| `investors`    | IR pages, funding, financial disclosures         |
+| `other`        | Catch-all for unclassifiable pages               |
 
 ### External Source Pages (from Phase 1B/1C)
 
-| Page Type | Source | Discovery |
-|---|---|---|
-| `google_maps` | Google Maps — address, phone, rating, hours | Direct URL construction → scrape chain |
-| `bbb_profile` | BBB — accreditation, rating, complaints | Jina Search `site:bbb.org` → scrape chain |
-| `government_registry` | State business registry — legal entity, officers, status | Jina Search → scrape chain |
-| `linkedin` | LinkedIn — overview, headcount, key personnel | Perplexity → Haiku JSON → synthetic page |
+| Page Type             | Source                                                   | Discovery                                 |
+| --------------------- | -------------------------------------------------------- | ----------------------------------------- |
+| `google_maps`         | Google Maps — address, phone, rating, hours              | Direct URL construction → scrape chain    |
+| `bbb_profile`         | BBB — accreditation, rating, complaints                  | Jina Search `site:bbb.org` → scrape chain |
+| `government_registry` | State business registry — legal entity, officers, status | Jina Search → scrape chain                |
+| `linkedin`            | LinkedIn — overview, headcount, key personnel            | Perplexity → Haiku JSON → synthetic page  |
 
 External page types are auto-classified by title prefix (e.g., `[bbb]` → `bbb_profile`). They are always included as supplementary context during question routing, regardless of a question's preferred page types.
 
@@ -1202,7 +1232,7 @@ The router is pure Go in `internal/pipeline/router.go`. Matches questions to rel
 # config.yaml — loaded by Viper. Env vars override with RESEARCH_ prefix.
 
 store:
-  driver: "postgres"          # "postgres" (Neon) or "sqlite" (local dev)
+  driver: "postgres" # "postgres" (Neon) or "sqlite" (local dev)
   database_url: "${RESEARCH_DATABASE_URL}"
   max_conns: 10
   min_conns: 2
@@ -1215,12 +1245,12 @@ notion:
 
 jina:
   key: "${RESEARCH_JINA_KEY}"
-  base_url: "https://r.jina.ai"            # Reader (scrape)
-  search_base_url: "https://s.jina.ai"     # Search (discovery)
+  base_url: "https://r.jina.ai" # Reader (scrape)
+  search_base_url: "https://s.jina.ai" # Search (discovery)
 
 firecrawl:
   key: "${RESEARCH_FIRECRAWL_KEY}"
-  base_url: "https://api.firecrawl.dev/v2"  # Fallback only
+  base_url: "https://api.firecrawl.dev/v2" # Fallback only
   max_pages: 50
 
 perplexity:
@@ -1234,8 +1264,8 @@ anthropic:
   sonnet_model: "claude-sonnet-4-5-20250929"
   opus_model: "claude-opus-4-6"
   max_batch_size: 100
-  no_batch: false                 # true = use Messages API instead of Batch API
-  small_batch_threshold: 3        # bypass Batch API for <N items (latency optimization)
+  no_batch: false # true = use Messages API instead of Batch API
+  small_batch_threshold: 3 # bypass Batch API for <N items (latency optimization)
 
 salesforce:
   client_id: "${RESEARCH_SF_CLIENT_ID}"
@@ -1247,15 +1277,15 @@ tooljet:
   webhook_url: "${RESEARCH_TOOLJET_WEBHOOK}"
 
 ppp:
-  similarity_threshold: 0.4       # fuzzy name match threshold
+  similarity_threshold: 0.4 # fuzzy name match threshold
   max_candidates: 10
 
 pipeline:
-  confidence_escalation_threshold: 0.4   # T1 answers below this escalate to T2
-  tier3_gate: "off"                      # "off", "always", "ambiguity_only"
-  quality_score_threshold: 0.6           # below this → manual review
-  max_cost_per_company_usd: 10.0         # cost budget gate for T3
-  skip_confidence_threshold: 0.8         # reuse existing answers above this
+  confidence_escalation_threshold: 0.4 # T1 answers below this escalate to T2
+  tier3_gate: "off" # "off", "always", "ambiguity_only"
+  quality_score_threshold: 0.6 # below this → manual review
+  max_cost_per_company_usd: 10.0 # cost budget gate for T3
+  skip_confidence_threshold: 0.8 # reuse existing answers above this
 
 crawl:
   max_pages: 50
@@ -1270,22 +1300,22 @@ scrape:
 
 waterfall:
   config_path: "config/waterfall.yaml"
-  confidence_threshold: 0.7        # fields below this enter waterfall
-  max_premium_cost_usd: 2.00       # per-company premium source budget
+  confidence_threshold: 0.7 # fields below this enter waterfall
+  max_premium_cost_usd: 2.00 # per-company premium source budget
 
 batch:
-  max_concurrent_companies: 15     # parallel enrichment runs in batch mode
+  max_concurrent_companies: 15 # parallel enrichment runs in batch mode
 
 server:
   port: 8080
 
 log:
-  level: "info"    # debug, info, warn, error
-  format: "json"   # json (prod) or console (dev)
+  level: "info" # debug, info, warn, error
+  format: "json" # json (prod) or console (dev)
 
 # Fedsync config (see fedsync section)
 fedsync:
-  database_url: "${RESEARCH_FEDSYNC_DATABASE_URL}"  # falls back to store.database_url
+  database_url: "${RESEARCH_FEDSYNC_DATABASE_URL}" # falls back to store.database_url
   temp_dir: "/tmp/fedsync"
   sam_api_key: "${RESEARCH_FEDSYNC_SAM_API_KEY}"
   fred_api_key: "${RESEARCH_FEDSYNC_FRED_API_KEY}"
@@ -1294,13 +1324,13 @@ fedsync:
   edgar_user_agent: "Sells Advisors blake@sellsadvisors.com"
   mistral_api_key: "${RESEARCH_FEDSYNC_MISTRAL_API_KEY}"
   ocr:
-    provider: "local"              # "local" (pdftotext) or "mistral"
+    provider: "local" # "local" (pdftotext) or "mistral"
 
 # Per-provider pricing rates (used by cost calculator)
 pricing:
   anthropic:
     claude-haiku-4-5-20251001:
-      input: 1.0      # $/MTok
+      input: 1.0 # $/MTok
       output: 5.0
       batch_discount: 0.5
       cache_write_mul: 1.25
@@ -1330,11 +1360,28 @@ pricing:
 
 ## Fedsync — Federal Data Sync
 
-The fedsync subsystem incrementally syncs 33 federal datasets into `fed_data.*` Postgres tables. Runs daily via Fly.io cron; exits in <1s when no new data is expected.
+The fedsync subsystem incrementally syncs federal datasets into `fed_data.*` Postgres tables. Runs daily via Fly.io cron; exits in <1s when no new data is expected.
+
+<!-- BEGIN GENERATED DATASET SUMMARY -->
+
+## Live Fedsync Dataset Summary
+
+- Total datasets: 42
+- By phase: `1`=12, `1b`=6, `2`=15, `3`=9
+- By cadence: `daily`=4, `weekly`=2, `monthly`=15, `quarterly`=7, `annual`=14
+
+| Phase | Datasets                                                                                                                                                                       |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `1`   | cbp, susb, qcew, oews, fpds, econ_census, ppp, sba_7a_504, form_5500, eo_bmf, census_geo, usaspending                                                                          |
+| `1b`  | adv_part1, ia_compilation, holdings_13f, form_d, edgar_submissions, entity_xref                                                                                                |
+| `2`   | adv_part2, brokercheck, sec_enforcement, form_bd, osha_ita, epa_echo, nes, asm, eci, fdic_bankfind, ncen, ncua_call_reports, bea_regional, irs_soi_migration, building_permits |
+| `3`   | adv_part3, adv_enrichment, adv_extract, xbrl_facts, fred, abs, cps_laus, m3, lehd_lodes                                                                                        |
+
+<!-- END GENERATED DATASET SUMMARY -->
 
 ### Dataset Interface
 
-Each of 33 datasets implements the `Dataset` interface in `internal/fedsync/dataset/`:
+Each registered federal dataset implements the `Dataset` interface in `internal/fedsync/dataset/`:
 
 ```go
 type Dataset interface {
@@ -1351,12 +1398,12 @@ The `Engine` iterates the registry, checks `ShouldRun()` for each dataset, calls
 
 ### Datasets by Phase
 
-| Phase | Category | Datasets | Cadence |
-|---|---|---|---|
-| **1** | Market Intelligence | Census CBP, SUSB · BLS QCEW, OEWS · SAM.gov FPDS · Census Economic Census · DOL Form 5500 · SBA PPP · IRS EO BMF | Annual–Monthly |
-| **1B** | Buyer Intelligence (SEC/EDGAR) | ADV Part 1A · IARD daily XML · 13F Holdings · Form D · EDGAR Submissions · Entity Cross-ref | Daily–Quarterly |
-| **2** | Extended Intelligence | ADV Part 2 (OCR) · FINRA BrokerCheck · SEC Enforcement · Form BD · OSHA ITA · EPA ECHO · Census NES, ASM · BLS ECI · FDIC BankFind | Weekly–Annual |
-| **3** | On-Demand | ADV Part 3/CRS (OCR) · XBRL Facts · FRED Series · Census ABS · BLS CPS/LAUS · Census M3 | Daily–Annual |
+| Phase  | Category                       | Datasets                                                                                                                           | Cadence         |
+| ------ | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| **1**  | Market Intelligence            | Census CBP, SUSB · BLS QCEW, OEWS · SAM.gov FPDS · Census Economic Census · DOL Form 5500 · SBA PPP · IRS EO BMF                   | Annual–Monthly  |
+| **1B** | Buyer Intelligence (SEC/EDGAR) | ADV Part 1A · IARD daily XML · 13F Holdings · Form D · EDGAR Submissions · Entity Cross-ref                                        | Daily–Quarterly |
+| **2**  | Extended Intelligence          | ADV Part 2 (OCR) · FINRA BrokerCheck · SEC Enforcement · Form BD · OSHA ITA · EPA ECHO · Census NES, ASM · BLS ECI · FDIC BankFind | Weekly–Annual   |
+| **3**  | On-Demand                      | ADV Part 3/CRS (OCR) · XBRL Facts · FRED Series · Census ABS · BLS CPS/LAUS · Census M3                                            | Daily–Annual    |
 
 ### Streaming Pattern (Large Datasets)
 
@@ -1371,11 +1418,11 @@ Memory stays bounded regardless of dataset size:
 
 Per-host limiters in `internal/fetcher/http.go` via `golang.org/x/time/rate`:
 
-| Host | Limit | Notes |
-|---|---|---|
+| Host                        | Limit    | Notes                              |
+| --------------------------- | -------- | ---------------------------------- |
 | SEC (efts/www/data.sec.gov) | 10 req/s | EDGAR requires `User-Agent` header |
-| SAM.gov | 5 req/s | |
-| Default | 20 req/s | |
+| SAM.gov                     | 5 req/s  |                                    |
+| Default                     | 20 req/s |                                    |
 
 ### Migrations
 
@@ -1406,79 +1453,79 @@ Fedsync data feeds back into the enrichment pipeline in two ways:
 
 ### API Pricing (Anthropic — Feb 2026)
 
-| Model | Input | Output | Batch (50% off) |
-|---|---|---|---|
-| Opus 4.6 | $5 / MTok | $25 / MTok | $2.50 in / $12.50 out |
-| Sonnet 4.5 | $3 / MTok | $15 / MTok | $1.50 in / $7.50 out |
-| Haiku 4.5 | $1 / MTok | $5 / MTok | $0.50 in / $2.50 out |
+| Model      | Input     | Output     | Batch (50% off)       |
+| ---------- | --------- | ---------- | --------------------- |
+| Opus 4.6   | $5 / MTok | $25 / MTok | $2.50 in / $12.50 out |
+| Sonnet 4.5 | $3 / MTok | $15 / MTok | $1.50 in / $7.50 out  |
+| Haiku 4.5  | $1 / MTok | $5 / MTok  | $0.50 in / $2.50 out  |
 
 ### Per-Company Cost (Batch Pricing)
 
-| Component | Est. Cost | Notes |
-|---|---|---|
+| Component                          | Est. Cost       | Notes                                                                 |
+| ---------------------------------- | --------------- | --------------------------------------------------------------------- |
 | Firecrawl (local-first + fallback) | ~24 credits avg | 60% local crawl (0 credits), 40% Firecrawl fallback (50), + 4 scrapes |
-| Perplexity — LinkedIn | ~$0.01 | 1 query |
-| Haiku — LinkedIn JSON | ~$0.01 | Parse → strict JSON |
-| Haiku — classification | ~$0.13 | ~54 pages (batch 50% off) |
-| Tier 1 — Haiku (70 Qs) | ~$0.23 | Single-page extraction (batch) |
-| Tier 2 — Sonnet (25 Qs) | ~$0.68 | Multi-page synthesis (batch) |
-| Haiku — context prep for T3 | ~$0.12 | Summarize crawl → 5 focused extracts (~3K tok each) |
-| Tier 3 — Opus (5 Qs) | ~$0.35 | Prepared context (~25K tok/Q), not raw markdown (batch) |
-| Haiku — aggregation | ~$0.08 | Merge + sanity check |
-| **Total (with Opus)** | **~$1.61** | Down from $4.90 with raw-crawl approach |
-| **Total (Sonnet for T3)** | **~$1.47** | Opus premium now only $0.14/company |
+| Perplexity — LinkedIn              | ~$0.01          | 1 query                                                               |
+| Haiku — LinkedIn JSON              | ~$0.01          | Parse → strict JSON                                                   |
+| Haiku — classification             | ~$0.13          | ~54 pages (batch 50% off)                                             |
+| Tier 1 — Haiku (70 Qs)             | ~$0.23          | Single-page extraction (batch)                                        |
+| Tier 2 — Sonnet (25 Qs)            | ~$0.68          | Multi-page synthesis (batch)                                          |
+| Haiku — context prep for T3        | ~$0.12          | Summarize crawl → 5 focused extracts (~3K tok each)                   |
+| Tier 3 — Opus (5 Qs)               | ~$0.35          | Prepared context (~25K tok/Q), not raw markdown (batch)               |
+| Haiku — aggregation                | ~$0.08          | Merge + sanity check                                                  |
+| **Total (with Opus)**              | **~$1.61**      | Down from $4.90 with raw-crawl approach                               |
+| **Total (Sonnet for T3)**          | **~$1.47**      | Opus premium now only $0.14/company                                   |
 
 ### Primer + Batch Cache Strategy
 
 For Tier 2 and 3: send 1 primer request (sequential, 1-hour TTL cache) → then submit remaining questions as a batch. Batch items hit warm cache = massive savings.
 
-| Component | Batch Only | Primer+Batch (worst) | Primer+Batch (best) |
-|---|---|---|---|
-| Tier 1 — Haiku | ~$0.23 | ~$0.23 | ~$0.23 |
-| Tier 2 — Sonnet | ~$0.68 | ~$0.72 | ~$0.14 |
-| Context prep (Haiku) | ~$0.12 | ~$0.12 | ~$0.12 |
-| Tier 3 — Opus (5 Qs) | ~$0.35 | ~$0.44 | ~$0.22 |
-| Other | ~$0.23 | ~$0.23 | ~$0.23 |
-| **Total (Opus)** | **~$1.61** | **~$1.74** | **~$0.94** |
-| **Total (Sonnet T3)** | **~$1.47** | **~$1.57** | **~$0.86** |
+| Component             | Batch Only | Primer+Batch (worst) | Primer+Batch (best) |
+| --------------------- | ---------- | -------------------- | ------------------- |
+| Tier 1 — Haiku        | ~$0.23     | ~$0.23               | ~$0.23              |
+| Tier 2 — Sonnet       | ~$0.68     | ~$0.72               | ~$0.14              |
+| Context prep (Haiku)  | ~$0.12     | ~$0.12               | ~$0.12              |
+| Tier 3 — Opus (5 Qs)  | ~$0.35     | ~$0.44               | ~$0.22              |
+| Other                 | ~$0.23     | ~$0.23               | ~$0.23              |
+| **Total (Opus)**      | **~$1.61** | **~$1.74**           | **~$0.94**          |
+| **Total (Sonnet T3)** | **~$1.47** | **~$1.57**           | **~$0.86**          |
 
 ### Infrastructure Costs
 
-| Component | Est. Monthly | Notes |
-|---|---|---|
-| Fly.io compute | ~$15-30 | performance-4x 8GB RAM. Per-second billing. Machine sleeps between runs. |
-| Neon Postgres | $19 (Launch) or $5 min (usage-based) | Scale-to-zero. 10GB storage, 300 CU-hours included. |
-| Fly.io bandwidth | ~$1-2 | $0.02/GB outbound NA/EU. Mostly API calls, minimal data. |
-| **Total infra** | **~$35-50/mo** | Still <1% of total spend at scale |
+| Component        | Est. Monthly                         | Notes                                                                    |
+| ---------------- | ------------------------------------ | ------------------------------------------------------------------------ |
+| Fly.io compute   | ~$15-30                              | performance-4x 8GB RAM. Per-second billing. Machine sleeps between runs. |
+| Neon Postgres    | $19 (Launch) or $5 min (usage-based) | Scale-to-zero. 10GB storage, 300 CU-hours included.                      |
+| Fly.io bandwidth | ~$1-2                                | $0.02/GB outbound NA/EU. Mostly API calls, minimal data.                 |
+| **Total infra**  | **~$35-50/mo**                       | Still <1% of total spend at scale                                        |
 
 ### Monthly Cost at Scale (5K and 10K companies)
 
-| Component | 5K — Batch Only | 5K — Primer+Batch | 10K — Batch Only | 10K — Primer+Batch |
-|---|---|---|---|---|
-| Tier 1 — Haiku | $1,150 | $1,150 | $2,300 | $2,300 |
-| Tier 2 — Sonnet | $3,400 | $700 | $6,800 | $1,400 |
-| Context prep (Haiku) | $600 | $600 | $1,200 | $1,200 |
-| Tier 3 — Opus (5 Qs) | $1,750 | $1,100 | $3,500 | $2,200 |
-| Other (classify, LI, agg) | $1,150 | $1,150 | $2,300 | $2,300 |
-| **Claude subtotal (Opus T3)** | **$8,050** | **$4,700** | **$16,100** | **$9,400** |
-| **Claude subtotal (Sonnet T3)** | **$7,350** | **$4,250** | **$14,700** | **$8,500** |
-| Firecrawl | $399 (Growth) | $399 (Growth) | $399 (Growth) | $399 (Growth) |
-| Perplexity | $50 | $50 | $100 | $100 |
-| Infra (Fly + Neon) | $50 | $50 | $50 | $50 |
-| **Grand total (Opus T3)** | **~$8,550** | **~$5,200** | **~$16,650** | **~$9,950** |
-| **Grand total (Sonnet T3)** | **~$7,850** | **~$4,750** | **~$15,250** | **~$9,050** |
+| Component                       | 5K — Batch Only | 5K — Primer+Batch | 10K — Batch Only | 10K — Primer+Batch |
+| ------------------------------- | --------------- | ----------------- | ---------------- | ------------------ |
+| Tier 1 — Haiku                  | $1,150          | $1,150            | $2,300           | $2,300             |
+| Tier 2 — Sonnet                 | $3,400          | $700              | $6,800           | $1,400             |
+| Context prep (Haiku)            | $600            | $600              | $1,200           | $1,200             |
+| Tier 3 — Opus (5 Qs)            | $1,750          | $1,100            | $3,500           | $2,200             |
+| Other (classify, LI, agg)       | $1,150          | $1,150            | $2,300           | $2,300             |
+| **Claude subtotal (Opus T3)**   | **$8,050**      | **$4,700**        | **$16,100**      | **$9,400**         |
+| **Claude subtotal (Sonnet T3)** | **$7,350**      | **$4,250**        | **$14,700**      | **$8,500**         |
+| Firecrawl                       | $399 (Growth)   | $399 (Growth)     | $399 (Growth)    | $399 (Growth)      |
+| Perplexity                      | $50             | $50               | $100             | $100               |
+| Infra (Fly + Neon)              | $50             | $50               | $50              | $50                |
+| **Grand total (Opus T3)**       | **~$8,550**     | **~$5,200**       | **~$16,650**     | **~$9,950**        |
+| **Grand total (Sonnet T3)**     | **~$7,850**     | **~$4,750**       | **~$15,250**     | **~$9,050**        |
 
 ### Total Cost Per Company at Scale
 
 All-in estimate (Claude + Firecrawl + Perplexity + infra) using **Opus T3 + primer+batch + context prep**.
 
-| Volume | Claude/co | Firecrawl/co | Other/co | All-in/co |
-|---|---|---|---|---|
-| 100 / mo | ~$0.94 | ~$0.99 | ~$0.51 | **~$2.44** |
-| 500 / mo | ~$0.94 | ~$0.20 | ~$0.11 | **~$1.25** |
-| 1K / mo | ~$0.94 | ~$0.10 | ~$0.06 | **~$1.10** |
-| 5K / mo | ~$0.94 | ~$0.08 | ~$0.02 | **~$1.04** |
-| **10K / mo** | **~$0.94** | **~$0.04** | **~$0.02** | **~$1.00** |
+| Volume       | Claude/co  | Firecrawl/co | Other/co   | All-in/co  |
+| ------------ | ---------- | ------------ | ---------- | ---------- |
+| 100 / mo     | ~$0.94     | ~$0.99       | ~$0.51     | **~$2.44** |
+| 500 / mo     | ~$0.94     | ~$0.20       | ~$0.11     | **~$1.25** |
+| 1K / mo      | ~$0.94     | ~$0.10       | ~$0.06     | **~$1.10** |
+| 5K / mo      | ~$0.94     | ~$0.08       | ~$0.02     | **~$1.04** |
+| **10K / mo** | **~$0.94** | **~$0.04**   | **~$0.02** | **~$1.00** |
 
 **Key takeaways:**
 
@@ -1555,12 +1602,12 @@ fly secrets set \
 
 ### Trigger Modes
 
-| Command | Trigger | Use Case |
-|---|---|---|
-| `research-cli import --csv leads.csv` | Manual / CI | Import CSV into Notion Lead Tracker. Run locally or via `fly ssh`. |
-| `research-cli run --url acme.com --sf-id 001xx` | Manual | Enrich a single company. Dev/testing. |
-| `research-cli batch --limit 100` | Cron / Manual | Process queued leads from Notion. Primary production trigger. |
-| `research-cli serve --port 8080` | HTTP webhook | Fly auto-starts on request, auto-stops when idle. For SF triggers or ToolJet callbacks. |
+| Command                                         | Trigger       | Use Case                                                                                |
+| ----------------------------------------------- | ------------- | --------------------------------------------------------------------------------------- |
+| `research-cli import --csv leads.csv`           | Manual / CI   | Import CSV into Notion Lead Tracker. Run locally or via `fly ssh`.                      |
+| `research-cli run --url acme.com --sf-id 001xx` | Manual        | Enrich a single company. Dev/testing.                                                   |
+| `research-cli batch --limit 100`                | Cron / Manual | Process queued leads from Notion. Primary production trigger.                           |
+| `research-cli serve --port 8080`                | HTTP webhook  | Fly auto-starts on request, auto-stops when idle. For SF triggers or ToolJet callbacks. |
 
 ### Deployment Commands
 
@@ -1600,6 +1647,9 @@ go run ./cmd batch --limit 5
 go test ./...
 go test ./internal/pipeline/ -run TestRouter -v
 go test ./pkg/anthropic/ -run TestBatchPoll -v
+
+# Lint
+./scripts/lint.sh ./...
 ```
 
 **Testing strategy:**
@@ -1613,27 +1663,27 @@ go test ./pkg/anthropic/ -run TestBatchPoll -v
 
 ## Ownership Matrix
 
-| Person | Responsibilities | Phase(s) |
-|---|---|---|
-| **Blake** | End-to-end Go binary build; all `pkg/` API clients; pipeline orchestration; Fly.io deployment; Neon schema; prompt caching strategy | 0-9 |
-| **Seth** | Question Registry content; Field Registry + SF field mapping; enrichment prompt authoring (system prompt + instructions + output schema) | 3, 4-6 |
-| **Hutton** | Salesforce field schema; validate SF API names in Field Registry; Connected App setup for JWT auth; SOQL for account matching | 9 |
-| **Research Team** | ToolJet validation on flagged records below quality threshold | 9 |
+| Person            | Responsibilities                                                                                                                         | Phase(s) |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| **Blake**         | End-to-end Go binary build; all `pkg/` API clients; pipeline orchestration; Fly.io deployment; Neon schema; prompt caching strategy      | 0-9      |
+| **Seth**          | Question Registry content; Field Registry + SF field mapping; enrichment prompt authoring (system prompt + instructions + output schema) | 3, 4-6   |
+| **Hutton**        | Salesforce field schema; validate SF API names in Field Registry; Connected App setup for JWT auth; SOQL for account matching            | 9        |
+| **Research Team** | ToolJet validation on flagged records below quality threshold                                                                            | 9        |
 
 ---
 
 ## Open Decisions
 
-| # | Decision | Current Default / Notes |
-|---|---|---|
-| 1 | **Notion Lead Tracker DB schema** — confirm properties needed for CSV import | Minimum: Company Name, Website, SF Account ID, City, State, Enrichment Status, Quality Score, Fields Populated, Last Enriched. Add more as needed. |
-| 2 | **SF Connected App** — JWT Bearer vs username-password flow? | JWT Bearer (server-to-server, no user interaction). Hutton to create Connected App + upload certificate. |
-| 3 | **Tier 3 gating** — always run or only when Tier 2 flags ambiguity? | Config switch: `always` vs `ambiguity_only`. Opus is ~77% of cost. |
-| 4 | **Confidence re-eval threshold** | 0.4 default. Tune after initial runs. |
-| 5 | **Firecrawl exclude paths** | Current: `/blog/*`, `/news/*`, `/press/*`, `/careers/*`. Confirm. |
-| 6 | **Question granularity** — grouped or one-per-field? | Start grouped (Seth's current structure). Break into per-field if quality issues emerge. |
-| 7 | **PPP + SoS URL construction** — how to build scrapeable URLs? | Need to confirm URL patterns for PPP (ProPublica) and Secretary of State (varies by state). |
-| 8 | **CSV format** — standardize column names for `research-cli import`? | Map common Grata export columns to Notion properties. Handle missing columns gracefully. |
+| #   | Decision                                                                     | Current Default / Notes                                                                                                                            |
+| --- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Notion Lead Tracker DB schema** — confirm properties needed for CSV import | Minimum: Company Name, Website, SF Account ID, City, State, Enrichment Status, Quality Score, Fields Populated, Last Enriched. Add more as needed. |
+| 2   | **SF Connected App** — JWT Bearer vs username-password flow?                 | JWT Bearer (server-to-server, no user interaction). Hutton to create Connected App + upload certificate.                                           |
+| 3   | **Tier 3 gating** — always run or only when Tier 2 flags ambiguity?          | Config switch: `always` vs `ambiguity_only`. Opus is ~77% of cost.                                                                                 |
+| 4   | **Confidence re-eval threshold**                                             | 0.4 default. Tune after initial runs.                                                                                                              |
+| 5   | **Firecrawl exclude paths**                                                  | Current: `/blog/*`, `/news/*`, `/press/*`, `/careers/*`. Confirm.                                                                                  |
+| 6   | **Question granularity** — grouped or one-per-field?                         | Start grouped (Seth's current structure). Break into per-field if quality issues emerge.                                                           |
+| 7   | **PPP + SoS URL construction** — how to build scrapeable URLs?               | Need to confirm URL patterns for PPP (ProPublica) and Secretary of State (varies by state).                                                        |
+| 8   | **CSV format** — standardize column names for `research-cli import`?         | Map common Grata export columns to Notion properties. Handle missing columns gracefully.                                                           |
 
 ---
 

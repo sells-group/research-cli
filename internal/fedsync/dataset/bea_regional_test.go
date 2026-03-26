@@ -73,7 +73,7 @@ func TestBEARegional_Sync(t *testing.T) {
 	f := fetchermocks.NewMockFetcher(t)
 
 	// Mock DownloadToFile for all 3 table ZIPs (CAGDP1, CAINC1, CAINC4).
-	mockDownloadToFile(f, zipPath).Times(3)
+	mockDownloadToFile(t, f, zipPath).Times(3)
 
 	// Each table produces 8 value rows:
 	//   row1 (48000, 5-digit? no — "48000" is 5 chars) => 3 year values
@@ -125,7 +125,7 @@ func TestBEARegional_NAValues(t *testing.T) {
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
-	mockDownloadToFile(f, zipPath).Times(3)
+	mockDownloadToFile(t, f, zipPath).Times(3)
 
 	// No BulkUpsert expected since all values are suppressed markers.
 
@@ -171,7 +171,7 @@ func TestBEARegional_NoCSVInZIP(t *testing.T) {
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
-	mockDownloadToFile(f, zipPath).Once()
+	mockDownloadToFile(t, f, zipPath).Once()
 
 	d := &BEARegional{baseURL: "file://" + zipPath}
 	_, err = d.Sync(context.Background(), pool, f, dir)
@@ -190,7 +190,7 @@ func TestBEARegional_UpsertError(t *testing.T) {
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
-	mockDownloadToFile(f, zipPath).Once()
+	mockDownloadToFile(t, f, zipPath).Once()
 
 	// Make BulkUpsert fail at the Begin step.
 	pool.ExpectBegin().WillReturnError(errors.New("db connection lost"))
@@ -216,7 +216,7 @@ func TestBEARegional_InvalidLineCode(t *testing.T) {
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
-	mockDownloadToFile(f, zipPath).Times(3)
+	mockDownloadToFile(t, f, zipPath).Times(3)
 
 	// Only 1 valid row per table × 3 tables = 3.
 	expectBulkUpsert(pool, "fed_data.bea_regional", beaCols, 1)
@@ -246,7 +246,7 @@ func TestBEARegional_InvalidValueSkipped(t *testing.T) {
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
-	mockDownloadToFile(f, zipPath).Times(3)
+	mockDownloadToFile(t, f, zipPath).Times(3)
 
 	// Each table: row1 has 1 valid value (2022), row2 has 1 valid value (2021) → 2 per table.
 	expectBulkUpsert(pool, "fed_data.bea_regional", beaCols, 2)
@@ -335,7 +335,7 @@ func TestBEARegional_EmptyCSVHeader(t *testing.T) {
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
-	mockDownloadToFile(f, zipPath).Once()
+	mockDownloadToFile(t, f, zipPath).Once()
 
 	d := &BEARegional{baseURL: "file://" + zipPath}
 	_, err = d.Sync(context.Background(), pool, f, dir)
@@ -362,7 +362,7 @@ func TestBEARegional_FIPSFiltering(t *testing.T) {
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
-	mockDownloadToFile(f, zipPath).Times(3)
+	mockDownloadToFile(t, f, zipPath).Times(3)
 
 	// Only 2-digit (48) and 5-digit (48453) FIPS pass → 2 rows per table × 3 = 6.
 	expectBulkUpsert(pool, "fed_data.bea_regional", beaCols, 2)
@@ -390,7 +390,7 @@ func TestBEARegional_CommaInValue(t *testing.T) {
 	defer pool.Close()
 
 	f := fetchermocks.NewMockFetcher(t)
-	mockDownloadToFile(f, zipPath).Times(3)
+	mockDownloadToFile(t, f, zipPath).Times(3)
 
 	// 1 row per table × 3 = 3.
 	expectBulkUpsert(pool, "fed_data.bea_regional", beaCols, 1)

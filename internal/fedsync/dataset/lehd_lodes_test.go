@@ -63,13 +63,7 @@ func TestLEHDLODES_Sync(t *testing.T) {
 	// Mock DownloadToFile: copy the testdata gzip to the requested dest path.
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		Run(func(_ context.Context, _ string, destPath string) {
-			data, rErr := os.ReadFile(gzPath)
-			if rErr != nil {
-				panic(fmt.Sprintf("TestLEHDLODES_Sync: ReadFile %s: %v", gzPath, rErr))
-			}
-			if wErr := os.WriteFile(destPath, data, 0644); wErr != nil {
-				panic(fmt.Sprintf("TestLEHDLODES_Sync: WriteFile %s: %v", destPath, wErr))
-			}
+			copyTestFixture(t, gzPath, destPath)
 		}).
 		Return(int64(1000), nil).
 		Times(1)
@@ -145,13 +139,7 @@ func TestLEHDLODES_EmptyFile(t *testing.T) {
 	f := fetchermocks.NewMockFetcher(t)
 	f.EXPECT().DownloadToFile(mock.Anything, mock.Anything, mock.Anything).
 		Run(func(_ context.Context, _ string, destPath string) {
-			data, rErr := os.ReadFile(gzPath)
-			if rErr != nil {
-				panic(fmt.Sprintf("TestLEHDLODES_EmptyFile: ReadFile %s: %v", gzPath, rErr))
-			}
-			if wErr := os.WriteFile(destPath, data, 0644); wErr != nil {
-				panic(fmt.Sprintf("TestLEHDLODES_EmptyFile: WriteFile %s: %v", destPath, wErr))
-			}
+			copyTestFixture(t, gzPath, destPath)
 		}).
 		Return(int64(100), nil).
 		Times(1)
@@ -169,11 +157,9 @@ func TestLEHDLODES_EmptyFile(t *testing.T) {
 func copyTestGZ(t *testing.T, gzPath string) func(context.Context, string, string) (int64, error) {
 	t.Helper()
 	return func(_ context.Context, _ string, destPath string) (int64, error) {
-		data, err := os.ReadFile(gzPath)
-		if err != nil {
-			return 0, err
-		}
-		return int64(len(data)), os.WriteFile(destPath, data, 0644)
+		data := readTestFixture(t, gzPath)
+		writeTestFixture(t, destPath, data)
+		return int64(len(data)), nil
 	}
 }
 
@@ -210,15 +196,17 @@ func TestLEHDLODES_ProdURL_ProbeSuccess(t *testing.T) {
 					probeState, probeState, y-3)
 				assert.Equal(t, expectedProbeURL, url)
 				// Write then remove the probe file (source does os.Remove).
-				data, _ := os.ReadFile(gzPath)
-				return int64(len(data)), os.WriteFile(destPath, data, 0644)
+				data := readTestFixture(t, gzPath)
+				writeTestFixture(t, destPath, data)
+				return int64(len(data)), nil
 			}
 			// Third call: actual state download using the probed year.
 			expectedURL := fmt.Sprintf("https://lehd.ces.census.gov/data/lodes/LODES8/%s/od/%s_od_main_JT00_%d.csv.gz",
 				probeState, probeState, y-3)
 			assert.Equal(t, expectedURL, url)
-			data, _ := os.ReadFile(gzPath)
-			return int64(len(data)), os.WriteFile(destPath, data, 0644)
+			data := readTestFixture(t, gzPath)
+			writeTestFixture(t, destPath, data)
+			return int64(len(data)), nil
 		}).Times(3) // 2 probes + 1 state download
 
 	// Expect one BulkUpsert for the state's aggregated data.

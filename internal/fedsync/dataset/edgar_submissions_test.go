@@ -169,7 +169,7 @@ func TestEDGARSubmissions_Sync_ParallelDecode(t *testing.T) {
 	f := fetchermocks.NewMockFetcher(t)
 
 	// Mock DownloadToFile to copy the pre-built ZIP to the requested path.
-	mockDownloadToFile(f, zipPath)
+	mockDownloadToFile(t, f, zipPath)
 
 	// 3 entities, 4 filings total (2+1+1).
 	expectBulkUpsertZip(pool, "fed_data.edgar_entities", edgarEntityCols, 3)
@@ -201,7 +201,7 @@ func TestEDGARSubmissions_Sync_DecodeError(t *testing.T) {
 	pool.MatchExpectationsInOrder(false)
 
 	f := fetchermocks.NewMockFetcher(t)
-	mockDownloadToFile(f, zipPath)
+	mockDownloadToFile(t, f, zipPath)
 
 	// 2 valid entities, 2 filings (1+1). Malformed file is skipped.
 	expectBulkUpsertZip(pool, "fed_data.edgar_entities", edgarEntityCols, 2)
@@ -231,7 +231,7 @@ func TestEDGARSubmissions_Sync_IgnoresFilingsPrefix(t *testing.T) {
 	pool.MatchExpectationsInOrder(false)
 
 	f := fetchermocks.NewMockFetcher(t)
-	mockDownloadToFile(f, zipPath)
+	mockDownloadToFile(t, f, zipPath)
 
 	// Only 1 entity, 1 filing. The filings- file is ignored.
 	expectBulkUpsertZip(pool, "fed_data.edgar_entities", edgarEntityCols, 1)
@@ -286,7 +286,7 @@ func TestEDGARSubmissions_Sync_SkipsEmptyNameEntity(t *testing.T) {
 	pool.MatchExpectationsInOrder(false)
 
 	f := fetchermocks.NewMockFetcher(t)
-	mockDownloadToFile(f, zipPath)
+	mockDownloadToFile(t, f, zipPath)
 
 	// Only 1 valid entity (empty name is skipped).
 	expectBulkUpsertZip(pool, "fed_data.edgar_entities", edgarEntityCols, 1)
